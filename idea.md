@@ -74,13 +74,13 @@ Sản phẩm nên tổ chức catalog theo **ý định và cảm xúc** (“t�
 
 ### 3.1. Những gì có thể quan sát
 
-| Nhóm/đối thủ | Giá trị đang cung cấp | Điểm mạnh có thể học | Khoảng trống để khác biệt |
-|---|---|---|---|
-| Harumi Gifts Box | Quà cá nhân hóa, khung ảnh/thiệp và QR mở nội dung số | Kết nối quà vật lý với cảm xúc số | Xây trải nghiệm số thành một câu chuyện dài hạn, có công cụ tự phục vụ mạnh |
-| DearGift | Nhiều mẫu tỏ tình/sinh nhật/3D, ảnh, nhạc, preview, link, QR, mật khẩu, miễn phí và trả phí | Catalog rộng, quy trình dễ hiểu, không cần app | Chất lượng kể chuyện nhất quán, độ bền nội dung và trải nghiệm quản lý sau khi tặng |
-| LoveGift | QR, pháo hoa, thiệp, sách truyện, photobooth, link ngắn, thanh toán | Viral loop và tiện ích miễn phí thu hút traffic | Định vị sâu hơn vào “ký ức của hai người”, privacy-by-design và phản hồi sau khi nhận |
-| Các website effect/viral | Template theo trend TikTok, nhạc tùy chọn, tạo link nhanh | Nhanh ra nội dung, dễ lan truyền | Dễ bị sao chép; chất lượng, bản quyền, hiệu năng và sự tin cậy thường không đồng đều |
-| Xưởng quà NFC/handmade | Thẻ/cassette/polaroid chạm để mở ảnh, nhạc và lời nhắn | Vật phẩm thật làm tăng giá trị cảm nhận | LoveMemory có thể trở thành hạ tầng nội dung cho nhiều xưởng thay vì tự sản xuất mọi món quà |
+| Nhóm/đối thủ             | Giá trị đang cung cấp                                                                       | Điểm mạnh có thể học                            | Khoảng trống để khác biệt                                                                    |
+| ------------------------ | ------------------------------------------------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Harumi Gifts Box         | Quà cá nhân hóa, khung ảnh/thiệp và QR mở nội dung số                                       | Kết nối quà vật lý với cảm xúc số               | Xây trải nghiệm số thành một câu chuyện dài hạn, có công cụ tự phục vụ mạnh                  |
+| DearGift                 | Nhiều mẫu tỏ tình/sinh nhật/3D, ảnh, nhạc, preview, link, QR, mật khẩu, miễn phí và trả phí | Catalog rộng, quy trình dễ hiểu, không cần app  | Chất lượng kể chuyện nhất quán, độ bền nội dung và trải nghiệm quản lý sau khi tặng          |
+| LoveGift                 | QR, pháo hoa, thiệp, sách truyện, photobooth, link ngắn, thanh toán                         | Viral loop và tiện ích miễn phí thu hút traffic | Định vị sâu hơn vào “ký ức của hai người”, privacy-by-design và phản hồi sau khi nhận        |
+| Các website effect/viral | Template theo trend TikTok, nhạc tùy chọn, tạo link nhanh                                   | Nhanh ra nội dung, dễ lan truyền                | Dễ bị sao chép; chất lượng, bản quyền, hiệu năng và sự tin cậy thường không đồng đều         |
+| Xưởng quà NFC/handmade   | Thẻ/cassette/polaroid chạm để mở ảnh, nhạc và lời nhắn                                      | Vật phẩm thật làm tăng giá trị cảm nhận         | LoveMemory có thể trở thành hạ tầng nội dung cho nhiều xưởng thay vì tự sản xuất mọi món quà |
 
 Thông tin trong bảng là ảnh chụp thị trường tại thời điểm viết, dựa trên nội dung công khai của các website; không phải kiểm toán tính năng hay số liệu kinh doanh.
 
@@ -208,13 +208,13 @@ Template nên là **module có version**, chạy trên một runtime chuẩn và
   },
   "entry": "index.js",
   "schema": {
-    "senderName": {"type": "shortText", "required": true, "max": 40},
-    "receiverName": {"type": "shortText", "required": true, "max": 40},
-    "headline": {"type": "text", "required": true, "max": 120},
-    "photos": {"type": "imageList", "min": 3, "max": 8, "aspect": "4:5"},
-    "finalMessage": {"type": "richText", "required": true, "max": 1200},
-    "theme": {"type": "enum", "values": ["rose", "midnight", "cream"]},
-    "music": {"type": "licensedAudio", "required": false}
+    "senderName": { "type": "shortText", "required": true, "max": 40 },
+    "receiverName": { "type": "shortText", "required": true, "max": 40 },
+    "headline": { "type": "text", "required": true, "max": 120 },
+    "photos": { "type": "imageList", "min": 3, "max": 8, "aspect": "4:5" },
+    "finalMessage": { "type": "richText", "required": true, "max": 1200 },
+    "theme": { "type": "enum", "values": ["rose", "midnight", "cream"] },
+    "music": { "type": "licensedAudio", "required": false }
   },
   "capabilities": ["audio", "canvas2d"],
   "budgets": {
@@ -467,7 +467,7 @@ Một lựa chọn cân bằng tốc độ và khả năng mở rộng:
 - **Next.js/React** cho marketing, catalog và Studio; SSR/SSG cho trang cần SEO.
 - **Viewer runtime nhẹ**, hạn chế phụ thuộc React trong bundle đầu; template canvas/DOM tùy mẫu.
 - **PostgreSQL** cho quan hệ, transaction publish/order và JSONB content đã validate.
-- **S3-compatible object storage + CDN** cho ảnh, audio, template bundle và derivative.
+- **Vercel Blob private** cho ảnh, audio và derivative; template bundle immutable đi cùng deployment ở MVP.
 - **Queue/job runner** cho resize, scan, thumbnail, cleanup, email và webhook retry.
 - **Schema validation dùng chung** giữa manifest, API và client.
 - **Infrastructure managed** ở giai đoạn đầu để tập trung vào sản phẩm; chưa cần microservices.
@@ -600,12 +600,12 @@ Tạo quà là hành vi không đều; phần lớn cá nhân không cần subsc
 
 Các mức dưới đây là giả thuyết cần A/B test, không phải kết luận về willingness-to-pay:
 
-| Gói | Phạm vi gợi ý | Mục tiêu |
-|---|---|---|
-| Free/Demo | 1 mẫu nhẹ, tối đa 3 ảnh, watermark nhỏ, link 7–14 ngày | Cho người dùng trải nghiệm và tạo viral loop |
-| Standard | 1 gift, 1 năm, 8–12 ảnh, QR HD, không watermark, mật khẩu | Sản phẩm chủ lực; thử vùng giá khoảng 39.000–69.000đ |
-| Premium | 1 gift, 3–5 năm, template cao cấp, scheduled reveal, voice/reaction, export | Tăng giá trị; thử vùng giá khoảng 99.000–199.000đ |
-| Partner | Credit số lượng lớn, white-label nhẹ, QR/NFC mapping, dashboard đơn hàng | Xưởng quà, studio ảnh, florist, wedding planner |
+| Gói       | Phạm vi gợi ý                                                               | Mục tiêu                                             |
+| --------- | --------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Free/Demo | 1 mẫu nhẹ, tối đa 3 ảnh, watermark nhỏ, link 7–14 ngày                      | Cho người dùng trải nghiệm và tạo viral loop         |
+| Standard  | 1 gift, 1 năm, 8–12 ảnh, QR HD, không watermark, mật khẩu                   | Sản phẩm chủ lực; thử vùng giá khoảng 39.000–69.000đ |
+| Premium   | 1 gift, 3–5 năm, template cao cấp, scheduled reveal, voice/reaction, export | Tăng giá trị; thử vùng giá khoảng 99.000–199.000đ    |
+| Partner   | Credit số lượng lớn, white-label nhẹ, QR/NFC mapping, dashboard đơn hàng    | Xưởng quà, studio ảnh, florist, wedding planner      |
 
 Không dùng từ “lưu trữ vĩnh viễn” nếu không có quỹ vận hành, điều khoản và phương án export. “Bao gồm 3 năm, gia hạn bất kỳ lúc nào, tải bản lưu trữ” dễ tin hơn.
 
@@ -797,19 +797,19 @@ Các con số là target để học, cần điều chỉnh sau pilot; không ph
 
 ## 17. Rủi ro chính và cách giảm thiểu
 
-| Rủi ro | Tác động | Giảm thiểu |
-|---|---|---|
-| Sản phẩm bị xem như “một web effect nữa” | Khó giữ giá và khác biệt | Story prompts, narrative template, phản hồi, lưu giữ dài hạn, partner vật lý |
-| Quá nhiều template quá sớm | QA kém, mobile lỗi, bảo trì cao | 3 mẫu flagship, manifest/versioning, quality gate và scorecard |
-| Ảnh/nhạc tải chậm | Hỏng cao trào | Cover nhẹ, derivative, CDN, lazy scene loading, performance budget |
-| Autoplay không chạy | Trải nghiệm im lặng/khó hiểu | “Tap to open” làm user gesture, state nhạc rõ, fallback không nhạc |
-| Link bị lộ hoặc bị bot mở | Mất bất ngờ/riêng tư | Token ngẫu nhiên, generic OG, password/schedule, bot-aware open event |
-| Nội dung không đồng thuận | Rủi ro con người/pháp lý | Consent, report/takedown, private default, không gallery sớm |
-| Bản quyền nhạc/template | Takedown, mất uy tín | Licensed library, provenance/license registry, hạn chế upload tùy ý |
-| Cam kết “vĩnh viễn” không thực hiện được | Mất niềm tin | Thời hạn rõ, gia hạn, export, backup và sunset policy |
-| Traffic dồn vào ngày lễ/0:00 | Viewer lỗi đúng thời điểm quan trọng | CDN-first viewer, queue, load test, canary và capacity plan |
-| Phụ thuộc trend TikTok | Tăng trưởng ngắn hạn | SEO intent, partner distribution và use case lặp lại hằng năm |
-| AI làm mất tính chân thật | Nội dung na ná nhau | AI chỉ gợi mở/chỉnh sửa; hiển thị rõ và luôn yêu cầu duyệt |
+| Rủi ro                                   | Tác động                             | Giảm thiểu                                                                   |
+| ---------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------- |
+| Sản phẩm bị xem như “một web effect nữa” | Khó giữ giá và khác biệt             | Story prompts, narrative template, phản hồi, lưu giữ dài hạn, partner vật lý |
+| Quá nhiều template quá sớm               | QA kém, mobile lỗi, bảo trì cao      | 3 mẫu flagship, manifest/versioning, quality gate và scorecard               |
+| Ảnh/nhạc tải chậm                        | Hỏng cao trào                        | Cover nhẹ, derivative, CDN, lazy scene loading, performance budget           |
+| Autoplay không chạy                      | Trải nghiệm im lặng/khó hiểu         | “Tap to open” làm user gesture, state nhạc rõ, fallback không nhạc           |
+| Link bị lộ hoặc bị bot mở                | Mất bất ngờ/riêng tư                 | Token ngẫu nhiên, generic OG, password/schedule, bot-aware open event        |
+| Nội dung không đồng thuận                | Rủi ro con người/pháp lý             | Consent, report/takedown, private default, không gallery sớm                 |
+| Bản quyền nhạc/template                  | Takedown, mất uy tín                 | Licensed library, provenance/license registry, hạn chế upload tùy ý          |
+| Cam kết “vĩnh viễn” không thực hiện được | Mất niềm tin                         | Thời hạn rõ, gia hạn, export, backup và sunset policy                        |
+| Traffic dồn vào ngày lễ/0:00             | Viewer lỗi đúng thời điểm quan trọng | CDN-first viewer, queue, load test, canary và capacity plan                  |
+| Phụ thuộc trend TikTok                   | Tăng trưởng ngắn hạn                 | SEO intent, partner distribution và use case lặp lại hằng năm                |
+| AI làm mất tính chân thật                | Nội dung na ná nhau                  | AI chỉ gợi mở/chỉnh sửa; hiển thị rõ và luôn yêu cầu duyệt                   |
 
 ---
 

@@ -1,0 +1,66 @@
+{
+  "budgets": {
+    "initialJsKbGzip": 12,
+    "initialMediaKb": 0,
+    "maxTextureMb": 4
+  },
+  "capabilities": ["dom"],
+  "engineVersion": "1.0.0",
+  "entry": "index.html",
+  "fields": [
+    {
+      "id": "receiver-name",
+      "label": "Tên người nhận",
+      "maxLength": 40,
+      "required": true,
+      "type": "shortText"
+    },
+    {
+      "id": "opening-message",
+      "label": "Lời nhắn",
+      "maxLength": 400,
+      "required": true,
+      "type": "longText"
+    },
+    {
+      "id": "anniversary-date",
+      "label": "Ngày kỷ niệm",
+      "required": false,
+      "type": "date"
+    },
+    {
+      "aspectRatio": "4:3",
+      "id": "photos",
+      "label": "Ảnh kỷ niệm",
+      "maxItems": 12,
+      "minItems": 3,
+      "required": true,
+      "type": "imageList"
+    },
+    {
+      "id": "theme",
+      "label": "Màu sắc",
+      "options": ["rose-night", "warm-paper"],
+      "required": true,
+      "type": "theme"
+    },
+    {
+      "id": "audio",
+      "label": "Nhạc nền có bản quyền",
+      "required": false,
+      "source": "licensedLibrary",
+      "type": "audio"
+    }
+  ],
+  "id": "memory-box-spike",
+  "meta": {
+    "description": "Artifact tối giản để kiểm chứng sandbox và lifecycle trước Sprint 1.",
+    "estimatedDurationSec": 5,
+    "moods": ["romantic"],
+    "name": "Hộp ký ức · Isolation spike",
+    "occasions": ["anniversary"]
+  },
+  "previewFixture": "preview.fixture.json",
+  "status": "draft",
+  "version": "0.1.0"
+}

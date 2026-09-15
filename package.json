@@ -1,0 +1,54 @@
+{
+  "name": "love-memory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A browser-first platform for creating private, interactive memory gifts.",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@10.22.0",
+  "engines": {
+    "node": ">=22.13.0 <27",
+    "pnpm": ">=10.22.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "build:templates": "pnpm --filter @love-memory/template-memory-box-spike build",
+    "dev": "turbo run dev --filter=@love-memory/web",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings=0",
+    "start": "pnpm --filter @love-memory/web start",
+    "test": "pnpm build:templates && vitest run",
+    "test:coverage": "pnpm build:templates && vitest run --coverage",
+    "test:e2e": "playwright test",
+    "test:watch": "vitest",
+    "type-check": "tsc --noEmit -p tsconfig.json && turbo run type-check"
+  },
+  "pnpm": {
+    "ignoredBuiltDependencies": [
+      "unrs-resolver"
+    ]
+  },
+  "devDependencies": {
+    "@love-memory/template-sdk": "workspace:*",
+    "@playwright/test": "catalog:",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@testing-library/user-event": "catalog:",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "eslint": "catalog:",
+    "eslint-config-next": "catalog:",
+    "jsdom": "catalog:",
+    "prettier": "catalog:",
+    "prettier-plugin-tailwindcss": "catalog:",
+    "turbo": "catalog:",
+    "typescript": "catalog:",
+    "typescript-eslint": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

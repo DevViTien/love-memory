@@ -1,0 +1,35 @@
+{
+  "name": "@love-memory/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev",
+    "start": "next start",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@love-memory/contracts": "workspace:*",
+    "@love-memory/database": "workspace:*",
+    "@love-memory/media": "workspace:*",
+    "@love-memory/shared": "workspace:*",
+    "@love-memory/storage": "workspace:*",
+    "@love-memory/template-sdk": "workspace:*",
+    "@love-memory/template-memory-box-spike": "workspace:*",
+    "@love-memory/ui": "workspace:*",
+    "next": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "server-only": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "catalog:",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "postcss": "catalog:",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:"
+  }
+}

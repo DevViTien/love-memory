@@ -10,27 +10,27 @@ Stack dự định ban đầu là **React/Next.js + Tailwind CSS + MongoDB** ph�
 
 Kiến trúc nên chốt như sau:
 
-| Lớp | Lựa chọn đề xuất | Vai trò |
-|---|---|---|
-| Runtime | Node.js 24 LTS | Runtime thống nhất cho web, tooling và background jobs |
-| Ngôn ngữ | TypeScript strict | Chia sẻ type giữa form schema, API, database và template SDK |
-| Web framework | Next.js 16, App Router, bản vá 16.x mới nhất | Marketing, catalog, Studio, Viewer shell, dashboard và BFF |
-| UI | React 19 + Tailwind CSS 4 + shadcn/ui/Radix primitives | UI sản phẩm; token qua CSS variables |
-| Form/validation | React Hook Form + Zod | Form động theo schema và runtime validation |
-| Client state | Zustand | State của editor/preview; không dùng Redux ở MVP |
-| Animation | CSS/WAAPI + Motion; Canvas 2D; Three.js/R3F chỉ theo template | Phân tầng animation theo độ phức tạp |
-| Database | MongoDB Atlas + official Node.js driver | Metadata, gift snapshots, revisions, template registry, orders |
-| Media | Cloudflare R2 hoặc S3-compatible storage + CDN | Ảnh, audio, thumbnail và template bundle |
-| Auth | Better Auth + MongoDB adapter + email magic link/OTP | Xác thực nhẹ, không bắt người nhận đăng nhập |
-| Background jobs | Trigger.dev Cloud ở MVP/beta | Resize, cleanup, email, scheduled reveal, webhook retry |
-| Thanh toán | Payment abstraction; payOS là ứng viên MVP tại Việt Nam | VietQR/payment link; webhook là nguồn xác nhận |
-| Email | Một transactional email provider + React Email | Magic link, receipt, thông báo gift/reaction |
-| QR | Package tạo QR server-side, xuất SVG + PNG | QR chia sẻ và QR chất lượng in |
-| Test | Vitest + Testing Library + Playwright | Unit, component, integration, E2E và visual regression |
-| Observability | Sentry + structured logs; OpenTelemetry khi cần | Error, performance, tracing và alert |
-| Product analytics | PostHog hoặc giải pháp tương đương, cấu hình tối thiểu dữ liệu | Funnel tạo–publish–mở–hoàn tất |
-| Monorepo | pnpm workspaces + Turborepo | Web, worker, template SDK và template packages |
-| Hosting | Vercel cho Next.js; R2/CDN cho asset; Atlas cho MongoDB | Managed-first, chưa cần Kubernetes/microservices |
+| Lớp               | Lựa chọn đề xuất                                               | Vai trò                                                        |
+| ----------------- | -------------------------------------------------------------- | -------------------------------------------------------------- |
+| Runtime           | Node.js 24 LTS                                                 | Runtime thống nhất cho web, tooling và background jobs         |
+| Ngôn ngữ          | TypeScript strict                                              | Chia sẻ type giữa form schema, API, database và template SDK   |
+| Web framework     | Next.js 16, App Router, bản vá 16.x mới nhất                   | Marketing, catalog, Studio, Viewer shell, dashboard và BFF     |
+| UI                | React 19 + Tailwind CSS 4 + shadcn/ui/Radix primitives         | UI sản phẩm; token qua CSS variables                           |
+| Form/validation   | React Hook Form + Zod                                          | Form động theo schema và runtime validation                    |
+| Client state      | Zustand                                                        | State của editor/preview; không dùng Redux ở MVP               |
+| Animation         | CSS/WAAPI + Motion; Canvas 2D; Three.js/R3F chỉ theo template  | Phân tầng animation theo độ phức tạp                           |
+| Database          | MongoDB Atlas + official Node.js driver                        | Metadata, gift snapshots, revisions, template registry, orders |
+| Media             | Vercel Blob private + Sharp                                    | Ảnh, audio và derivative có kiểm soát truy cập                 |
+| Auth              | Better Auth + MongoDB adapter + email magic link/OTP           | Xác thực nhẹ, không bắt người nhận đăng nhập                   |
+| Background jobs   | Trigger.dev Cloud ở MVP/beta                                   | Resize, cleanup, email, scheduled reveal, webhook retry        |
+| Thanh toán        | Payment abstraction; payOS là ứng viên MVP tại Việt Nam        | VietQR/payment link; webhook là nguồn xác nhận                 |
+| Email             | Một transactional email provider + React Email                 | Magic link, receipt, thông báo gift/reaction                   |
+| QR                | Package tạo QR server-side, xuất SVG + PNG                     | QR chia sẻ và QR chất lượng in                                 |
+| Test              | Vitest + Testing Library + Playwright                          | Unit, component, integration, E2E và visual regression         |
+| Observability     | Sentry + structured logs; OpenTelemetry khi cần                | Error, performance, tracing và alert                           |
+| Product analytics | PostHog hoặc giải pháp tương đương, cấu hình tối thiểu dữ liệu | Funnel tạo–publish–mở–hoàn tất                                 |
+| Monorepo          | pnpm workspaces + Turborepo                                    | Web, worker, template SDK và template packages                 |
+| Hosting           | Vercel cho Next.js/Blob; Atlas cho MongoDB                     | Managed-first, chưa cần Kubernetes/microservices               |
 
 Đây là một **modular monolith có worker**, không phải microservices:
 
@@ -95,15 +95,15 @@ Lý do:
 
 Không nên dùng Next.js như một framework ma thuật. Ranh giới rendering phải rõ:
 
-| Khu vực | Cách render |
-|---|---|
-| Marketing, blog, catalog | Server Components + static/cached rendering |
-| Template detail/demo metadata | Server Components; demo animation lazy-load |
-| Studio editor | Client Component island; server chỉ cấp dữ liệu và mutation |
-| Dashboard | Server Components cho read; client cho interaction |
-| Gift Viewer shell | Server-rendered shell rất nhẹ |
-| Template animation | Client-only, dynamic import hoặc sandboxed iframe |
-| Admin | Server-first; mutation kiểm tra quyền tại DAL |
+| Khu vực                       | Cách render                                                 |
+| ----------------------------- | ----------------------------------------------------------- |
+| Marketing, blog, catalog      | Server Components + static/cached rendering                 |
+| Template detail/demo metadata | Server Components; demo animation lazy-load                 |
+| Studio editor                 | Client Component island; server chỉ cấp dữ liệu và mutation |
+| Dashboard                     | Server Components cho read; client cho interaction          |
+| Gift Viewer shell             | Server-rendered shell rất nhẹ                               |
+| Template animation            | Client-only, dynamic import hoặc sandboxed iframe           |
+| Admin                         | Server-first; mutation kiểm tra quyền tại DAL               |
 
 ### 3.2. Phiên bản nên dùng
 
@@ -232,16 +232,16 @@ Không dùng Redux ở MVP. Không đưa toàn bộ gift draft vào một global
 
 Chọn theo tầng:
 
-| Nhu cầu | Công nghệ |
-|---|---|
-| Hover, opacity, transform đơn giản | CSS transition/keyframes |
-| DOM/SVG sequence, gesture, enter/exit | Motion |
-| Timeline rất đặc thù | Web Animations API hoặc timeline abstraction nhỏ |
-| Firework, particle, star field | Canvas 2D |
-| Cảnh 3D thật sự tạo giá trị | Three.js + React Three Fiber, dynamic import |
-| Animation do designer xuất | Lottie chỉ cho template phù hợp và có budget |
-| Audio dài/nhạc nền | HTMLAudioElement qua audio controller chung |
-| Sound effect ngắn/phối âm | Web Audio API khi cần |
+| Nhu cầu                               | Công nghệ                                        |
+| ------------------------------------- | ------------------------------------------------ |
+| Hover, opacity, transform đơn giản    | CSS transition/keyframes                         |
+| DOM/SVG sequence, gesture, enter/exit | Motion                                           |
+| Timeline rất đặc thù                  | Web Animations API hoặc timeline abstraction nhỏ |
+| Firework, particle, star field        | Canvas 2D                                        |
+| Cảnh 3D thật sự tạo giá trị           | Three.js + React Three Fiber, dynamic import     |
+| Animation do designer xuất            | Lottie chỉ cho template phù hợp và có budget     |
+| Audio dài/nhạc nền                    | HTMLAudioElement qua audio controller chung      |
+| Sound effect ngắn/phối âm             | Web Audio API khi cần                            |
 
 **Motion** là lựa chọn mặc định cho UI và DOM/SVG animation; package hiện dùng import từ motion/react. Nó hỗ trợ reduced-motion và gesture tốt. Không dùng Motion cho hàng nghìn particle.
 
@@ -258,7 +258,7 @@ Three.js/R3F không được nằm trong viewer shell. Mỗi template 3D phải:
 
 Cấu trúc đề xuất:
 
-~~~text
+```text
 packages/
 ├── template-sdk/
 │   ├── manifest-schema
@@ -268,7 +268,7 @@ packages/
 ├── template-memory-box/
 ├── template-timeline/
 └── template-midnight-wish/
-~~~
+```
 
 Mỗi template có:
 
@@ -298,15 +298,15 @@ Giai đoạn prototype có thể render template nội bộ trực tiếp để 
 
 ### 5.4. Contract tối thiểu
 
-~~~ts
-type TemplateRuntime = {
-  mount(input: ValidatedGiftPayload, context: RuntimeContext): Promise<void>;
+```ts
+type TemplateRuntime<TPayload extends TemplatePayload = TemplatePayload> = {
+  mount(root: HTMLElement, payload: TPayload, context: RuntimeContext): Promise<void>;
   play(): Promise<void>;
   pause(): void;
   seek?(sceneId: string): void;
   destroy(): void;
 };
-~~~
+```
 
 RuntimeContext chỉ cấp capability được duyệt:
 
@@ -347,7 +347,7 @@ MongoDB phù hợp tự nhiên với:
 
 Ví dụ gift snapshot có thể giữ story data lồng nhau mà không cần hàng chục bảng field:
 
-~~~json
+```json
 {
   "_id": "ObjectId",
   "publicId": "random-128-bit-token",
@@ -378,7 +378,7 @@ Ví dụ gift snapshot có thể giữ story data lồng nhau mà không cần h
   "publishedAt": "ISODate",
   "updatedAt": "ISODate"
 }
-~~~
+```
 
 ### 6.2. MongoDB khó ở đâu?
 
@@ -387,7 +387,7 @@ Ví dụ gift snapshot có thể giữ story data lồng nhau mà không cần h
 - Schema linh hoạt dễ biến thành schema tùy tiện.
 - Unbounded array làm document lớn và write contention.
 - Transaction đa document có chi phí và cần hiểu retry semantics.
-- TTL chỉ xóa document theo background process, không xóa asset R2 hoặc CDN cache.
+- TTL chỉ xóa document theo background process, không xóa asset Vercel Blob.
 - Event analytics lớn không nên ở chung operational cluster lâu dài.
 
 ### 6.3. Quyết định
@@ -437,7 +437,7 @@ Không thêm Prisma chỉ để có cảm giác “type-safe”. Type TypeScript
 
 ### 7.1. Collections
 
-~~~text
+```text
 users
 sessions / accounts / verifications
 templates
@@ -452,7 +452,7 @@ events
 abuseReports
 idempotencyKeys
 jobOutbox
-~~~
+```
 
 ### 7.2. Embed hay reference?
 
@@ -479,7 +479,7 @@ Quy tắc: dữ liệu được đọc cùng nhau, có giới hạn nhỏ và c�
 
 Ví dụ logical indexes:
 
-~~~js
+```js
 gifts: { publicId: 1 } unique
 gifts: { ownerId: 1, updatedAt: -1 }
 gifts: { status: 1, unlockAt: 1 }
@@ -495,7 +495,7 @@ paymentAttempts: { provider: 1, providerPaymentId: 1 } unique
 
 idempotencyKeys: { scope: 1, key: 1 } unique
 events: { giftId: 1, createdAt: -1 }
-~~~
+```
 
 Index phải đi cùng query thật và được quản lý bằng migration script. Không tạo index cho mọi field: index làm tăng RAM/disk và chi phí write.
 
@@ -529,7 +529,7 @@ MongoDB write trên một document là atomic. Vì vậy:
 - Payment webhook cập nhật paymentAttempt, order và entitlement trong transaction.
 - Mọi transaction cần retry với transient error.
 
-Không gọi HTTP provider, upload R2 hoặc gửi email bên trong database transaction. Dùng outbox:
+Không gọi HTTP provider, upload Blob hoặc gửi email bên trong database transaction. Dùng outbox:
 
 1. transaction ghi business state + jobOutbox;
 2. worker đọc outbox;
@@ -574,14 +574,14 @@ MongoDB có giới hạn 16 MiB cho BSON document và có GridFS, nhưng GridFS 
 
 Dùng:
 
-- **Cloudflare R2** nếu ưu tiên S3-compatible API và giảm egress cost.
-- Hoặc AWS S3 + CloudFront nếu hạ tầng/đội ngũ đã ở AWS.
+- **Vercel Blob private** là provider đầu tiên; deployed Functions ưu tiên OIDC ngắn hạn.
+- Giữ `StoragePort` nhỏ để có thể thay adapter nếu chi phí hoặc yêu cầu vùng dữ liệu thay đổi.
 
 Không viết abstraction phức tạp cho mọi cloud. Chỉ tạo StoragePort nhỏ gồm createUpload, headObject, copy/promote, delete và signDownload.
 
 ### 8.2. Upload flow
 
-~~~text
+```text
 Browser
   → POST /api/uploads/init
   ← presigned PUT + assetId
@@ -598,7 +598,7 @@ Worker
   → update asset = ready
 Studio
   → poll/subscription nhận trạng thái ready
-~~~
+```
 
 Presigned URL là bearer token:
 
@@ -609,7 +609,7 @@ Presigned URL là bearer token:
 - quota được kiểm tra trước;
 - sau upload vẫn kiểm tra byte size/MIME/checksum.
 
-R2 presigned URL hỗ trợ PUT nhưng không thay thế validation server-side.
+Vercel Blob signed PUT hỗ trợ upload trực tiếp nhưng không thay thế validation server-side.
 
 ### 8.3. Image pipeline
 
@@ -627,12 +627,12 @@ Dùng **Sharp/libvips trong background worker**:
 
 Object key ví dụ:
 
-~~~text
+```text
 private/{ownerId}/{assetId}/source
 published/{giftPublicId}/{assetId}/w768.webp
 published/{giftPublicId}/{assetId}/w1280.avif
 templates/{templateId}/{version}/{contentHash}/index.js
-~~~
+```
 
 Không đưa email/tên thật vào object key.
 
@@ -656,16 +656,16 @@ Nếu cho upload voice note:
 
 ### 8.5. Cache policy
 
-| Dữ liệu | Cache |
-|---|---|
-| Template artifact có content hash | public, max-age dài, immutable |
-| Licensed static asset | public theo license |
+| Dữ liệu                            | Cache                                |
+| ---------------------------------- | ------------------------------------ |
+| Template artifact có content hash  | public, max-age dài, immutable       |
+| Licensed static asset              | public theo license                  |
 | Published derivative có random key | cache dài; cần purge/delete strategy |
-| Viewer shell | public cache/ISR |
-| Gift payload unlisted | no-store hoặc TTL rất ngắn lúc MVP |
-| Gift password/scheduled payload | private, no-store |
-| Draft/original asset | private; signed access |
-| Generic OG image | public cache |
+| Viewer shell                       | public cache/ISR                     |
+| Gift payload unlisted              | no-store hoặc TTL rất ngắn lúc MVP   |
+| Gift password/scheduled payload    | private, no-store                    |
+| Draft/original asset               | private; signed access               |
+| Generic OG image                   | public cache                         |
 
 Ưu tiên privacy và khả năng xóa hơn vài millisecond cache ở gift payload.
 
@@ -675,7 +675,7 @@ Nếu cho upload voice note:
 
 ### 9.1. Modular monolith
 
-~~~text
+```text
 src/
 ├── app/
 │   ├── (marketing)/
@@ -705,7 +705,7 @@ src/
     ├── schemas/
     ├── contracts/
     └── utils/
-~~~
+```
 
 Quy tắc dependency:
 
@@ -720,7 +720,7 @@ Quy tắc dependency:
 
 Endpoint chính:
 
-~~~text
+```text
 POST   /api/uploads/init
 POST   /api/uploads/complete
 GET    /api/assets/{id}/status
@@ -741,7 +741,7 @@ POST   /api/view/{publicId}/report
 
 POST   /api/billing/checkout
 POST   /api/webhooks/payos
-~~~
+```
 
 Envelope chỉ trả trạng thái an toàn: available/locked/scheduled/expired và generic cover. Payload cá nhân chỉ trả sau access check.
 
@@ -749,7 +749,7 @@ Envelope chỉ trả trạng thái an toàn: available/locked/scheduled/expired 
 
 Không trả message tự phát ở từng endpoint. Dùng:
 
-~~~json
+```json
 {
   "error": {
     "code": "GIFT_NOT_PUBLISHABLE",
@@ -760,7 +760,7 @@ Không trả message tự phát ở từng endpoint. Dùng:
     "requestId": "..."
   }
 }
-~~~
+```
 
 Log requestId, không log content gift/password/token.
 
@@ -817,14 +817,14 @@ Với người dùng Việt Nam, **payOS** là ứng viên thực dụng để t
 
 Không gắn domain logic trực tiếp vào SDK:
 
-~~~ts
+```ts
 interface BillingProvider {
   createCheckout(input: CheckoutInput): Promise<CheckoutSession>;
   verifyWebhook(rawBody: Uint8Array, headers: Headers): VerifiedPaymentEvent;
   getPayment(providerPaymentId: string): Promise<ProviderPayment>;
   cancel?(providerPaymentId: string): Promise<void>;
 }
-~~~
+```
 
 ### 11.2. Source of truth
 
@@ -1018,16 +1018,16 @@ LoveMemory phụ thuộc mạnh vào browser và hình ảnh; unit test một m�
 
 ### 16.1. Test pyramid
 
-| Lớp | Công cụ | Nội dung |
-|---|---|---|
-| Unit | Vitest | schema, domain state machine, access policy, pricing, idempotency |
-| Component | Testing Library + Vitest | form fields, editor step, error/a11y behavior |
-| Repository integration | Vitest + MongoDB test environment | index, atomic update, transaction, optimistic concurrency |
-| API integration | Vitest hoặc request harness | authz, validation, webhook, publish flow |
-| E2E | Playwright | create → upload → preview → pay stub → publish → open |
-| Visual | Playwright screenshot | template scenes theo viewport/reduced-motion |
-| Performance | Lighthouse CI + custom budget | Viewer LCP/JS/media budget |
-| Security | automated headers/CSP + dependency scan | XSS, access control, upload abuse |
+| Lớp                    | Công cụ                                 | Nội dung                                                          |
+| ---------------------- | --------------------------------------- | ----------------------------------------------------------------- |
+| Unit                   | Vitest                                  | schema, domain state machine, access policy, pricing, idempotency |
+| Component              | Testing Library + Vitest                | form fields, editor step, error/a11y behavior                     |
+| Repository integration | Vitest + MongoDB test environment       | index, atomic update, transaction, optimistic concurrency         |
+| API integration        | Vitest hoặc request harness             | authz, validation, webhook, publish flow                          |
+| E2E                    | Playwright                              | create → upload → preview → pay stub → publish → open             |
+| Visual                 | Playwright screenshot                   | template scenes theo viewport/reduced-motion                      |
+| Performance            | Lighthouse CI + custom budget           | Viewer LCP/JS/media budget                                        |
+| Security               | automated headers/CSP + dependency scan | XSS, access control, upload abuse                                 |
 
 ### 16.2. Template contract tests
 
@@ -1072,7 +1072,7 @@ Dùng:
 
 - Sentry cho client/server error và performance sample.
 - Structured JSON logs có requestId, giftPublicId hash, template version, route, latency, error code.
-- Provider dashboards cho Atlas, R2, Vercel và jobs.
+- Provider dashboards cho Atlas, Vercel Blob và jobs.
 - Uptime/synthetic monitor mở canary gift.
 - OpenTelemetry khi cần trace qua web → Mongo → job → storage.
 
@@ -1093,7 +1093,7 @@ Alert quan trọng:
 
 Event taxonomy:
 
-~~~text
+```text
 template_demo_started
 customization_started
 required_content_completed
@@ -1106,7 +1106,7 @@ scene_completed
 gift_completed
 reaction_sent
 gift_replayed
-~~~
+```
 
 Không gửi:
 
@@ -1125,7 +1125,7 @@ Bot/social crawler phải tách khỏi human session.
 
 ### 18.1. Cấu trúc đề xuất
 
-~~~text
+```text
 love-memory/
 ├── apps/
 │   ├── web/
@@ -1150,7 +1150,7 @@ love-memory/
 ├── pnpm-workspace.yaml
 ├── turbo.json
 └── package.json
-~~~
+```
 
 Nếu chỉ có một lập trình viên và ba template đầu, vẫn dùng workspace nhưng không tách thành quá nhiều package nhỏ. Package chỉ được tạo khi có boundary thực.
 
@@ -1199,7 +1199,7 @@ MVP:
 
 - Next.js trên Vercel.
 - MongoDB Atlas managed.
-- R2 + custom asset domain/CDN.
+- Vercel Blob private; cân nhắc delivery project/custom domain khi quy mô yêu cầu.
 - Trigger.dev Cloud.
 - Transactional email provider.
 
@@ -1209,7 +1209,7 @@ Không dùng Edge Runtime cho route cần official MongoDB Node driver, Sharp ho
 
 ### 19.3. CI pipeline
 
-~~~text
+```text
 install --frozen-lockfile
 → lint
 → typecheck
@@ -1221,7 +1221,7 @@ install --frozen-lockfile
 → dependency/license/security check
 → deploy preview
 → manual/automatic production gate
-~~~
+```
 
 Database/index migration chạy như một release step kiểm soát được, không âm thầm tạo index trong mọi app startup.
 
@@ -1255,7 +1255,7 @@ HTML/JSON gift nhỏ; ảnh, audio và support dài hạn mới là bài toán k
 ### 20.2. Giai đoạn MVP
 
 - Một Atlas cluster phù hợp pilot, bật backup khi có dữ liệu trả phí.
-- R2/S3 lifecycle rule cho abandoned uploads/originals.
+- Cleanup job cho abandoned Blob uploads/originals dựa trên asset state.
 - Trigger.dev managed.
 - Viewer CDN-first.
 - Events lấy mẫu/tối thiểu.
@@ -1278,22 +1278,22 @@ Không chuyển microservices/Kubernetes chỉ vì số người dùng tăng. CD
 
 ## 21. Những lựa chọn không khuyến nghị lúc đầu
 
-| Lựa chọn | Vì sao chưa phù hợp |
-|---|---|
-| React SPA thuần cho toàn bộ app | Mất lợi thế SEO/server rendering và phải tự ghép nhiều hạ tầng |
-| NestJS/Express service riêng ngay | Trùng lớp với Next BFF khi domain/team còn nhỏ |
-| Microservices | Tăng network, deployment, tracing và consistency cost |
-| Kubernetes | Không giải quyết rủi ro sản phẩm hiện tại |
-| Redux | Editor chưa cần mức ceremony này |
-| MongoDB GridFS cho media | Không tối ưu cho direct upload/CDN/derivative |
-| Lưu base64 ảnh trong gift document | Tăng document, RAM, bandwidth và chạm giới hạn BSON |
-| Public template marketplace | Bề mặt bảo mật/license/moderation quá lớn |
-| WebGL cho mọi template | Bundle nặng, pin/GPU nóng, lỗi in-app browser |
-| Upload nhạc thương mại tùy ý | Rủi ro bản quyền và storage |
-| Redis từ ngày đầu | Chưa có use case bắt buộc ngoài thứ provider managed đã xử lý |
-| WebSocket/realtime collaboration | Chưa có nhu cầu đã xác thực |
-| Tự xây auth | Rủi ro bảo mật không tạo khác biệt sản phẩm |
-| Tin returnUrl thanh toán | Có thể giả mạo/trạng thái chưa chắc chắn; phải dùng verified webhook/reconciliation |
+| Lựa chọn                           | Vì sao chưa phù hợp                                                                 |
+| ---------------------------------- | ----------------------------------------------------------------------------------- |
+| React SPA thuần cho toàn bộ app    | Mất lợi thế SEO/server rendering và phải tự ghép nhiều hạ tầng                      |
+| NestJS/Express service riêng ngay  | Trùng lớp với Next BFF khi domain/team còn nhỏ                                      |
+| Microservices                      | Tăng network, deployment, tracing và consistency cost                               |
+| Kubernetes                         | Không giải quyết rủi ro sản phẩm hiện tại                                           |
+| Redux                              | Editor chưa cần mức ceremony này                                                    |
+| MongoDB GridFS cho media           | Không tối ưu cho direct upload/CDN/derivative                                       |
+| Lưu base64 ảnh trong gift document | Tăng document, RAM, bandwidth và chạm giới hạn BSON                                 |
+| Public template marketplace        | Bề mặt bảo mật/license/moderation quá lớn                                           |
+| WebGL cho mọi template             | Bundle nặng, pin/GPU nóng, lỗi in-app browser                                       |
+| Upload nhạc thương mại tùy ý       | Rủi ro bản quyền và storage                                                         |
+| Redis từ ngày đầu                  | Chưa có use case bắt buộc ngoài thứ provider managed đã xử lý                       |
+| WebSocket/realtime collaboration   | Chưa có nhu cầu đã xác thực                                                         |
+| Tự xây auth                        | Rủi ro bảo mật không tạo khác biệt sản phẩm                                         |
+| Tin returnUrl thanh toán           | Có thể giả mạo/trạng thái chưa chắc chắn; phải dùng verified webhook/reconciliation |
 
 ---
 
@@ -1304,7 +1304,7 @@ Không chuyển microservices/Kubernetes chỉ vì số người dùng tăng. CD
 - Next.js + TypeScript + Tailwind.
 - Template hardcoded nhưng dùng manifest/schema ngay.
 - Local/mock data hoặc Atlas dev.
-- R2 dev bucket.
+- Private Vercel Blob development store.
 - Chưa cần payment thật; dùng entitlement test.
 - Playwright cho một luồng.
 
@@ -1361,7 +1361,7 @@ Không chuyển microservices/Kubernetes chỉ vì số người dùng tăng. CD
 
 ### Sprint 2 — Media
 
-- R2 direct upload.
+- Vercel Blob private direct upload.
 - Asset status machine.
 - Background image pipeline.
 - Crop/preview/derivative resolver.
@@ -1401,7 +1401,7 @@ ADR là bản ghi ngắn: bối cảnh, lựa chọn, alternatives, hậu quả 
 1. ADR-001: Next.js App Router làm web + BFF.
 2. ADR-002: MongoDB Atlas là operational database.
 3. ADR-003: Official MongoDB driver thay vì ODM mặc định.
-4. ADR-004: Binary ở R2/S3, không ở MongoDB/GridFS.
+4. ADR-004: Binary ở Vercel Blob, không ở MongoDB/GridFS.
 5. ADR-005: Template artifact immutable và sandbox boundary.
 6. ADR-006: Route Handler cho durable/public mutations; Server Action có giới hạn.
 7. ADR-007: Trigger.dev cho background jobs giai đoạn đầu.
@@ -1418,7 +1418,7 @@ ADR là bản ghi ngắn: bối cảnh, lựa chọn, alternatives, hậu quả 
 - [ ] Chốt Atlas + compute region gần nhau.
 - [ ] Tạo dev/staging/prod isolation.
 - [ ] Có Mongo index migration và schema validator.
-- [ ] Có R2/S3 direct-upload prototype.
+- [ ] Có Vercel Blob private direct-upload prototype chạy trên Preview.
 - [ ] Có template manifest/schema v1.
 - [ ] Có một template build thành artifact riêng.
 - [ ] Có Viewer shell + reduced-motion.
@@ -1437,7 +1437,7 @@ ADR là bản ghi ngắn: bối cảnh, lựa chọn, alternatives, hậu quả 
 
 Giữ định hướng của bạn, nhưng chuẩn hóa thành:
 
-> **Next.js modular monolith + MongoDB Atlas cho metadata/document + R2/S3 cho media + background job runner + template runtime versioned và sandboxed.**
+> **Next.js modular monolith + MongoDB Atlas cho metadata/document + Vercel Blob private cho media + background job runner + template runtime versioned và sandboxed.**
 
 Stack này tối ưu đúng ba bài toán của LoveMemory:
 
@@ -1449,7 +1449,7 @@ Không nên tối ưu sớm bằng microservices hay nhiều database. Nên đ�
 
 ### Stack chốt cho MVP
 
-~~~text
+```text
 Node.js 24 LTS
 pnpm + Turborepo
 Next.js 16 App Router + React 19 + TypeScript strict
@@ -1457,14 +1457,14 @@ Tailwind CSS 4 + shadcn/ui/Radix
 React Hook Form + Zod + Zustand
 CSS/WAAPI + Motion + Canvas 2D
 MongoDB Atlas + official mongodb driver
-Cloudflare R2 + CDN + Sharp
+Vercel Blob private + Sharp
 Better Auth + MongoDB adapter + passwordless email
 Trigger.dev
 payOS behind BillingProvider
 Vitest + Testing Library + Playwright
 Sentry + structured logs + minimal product analytics
 Vercel + managed providers
-~~~
+```
 
 ---
 
@@ -1493,8 +1493,9 @@ Vercel + managed providers
 
 ### Storage, auth, jobs, payment và test
 
-- [Cloudflare R2 architecture](https://developers.cloudflare.com/r2/how-r2-works/)
-- [Cloudflare R2 presigned URLs](https://developers.cloudflare.com/r2/api/s3/presigned-urls/)
+- [Vercel Blob](https://vercel.com/docs/vercel-blob)
+- [Vercel Blob private storage](https://vercel.com/docs/vercel-blob/private-storage)
+- [Vercel Blob SDK and signed URLs](https://vercel.com/docs/vercel-blob/using-blob-sdk)
 - [Better Auth MongoDB adapter](https://better-auth.com/docs/adapters/mongo)
 - [Better Auth magic link](https://better-auth.com/docs/plugins/magic-link)
 - [Trigger.dev documentation](https://trigger.dev/docs/introduction)

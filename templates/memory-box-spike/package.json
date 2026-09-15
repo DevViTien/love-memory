@@ -1,0 +1,13 @@
+{
+  "name": "@love-memory/template-memory-box-spike",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/document.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node scripts/build.mjs",
+    "type-check": "tsc --noEmit"
+  }
+}

@@ -1,0 +1,55 @@
+@import "tailwindcss";
+@source "../../../../packages/ui/src";
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-ink: var(--ink);
+  --font-sans: var(--font-system);
+}
+
+:root {
+  --canvas: #fffaf8;
+  --ink: #292524;
+  --font-system:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--canvas);
+  color: var(--ink);
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(circle at 8% 4%, rgb(255 228 230 / 70%), transparent 28rem),
+    radial-gradient(circle at 92% 12%, rgb(254 215 170 / 55%), transparent 24rem), var(--canvas);
+  font-family: var(--font-system);
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: #fecdd3;
+  color: #881337;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

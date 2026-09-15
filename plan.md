@@ -28,15 +28,15 @@ Kế hoạch chuẩn gồm **8 sprint × 2 tuần = 16 tuần** cho đội hình
 
 Kết quả qua các mốc:
 
-| Mốc | Thời điểm mục tiêu | Kết quả |
-|---|---:|---|
-| M0 — Foundation ready | Cuối tuần 2 | Repo, CI, môi trường, ADR và skeleton hoạt động |
-| M1 — Core platform ready | Cuối tuần 6 | Auth, gift domain, media pipeline và Viewer runtime cơ bản |
-| M2 — Vertical slice | Cuối tuần 8 | Một template chạy end-to-end từ tạo đến mở |
-| M3 — Free pilot candidate | Cuối tuần 10 | Ba template, publish, access policy và QR |
-| M4 — Paid MVP candidate | Cuối tuần 12 | Thanh toán, dashboard và background workflows |
-| M5 — Release candidate | Cuối tuần 14 | Admin, privacy/deletion, security baseline |
-| M6 — Production-ready | Cuối tuần 16 | Hardening, performance, restore drill và release sign-off |
+| Mốc                       | Thời điểm mục tiêu | Kết quả                                                    |
+| ------------------------- | -----------------: | ---------------------------------------------------------- |
+| M0 — Foundation ready     |        Cuối tuần 2 | Repo, CI, môi trường, ADR và skeleton hoạt động            |
+| M1 — Core platform ready  |        Cuối tuần 6 | Auth, gift domain, media pipeline và Viewer runtime cơ bản |
+| M2 — Vertical slice       |        Cuối tuần 8 | Một template chạy end-to-end từ tạo đến mở                 |
+| M3 — Free pilot candidate |       Cuối tuần 10 | Ba template, publish, access policy và QR                  |
+| M4 — Paid MVP candidate   |       Cuối tuần 12 | Thanh toán, dashboard và background workflows              |
+| M5 — Release candidate    |       Cuối tuần 14 | Admin, privacy/deletion, security baseline                 |
+| M6 — Production-ready     |       Cuối tuần 16 | Hardening, performance, restore drill và release sign-off  |
 
 Mốc quan trọng nhất là **M2 — vertical slice**. Nếu chưa làm được một gift thật chạy trọn vẹn, không nên đồng thời mở rộng thêm template hoặc tính năng.
 
@@ -67,7 +67,7 @@ Mốc quan trọng nhất là **M2 — vertical slice**. Nếu chưa làm đư�
 
 - Next.js App Router, React, TypeScript, Tailwind.
 - MongoDB Atlas là operational database.
-- R2/S3-compatible storage lưu media và template artifacts.
+- Vercel Blob private lưu media và derivative; template artifacts immutable đi cùng deployment ở MVP.
 - Template runtime có manifest/version và được cách ly.
 - Background job dùng dịch vụ managed trong giai đoạn đầu.
 - Payment đi qua BillingProvider; payOS là provider đầu tiên.
@@ -353,7 +353,7 @@ Khi trễ:
 
 ## 7. Dependency map và critical path
 
-~~~mermaid
+```mermaid
 flowchart LR
   F[Foundation & CI] --> D[Gift domain & Auth]
   F --> M[Media pipeline]
@@ -371,7 +371,7 @@ flowchart LR
   TP23 --> H[Hardening]
   A --> H
   H --> RC[Production-ready]
-~~~
+```
 
 Critical path:
 
@@ -392,7 +392,7 @@ Media pipeline và template runtime có thể chạy song song. Template 2–3 c
 
 ### 8.1. Gift lifecycle
 
-~~~mermaid
+```mermaid
 stateDiagram-v2
   [*] --> draft
   draft --> readyToPublish: content + assets hợp lệ
@@ -410,7 +410,7 @@ stateDiagram-v2
   paused --> deleting: owner/admin delete
   expired --> deleting: retention job
   deleting --> deleted: metadata + asset cleanup
-~~~
+```
 
 Lưu ý:
 
@@ -421,7 +421,7 @@ Lưu ý:
 
 ### 8.2. Asset lifecycle
 
-~~~mermaid
+```mermaid
 stateDiagram-v2
   [*] --> initiated
   initiated --> uploaded: browser hoàn thành PUT
@@ -433,11 +433,11 @@ stateDiagram-v2
   ready --> deleting: gift/delete/retention
   rejected --> deleting
   deleting --> deleted
-~~~
+```
 
 ### 8.3. Order/payment lifecycle
 
-~~~mermaid
+```mermaid
 stateDiagram-v2
   [*] --> created
   created --> pendingPayment: checkout tạo thành công
@@ -449,7 +449,7 @@ stateDiagram-v2
   fulfilling --> fulfillmentFailed: retry/manual review
   paid --> refundPending
   refundPending --> refunded
-~~~
+```
 
 Không cho phép browser returnUrl tự chuyển order thành paid.
 
@@ -1590,7 +1590,7 @@ Budget cụ thể được thiết lập sau spike/template 1, sau đó template
 - Payment webhook ngừng đến.
 - Payment paid nhưng gift chưa publish.
 - MongoDB unavailable/high connection.
-- R2/CDN asset unavailable.
+- Vercel Blob/media unavailable.
 - Magic link email không đến.
 - Báo cáo nội dung khẩn cấp.
 - Xóa dữ liệu bị kẹt.
@@ -1617,30 +1617,30 @@ Alert không có owner/runbook chỉ tạo tiếng ồn.
 
 Đây là ước lượng phạm vi, không phải cam kết lịch. Độ bất định cao nhất nằm ở template animation, in-app browser, media processing và payment/provider.
 
-| Workstream | Person-days ước lượng |
-|---|---:|
-| Product/UX flow và design system | 15–22 |
-| Foundation, monorepo, CI, environments | 10–15 |
-| Gift domain, MongoDB và auth | 20–28 |
-| Media upload/processing/storage | 18–26 |
-| Template SDK/runtime/sandbox | 20–30 |
-| Ba template | 30–45 |
-| Studio/editor/preview | 28–40 |
-| Publish/access/QR/dashboard | 20–28 |
-| Payment/entitlement/jobs/email | 18–26 |
-| Admin/moderation/privacy/deletion | 18–28 |
-| Test automation/cross-browser/performance/security | 30–45 |
-| Documentation/recovery/release hardening | 10–16 |
-| **Tổng** | **237–349 person-days** |
+| Workstream                                         |   Person-days ước lượng |
+| -------------------------------------------------- | ----------------------: |
+| Product/UX flow và design system                   |                   15–22 |
+| Foundation, monorepo, CI, environments             |                   10–15 |
+| Gift domain, MongoDB và auth                       |                   20–28 |
+| Media upload/processing/storage                    |                   18–26 |
+| Template SDK/runtime/sandbox                       |                   20–30 |
+| Ba template                                        |                   30–45 |
+| Studio/editor/preview                              |                   28–40 |
+| Publish/access/QR/dashboard                        |                   20–28 |
+| Payment/entitlement/jobs/email                     |                   18–26 |
+| Admin/moderation/privacy/deletion                  |                   18–28 |
+| Test automation/cross-browser/performance/security |                   30–45 |
+| Documentation/recovery/release hardening           |                   10–16 |
+| **Tổng**                                           | **237–349 person-days** |
 
 Một phần công việc design/QA chạy song song và một số hạng mục dùng chung. Timeline theo đội:
 
-| Đội hình | Thời gian hợp lý |
-|---|---:|
-| 1 senior full-stack kiêm animation/design/QA | 40–52 tuần |
-| 2 engineers + design/QA part-time | 20–24 tuần |
-| 3 engineers + designer + QA part-time/full-time | 14–18 tuần |
-| 4+ engineers | Không tự động dưới 12 tuần vì dependency và hardening |
+| Đội hình                                        |                                      Thời gian hợp lý |
+| ----------------------------------------------- | ----------------------------------------------------: |
+| 1 senior full-stack kiêm animation/design/QA    |                                            40–52 tuần |
+| 2 engineers + design/QA part-time               |                                            20–24 tuần |
+| 3 engineers + designer + QA part-time/full-time |                                            14–18 tuần |
+| 4+ engineers                                    | Không tự động dưới 12 tuần vì dependency và hardening |
 
 Kế hoạch 16 tuần là mục tiêu hợp lý với 3 engineers, design/QA hỗ trợ đúng thời điểm, phạm vi P0 được giữ chặt và template không vượt độ phức tạp đã giả định.
 
@@ -1660,20 +1660,20 @@ Không dùng contingency để thêm feature.
 
 ## 24. Rủi ro thực thi
 
-| Rủi ro | Xác suất | Tác động | Dấu hiệu sớm | Giảm thiểu |
-|---|---|---|---|---|
-| Ba template chạy song song trước khi runtime ổn | Cao | Cao | Cùng lỗi lặp ở ba codebase | Chỉ Template 1 trước gate M2 |
-| Studio và Viewer render khác nhau | Trung bình | Cao | Preview đúng, publish sai | Dùng cùng artifact/payload transformer |
-| Media edge case tiêu tốn thời gian | Cao | Cao | HEIC/corrupt/ảnh lớn lỗi | Spike sớm, giới hạn rõ, worker re-encode |
-| Mongo schema trở nên tùy tiện | Trung bình | Cao | Field/invariant rải rác | Zod + DB validator + repository + migrations |
-| Payment race/duplicate | Trung bình | Rất cao | Đơn paid nhưng state lệch | Idempotency, transaction, outbox, reconciliation |
-| Template làm Viewer nặng | Cao | Cao | JS/media tăng qua mỗi mẫu | Artifact riêng, budget, dynamic import/CDN |
-| In-app browser chặn audio/API | Cao | Cao | Test desktop pass, user fail | Device spike Sprint 0, fallback |
-| Privacy bị để đến cuối | Trung bình | Rất cao | Không xóa hết asset/cache | Data inventory/lifecycle từ Sprint 1–2 |
-| Scope creep | Cao | Cao | P1 vào sprint trước P0 | Scope owner, gates, feature flags |
-| Solo bottleneck review/QA | Cao nếu solo | Cao | Bug lặp, chậm hardening | Automated tests, external review theo milestone |
-| Managed provider outage/lock-in | Thấp–TB | Cao | Không có adapter/export | Port nhỏ, retries, runbook, data export |
-| Thiếu license cho nhạc/asset | Trung bình | Cao | Không có provenance | Licensed catalog và registry trước paid MVP |
+| Rủi ro                                          | Xác suất     | Tác động | Dấu hiệu sớm                 | Giảm thiểu                                       |
+| ----------------------------------------------- | ------------ | -------- | ---------------------------- | ------------------------------------------------ |
+| Ba template chạy song song trước khi runtime ổn | Cao          | Cao      | Cùng lỗi lặp ở ba codebase   | Chỉ Template 1 trước gate M2                     |
+| Studio và Viewer render khác nhau               | Trung bình   | Cao      | Preview đúng, publish sai    | Dùng cùng artifact/payload transformer           |
+| Media edge case tiêu tốn thời gian              | Cao          | Cao      | HEIC/corrupt/ảnh lớn lỗi     | Spike sớm, giới hạn rõ, worker re-encode         |
+| Mongo schema trở nên tùy tiện                   | Trung bình   | Cao      | Field/invariant rải rác      | Zod + DB validator + repository + migrations     |
+| Payment race/duplicate                          | Trung bình   | Rất cao  | Đơn paid nhưng state lệch    | Idempotency, transaction, outbox, reconciliation |
+| Template làm Viewer nặng                        | Cao          | Cao      | JS/media tăng qua mỗi mẫu    | Artifact riêng, budget, dynamic import/CDN       |
+| In-app browser chặn audio/API                   | Cao          | Cao      | Test desktop pass, user fail | Device spike Sprint 0, fallback                  |
+| Privacy bị để đến cuối                          | Trung bình   | Rất cao  | Không xóa hết asset/cache    | Data inventory/lifecycle từ Sprint 1–2           |
+| Scope creep                                     | Cao          | Cao      | P1 vào sprint trước P0       | Scope owner, gates, feature flags                |
+| Solo bottleneck review/QA                       | Cao nếu solo | Cao      | Bug lặp, chậm hardening      | Automated tests, external review theo milestone  |
+| Managed provider outage/lock-in                 | Thấp–TB      | Cao      | Không có adapter/export      | Port nhỏ, retries, runbook, data export          |
+| Thiếu license cho nhạc/asset                    | Trung bình   | Cao      | Không có provenance          | Licensed catalog và registry trước paid MVP      |
 
 ---
 
@@ -1807,7 +1807,7 @@ Một template chỉ Done khi:
 
 ### Ngày 5
 
-- R2 signed upload spike.
+- Vercel Blob private signed-upload spike.
 - Sharp derivative.
 - Ghi kết quả/giới hạn.
 
