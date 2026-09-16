@@ -8,6 +8,7 @@ export type ContentSecurityPolicyOptions = Readonly<{
 }>;
 
 const VERCEL_BLOB_CONTROL_ORIGIN = "https://blob.vercel-storage.com";
+const VERCEL_BLOB_OIDC_CONTROL_PATH = "https://vercel.com/api/blob/";
 const VERCEL_PRIVATE_BLOB_ORIGIN = "https://*.private.blob.vercel-storage.com";
 
 export function getContentSecurityPolicyMode(pathname: string): ContentSecurityPolicyMode {
@@ -48,7 +49,11 @@ export function createContentSecurityPolicy({
   const assetSources = ["'self'", "blob:", VERCEL_PRIVATE_BLOB_ORIGIN, assetOrigin]
     .filter(Boolean)
     .join(" ");
-  const connectSources = [assetSources, VERCEL_BLOB_CONTROL_ORIGIN].join(" ");
+  const connectSources = [
+    assetSources,
+    VERCEL_BLOB_CONTROL_ORIGIN,
+    VERCEL_BLOB_OIDC_CONTROL_PATH,
+  ].join(" ");
   const imageSources = [assetSources, "data:"].join(" ");
   const scriptSources =
     mode === "nonce"

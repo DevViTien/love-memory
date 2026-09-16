@@ -8,13 +8,12 @@ restore a known-good deployment without destructive database rollback.
 ## One-time Vercel setup
 
 1. Import the GitHub repository as a new Vercel Project.
-2. Set Root Directory to `apps/web` and Framework Preset to Next.js.
-3. Keep “Include source files outside of the Root Directory” enabled for workspace packages.
-4. Let Vercel detect pnpm from the root lockfile and Turborepo from `turbo.json`.
-5. Add Preview-scoped `MONGODB_URI`, `MONGODB_DATABASE` and `APP_URL`. Use a dedicated non-production
+2. Keep Root Directory at the repository root (`./`) and Framework Preset at Next.js.
+3. Let Vercel detect pnpm from the root lockfile and Turborepo from `turbo.json`.
+4. Add Preview-scoped `MONGODB_URI`, `MONGODB_DATABASE` and `APP_URL`. Use a dedicated non-production
    database; never reuse production data in a pull-request deployment.
-6. Leave technical spikes disabled until their separate token and provider configuration are ready.
-7. Protect Preview URLs if they contain test data.
+5. Leave technical spikes disabled until their separate token and provider configuration are ready.
+6. Protect Preview URLs if they contain test data.
 
 Every pull request then receives a unique Preview Deployment through the Vercel Git integration.
 The production branch remains `main` unless explicitly changed in Project Settings.

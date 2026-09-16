@@ -21,6 +21,7 @@
     "test": "pnpm build:templates && vitest run",
     "test:coverage": "pnpm build:templates && vitest run --coverage",
     "test:e2e": "playwright test",
+    "test:spikes": "node scripts/verify-live-spikes.mjs",
     "test:watch": "vitest",
     "type-check": "tsc --noEmit -p tsconfig.json && turbo run type-check"
   },

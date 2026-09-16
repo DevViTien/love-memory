@@ -163,6 +163,7 @@ export function createVercelBlobObjectStorage({
       access: "private",
       ...(allowedContentTypes ? { allowedContentTypes } : {}),
       ...(maximumSize === undefined ? {} : { maximumSizeInBytes: maximumSize }),
+      ...(operation === "put" ? { addRandomSuffix: false, allowOverwrite: false } : {}),
       operation,
       pathname: key,
       validUntil: expiresAt.getTime(),

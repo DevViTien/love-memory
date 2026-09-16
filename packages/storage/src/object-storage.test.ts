@@ -87,7 +87,12 @@ describe("Vercel Blob object storage", () => {
     );
     expect(presign).toHaveBeenCalledWith(
       issuedToken,
-      expect.objectContaining({ access: "private", operation: "put" }),
+      expect.objectContaining({
+        access: "private",
+        addRandomSuffix: false,
+        allowOverwrite: false,
+        operation: "put",
+      }),
     );
   });
 

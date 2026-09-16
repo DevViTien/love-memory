@@ -5,6 +5,7 @@ node_modules/
 .next/
 .build/
 .turbo/
+.vercel/
 coverage/
 dist/
 playwright-report/
