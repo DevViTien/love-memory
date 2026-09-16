@@ -23,9 +23,17 @@ export default defineConfig({
       name: "mobile-chromium",
       use: { ...devices["Pixel 7"] },
     },
+    {
+      name: "installed-chrome",
+      use: { ...devices["Desktop Chrome"], channel: "chrome" },
+    },
   ],
   webServer: {
     command: "pnpm build && pnpm --filter @love-memory/web start --port " + port,
+    env: {
+      TECHNICAL_SPIKES_ENABLED: "true",
+      TECHNICAL_SPIKE_TOKEN: "playwright-technical-spike-token",
+    },
     reuseExistingServer: false,
     timeout: 180000,
     url: baseURL,

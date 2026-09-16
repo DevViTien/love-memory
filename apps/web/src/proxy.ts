@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { getWebEnvironment } from "@/config/environment";
+import { getTechnicalSpikeEnvironment, isTechnicalSpikePagePath } from "@/config/technical-spikes";
 import {
   createContentSecurityPolicy,
   getContentSecurityPolicyMode,
@@ -18,6 +19,20 @@ export function proxy(request: NextRequest) {
     mode,
     ...(nonce ? { nonce } : {}),
   });
+
+  if (
+    isTechnicalSpikePagePath(request.nextUrl.pathname) &&
+    !getTechnicalSpikeEnvironment().enabled
+  ) {
+    return new NextResponse(null, {
+      headers: {
+        "Cache-Control": "private, no-store",
+        "Content-Security-Policy": contentSecurityPolicy,
+      },
+      status: 404,
+    });
+  }
+
   const requestHeaders = new Headers(request.headers);
 
   requestHeaders.set("Content-Security-Policy", contentSecurityPolicy);

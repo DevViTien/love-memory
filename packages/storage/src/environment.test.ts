@@ -10,7 +10,13 @@ describe("storage environment", () => {
         BLOB_STORE_ID: "store_abc123",
         VERCEL_OIDC_TOKEN: "oidc-token",
       }),
-    ).toEqual({ oidcToken: "oidc-token", storeId: "store_abc123" });
+    ).toEqual({ storeId: "store_abc123" });
+  });
+
+  it("allows the Blob SDK to resolve runtime OIDC from Vercel request context", () => {
+    expect(parseStorageEnvironment({ BLOB_STORE_ID: "store_abc123" })).toEqual({
+      storeId: "store_abc123",
+    });
   });
 
   it("supports the read-write token required for local development", () => {
@@ -22,6 +28,5 @@ describe("storage environment", () => {
   it("rejects missing or incomplete credentials", () => {
     expect(() => parseStorageEnvironment({})).toThrow();
     expect(() => parseStorageEnvironment({ VERCEL_OIDC_TOKEN: "oidc-token" })).toThrow();
-    expect(() => parseStorageEnvironment({ BLOB_STORE_ID: "store_abc123" })).toThrow();
   });
 });

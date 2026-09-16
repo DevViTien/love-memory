@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseTechnicalSpikeEnvironment } from "./technical-spikes";
+import { isTechnicalSpikePagePath, parseTechnicalSpikeEnvironment } from "./technical-spikes";
 
 describe("technical spike environment", () => {
   it("is disabled by default", () => {
@@ -15,5 +15,15 @@ describe("technical spike environment", () => {
         TECHNICAL_SPIKE_TOKEN: "a-development-token-with-32-characters",
       }),
     ).toMatchObject({ enabled: true });
+  });
+
+  it.each([
+    ["/studio/spikes", true],
+    ["/studio/spikes/history", true],
+    ["/template-spikes/memory-box", true],
+    ["/studio/new", false],
+    ["/templates", false],
+  ])("classifies %s as technical-spike page: %s", (pathname, expected) => {
+    expect(isTechnicalSpikePagePath(pathname)).toBe(expected);
   });
 });

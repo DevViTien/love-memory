@@ -18,26 +18,26 @@ const StorageEnvironmentSchema = z
     const hasOidcToken = environment.VERCEL_OIDC_TOKEN !== undefined;
     const hasStoreId = environment.BLOB_STORE_ID !== undefined;
 
-    if (!hasStaticToken && !(hasOidcToken && hasStoreId)) {
+    if (!hasStaticToken && !hasStoreId) {
       context.addIssue({
         code: "custom",
-        message: "Configure BLOB_READ_WRITE_TOKEN, or both VERCEL_OIDC_TOKEN and BLOB_STORE_ID.",
+        message: "Configure BLOB_READ_WRITE_TOKEN or BLOB_STORE_ID.",
       });
     }
 
-    if (hasOidcToken !== hasStoreId) {
+    if (hasOidcToken && !hasStoreId) {
       context.addIssue({
         code: "custom",
-        message: "VERCEL_OIDC_TOKEN and BLOB_STORE_ID must be configured together.",
+        message: "BLOB_STORE_ID is required when VERCEL_OIDC_TOKEN is configured.",
       });
     }
   })
   .transform((environment) => {
-    if (environment.VERCEL_OIDC_TOKEN && environment.BLOB_STORE_ID) {
-      return {
-        oidcToken: environment.VERCEL_OIDC_TOKEN,
-        storeId: environment.BLOB_STORE_ID,
-      } as const;
+    if (environment.BLOB_STORE_ID) {
+      // Do not pass VERCEL_OIDC_TOKEN explicitly. The Blob SDK resolves a local
+      // token from the environment and a deployed token from Vercel's request
+      // context, where it is rotated automatically.
+      return { storeId: environment.BLOB_STORE_ID } as const;
     }
 
     const token = environment.BLOB_READ_WRITE_TOKEN;

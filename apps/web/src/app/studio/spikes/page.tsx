@@ -1,10 +1,15 @@
 import { Badge, Container } from "@love-memory/ui";
+import { notFound } from "next/navigation";
 
 import { getTechnicalSpikeEnvironment } from "@/config/technical-spikes";
 import { TechnicalSpikeLab } from "@/modules/spikes/presentation/technical-spike-lab";
 
 export default function TechnicalSpikesPage() {
   const environment = getTechnicalSpikeEnvironment();
+
+  if (!environment.enabled) {
+    notFound();
+  }
 
   return (
     <main>

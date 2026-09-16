@@ -1,5 +1,6 @@
 import {
   API_ERROR_CODES,
+  UploadCleanupRequestSchema,
   UploadCompleteRequestSchema,
   UploadInitRequestSchema,
 } from "@love-memory/contracts";
@@ -36,6 +37,37 @@ function isSafeUploadFailure(error: unknown): boolean {
     error instanceof InvalidImageError ||
     error instanceof UnsupportedImageFormatError
   );
+}
+
+export async function handleCleanupUpload(
+  request: Request,
+  { environment, getService, reportFailure = reportOperationalFailure }: UploadRouteDependencies,
+): Promise<Response> {
+  const requestId = crypto.randomUUID();
+  const authorizationFailure = getTechnicalSpikeAccessFailure(request, environment, requestId);
+
+  if (authorizationFailure) {
+    return authorizationFailure;
+  }
+
+  const body = await readJsonBody(request, UploadCleanupRequestSchema);
+
+  if (!body.ok) {
+    return createInvalidBodyResponse(body.error, requestId);
+  }
+
+  try {
+    const data = await getService().cleanupUpload(body.data);
+    return createApiSuccessResponse(data, requestId);
+  } catch (error) {
+    reportFailure("media.cleanup-upload", error, requestId);
+    return createApiErrorResponse({
+      code: API_ERROR_CODES.unavailable,
+      message: "Media cleanup is not available.",
+      requestId,
+      status: 503,
+    });
+  }
 }
 
 export async function handleInitializeUpload(

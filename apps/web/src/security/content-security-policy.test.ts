@@ -24,8 +24,9 @@ describe("content security policy", () => {
 
     expect(policy).toContain("'nonce-request-nonce' 'strict-dynamic'");
     expect(policy).toContain(
-      "connect-src 'self' blob: https://*.private.blob.vercel-storage.com https://cdn.example https://blob.vercel-storage.com",
+      "connect-src 'self' blob: https://*.private.blob.vercel-storage.com https://cdn.example https://blob.vercel-storage.com https://vercel.com/api/blob/",
     );
+    expect(policy).not.toContain("https://vercel.com ");
     expect(policy).not.toContain("'unsafe-inline'");
   });
 
@@ -54,6 +55,7 @@ describe("content security policy", () => {
     ["/templates/memory-box", "static"],
     ["/studio", "nonce"],
     ["/studio/new", "nonce"],
+    ["/g/a-public-gift-slug", "nonce"],
     ["/template-spikes/memory-box", "template"],
   ] as const)("selects %s as %s policy", (pathname, mode) => {
     expect(getContentSecurityPolicyMode(pathname)).toBe(mode);

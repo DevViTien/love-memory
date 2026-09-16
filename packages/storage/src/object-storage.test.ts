@@ -1,9 +1,15 @@
-import { type GetBlobResult, type HeadBlobResult, type PutBlobResult } from "@vercel/blob";
+import {
+  BlobNotFoundError,
+  type GetBlobResult,
+  type HeadBlobResult,
+  type PutBlobResult,
+} from "@vercel/blob";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   createVercelBlobObjectStorage,
   InvalidStoredObjectError,
+  ObjectNotFoundError,
   StoredObjectTooLargeError,
 } from "./object-storage";
 
@@ -50,6 +56,26 @@ function createGetResult(bytes: Uint8Array): GetBlobResult {
   };
 }
 
+function createNotModifiedResult(): GetBlobResult {
+  const head = createHead();
+  return {
+    blob: {
+      cacheControl: head.cacheControl,
+      contentDisposition: head.contentDisposition,
+      contentType: null,
+      downloadUrl: head.downloadUrl,
+      etag: head.etag,
+      pathname: head.pathname,
+      size: null,
+      uploadedAt: head.uploadedAt,
+      url: head.url,
+    },
+    headers: new Headers(),
+    statusCode: 304,
+    stream: null,
+  };
+}
+
 describe("Vercel Blob object storage", () => {
   it("creates a pathname-, MIME-, size- and time-scoped upload URL", async () => {
     const issueToken = vi.fn(() => Promise.resolve(issuedToken));
@@ -87,7 +113,12 @@ describe("Vercel Blob object storage", () => {
     );
     expect(presign).toHaveBeenCalledWith(
       issuedToken,
-      expect.objectContaining({ access: "private", operation: "put" }),
+      expect.objectContaining({
+        access: "private",
+        addRandomSuffix: false,
+        allowOverwrite: false,
+        operation: "put",
+      }),
     );
   });
 
@@ -131,6 +162,7 @@ describe("Vercel Blob object storage", () => {
     });
 
     await storage.putObject({
+      allowOverwrite: true,
       body: Uint8Array.from([1]),
       cacheControlMaxAge: 60,
       contentType: "image/webp",
@@ -144,7 +176,7 @@ describe("Vercel Blob object storage", () => {
     expect(putBlob).toHaveBeenCalledWith(
       "processed/asset.webp",
       expect.any(Uint8Array),
-      expect.objectContaining({ access: "private", allowOverwrite: false }),
+      expect.objectContaining({ access: "private", allowOverwrite: true }),
     );
     expect(deleteBlob).toHaveBeenCalledWith("private/asset/source", { token: "test-token" });
     expect(issueToken).toHaveBeenCalledWith(
@@ -157,7 +189,13 @@ describe("Vercel Blob object storage", () => {
       credentials,
       getBlob: vi.fn(() => Promise.resolve(null)),
     });
-    await expect(missingStorage.getObject("source")).rejects.toBeInstanceOf(
+    await expect(missingStorage.getObject("source")).rejects.toBeInstanceOf(ObjectNotFoundError);
+
+    const malformedStorage = createVercelBlobObjectStorage({
+      credentials,
+      getBlob: vi.fn(() => Promise.resolve(createNotModifiedResult())),
+    });
+    await expect(malformedStorage.getObject("source")).rejects.toBeInstanceOf(
       InvalidStoredObjectError,
     );
 
@@ -168,5 +206,14 @@ describe("Vercel Blob object storage", () => {
     await expect(oversizedStorage.getObject("source", 1)).rejects.toBeInstanceOf(
       StoredObjectTooLargeError,
     );
+  });
+
+  it("normalizes provider not-found metadata errors", async () => {
+    const storage = createVercelBlobObjectStorage({
+      credentials,
+      headBlob: vi.fn(() => Promise.reject(new BlobNotFoundError())),
+    });
+
+    await expect(storage.getObjectMetadata("missing")).rejects.toBeInstanceOf(ObjectNotFoundError);
   });
 });

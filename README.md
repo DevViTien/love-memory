@@ -48,15 +48,17 @@ Vercel Blob and the `TECHNICAL_SPIKE_*` values described in
 
 ## Quality commands
 
-| Command            | Purpose                                     |
-| ------------------ | ------------------------------------------- |
-| pnpm format:check  | Verify formatting                           |
-| pnpm lint          | Run ESLint with zero warnings               |
-| pnpm type-check    | Type-check root tooling and every workspace |
-| pnpm test          | Run unit and component tests                |
-| pnpm test:coverage | Run coverage gates                          |
-| pnpm test:e2e      | Build and test production UI                |
-| pnpm build         | Build production artifacts                  |
+| Command              | Purpose                                                |
+| -------------------- | ------------------------------------------------------ |
+| pnpm format:check    | Verify formatting                                      |
+| pnpm lint            | Run ESLint with zero warnings                          |
+| pnpm type-check      | Type-check root tooling and every workspace            |
+| pnpm test            | Run unit and component tests                           |
+| pnpm test:coverage   | Run coverage gates                                     |
+| pnpm test:e2e        | Build and test production UI                           |
+| pnpm test:e2e:chrome | Run production UI tests in installed Chrome            |
+| pnpm test:secrets    | Reject tracked environment files and secret signatures |
+| pnpm build           | Build production artifacts                             |
 
 ## Repository structure
 

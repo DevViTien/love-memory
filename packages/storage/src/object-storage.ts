@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  BlobNotFoundError,
   del,
   get,
   head,
@@ -49,6 +50,7 @@ export interface ObjectStorage {
   getObject: (key: string, maximumBytes?: number) => Promise<Uint8Array>;
   getObjectMetadata: (key: string) => Promise<ObjectMetadata>;
   putObject: (input: {
+    allowOverwrite?: boolean;
     body: Uint8Array;
     cacheControlMaxAge?: number;
     contentType: string;
@@ -58,6 +60,10 @@ export interface ObjectStorage {
 
 export class InvalidStoredObjectError extends Error {
   override readonly name = "InvalidStoredObjectError";
+}
+
+export class ObjectNotFoundError extends Error {
+  override readonly name = "ObjectNotFoundError";
 }
 
 export class StoredObjectTooLargeError extends Error {
@@ -76,7 +82,7 @@ type BlobPut = (
   options: StorageEnvironment & {
     access: "private";
     addRandomSuffix: false;
-    allowOverwrite: false;
+    allowOverwrite: boolean;
     cacheControlMaxAge?: number;
     contentType: string;
   },
@@ -163,6 +169,7 @@ export function createVercelBlobObjectStorage({
       access: "private",
       ...(allowedContentTypes ? { allowedContentTypes } : {}),
       ...(maximumSize === undefined ? {} : { maximumSizeInBytes: maximumSize }),
+      ...(operation === "put" ? { addRandomSuffix: false, allowOverwrite: false } : {}),
       operation,
       pathname: key,
       validUntil: expiresAt.getTime(),
@@ -207,6 +214,9 @@ export function createVercelBlobObjectStorage({
       });
 
       if (!result || result.statusCode !== 200 || !result.stream) {
+        if (!result) {
+          throw new ObjectNotFoundError("Stored object does not exist.");
+        }
         throw new InvalidStoredObjectError("Stored object has no readable body.");
       }
       if (result.blob.size > maximumBytes) {
@@ -217,7 +227,16 @@ export function createVercelBlobObjectStorage({
     },
 
     async getObjectMetadata(key) {
-      const result = await headBlob(key, credentials());
+      let result: HeadBlobResult;
+
+      try {
+        result = await headBlob(key, credentials());
+      } catch (error) {
+        if (error instanceof BlobNotFoundError) {
+          throw new ObjectNotFoundError("Stored object does not exist.");
+        }
+        throw error;
+      }
 
       if (!result.contentType || !Number.isSafeInteger(result.size) || result.size < 0) {
         throw new InvalidStoredObjectError("Stored object is missing required metadata.");
@@ -230,12 +249,12 @@ export function createVercelBlobObjectStorage({
       };
     },
 
-    async putObject({ body, cacheControlMaxAge, contentType, key }) {
+    async putObject({ allowOverwrite = false, body, cacheControlMaxAge, contentType, key }) {
       await putBlob(key, Buffer.from(body), {
         ...credentials(),
         access: "private",
         addRandomSuffix: false,
-        allowOverwrite: false,
+        allowOverwrite,
         ...(cacheControlMaxAge === undefined ? {} : { cacheControlMaxAge }),
         contentType,
       });

@@ -7,7 +7,8 @@ function captureBrowserErrors(page: Page): string[] {
 
   page.on("console", (message) => {
     if (message.type() === "error") {
-      errors.push(`console: ${message.text()}`);
+      const source = message.location().url;
+      errors.push(`console: ${message.text()}${source ? ` (${source})` : ""}`);
     }
   });
   page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
@@ -59,6 +60,9 @@ test("exposes a validated liveness endpoint", async ({ request }) => {
   const body = HealthResponseSchema.parse(await response.json());
 
   expect(response.ok()).toBe(true);
+  expect(response.headers()["x-request-id"]).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
   expect(response.headers()["x-content-type-options"]).toBe("nosniff");
   expect(body.data).toMatchObject({
     service: "love-memory",
@@ -89,9 +93,9 @@ test("isolates, controls, destroys and reloads the template spike", async ({ pag
   expect(browserErrors).toEqual([]);
 });
 
-test("keeps mutation spike endpoints hidden by default", async ({ request }) => {
+test("requires authorization for enabled mutation spike endpoints", async ({ request }) => {
   const response = await request.post("/api/spikes/mongodb");
 
-  expect(response.status()).toBe(404);
+  expect(response.status()).toBe(401);
   expect(response.headers()["cache-control"]).toBe("no-store");
 });

@@ -4,7 +4,11 @@ import {
   type MediaSpikeService,
   UploadVerificationError,
 } from "../application/media-spike-service";
-import { handleCompleteUpload, handleInitializeUpload } from "./upload-route-handlers";
+import {
+  handleCleanupUpload,
+  handleCompleteUpload,
+  handleInitializeUpload,
+} from "./upload-route-handlers";
 
 const token = "a-development-token-with-32-characters";
 const environment = { enabled: true, token } as const;
@@ -23,6 +27,7 @@ function createRequest(body: unknown, bearerToken = token): Request {
 
 function createService(): MediaSpikeService {
   return {
+    cleanupUpload: vi.fn(() => Promise.resolve({ assetId, deleted: true as const })),
     completeUpload: vi.fn(() =>
       Promise.resolve({
         assetId,
@@ -80,6 +85,38 @@ describe("upload spike route handlers", () => {
 
     expect(response.status).toBe(400);
     expect(service.completeUpload).not.toHaveBeenCalled();
+  });
+
+  it("cleans up a valid spike asset", async () => {
+    const service = createService();
+    const response = await handleCleanupUpload(createRequest({ assetId }), {
+      environment,
+      getService: () => service,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ data: { assetId, deleted: true } });
+    expect(service.cleanupUpload).toHaveBeenCalledWith({ assetId });
+  });
+
+  it("reports cleanup failures without exposing provider details", async () => {
+    const reportFailure = vi.fn();
+    const service = createService();
+    vi.mocked(service.cleanupUpload).mockRejectedValue(new Error("private provider failure"));
+
+    const response = await handleCleanupUpload(createRequest({ assetId }), {
+      environment,
+      getService: () => service,
+      reportFailure,
+    });
+
+    expect(response.status).toBe(503);
+    expect(JSON.stringify(await response.json())).not.toContain("private provider failure");
+    expect(reportFailure).toHaveBeenCalledWith(
+      "media.cleanup-upload",
+      expect.any(Error),
+      expect.any(String),
+    );
   });
 
   it("returns a safe validation response for rejected media", async () => {

@@ -10,7 +10,7 @@ describe("operational error reporting", () => {
   it("does not log database error messages or secrets", () => {
     const sink = { error: vi.fn() };
 
-    reportReadinessFailure(new Error("mongodb://user:secret@host"), "request-1", sink);
+    reportReadinessFailure(new Error("database-password=secret-value"), "request-1", sink);
 
     expect(sink.error).toHaveBeenCalledWith("Readiness check failed", {
       errorName: "Error",

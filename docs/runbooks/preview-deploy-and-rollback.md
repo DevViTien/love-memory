@@ -8,13 +8,12 @@ restore a known-good deployment without destructive database rollback.
 ## One-time Vercel setup
 
 1. Import the GitHub repository as a new Vercel Project.
-2. Set Root Directory to `apps/web` and Framework Preset to Next.js.
-3. Keep “Include source files outside of the Root Directory” enabled for workspace packages.
-4. Let Vercel detect pnpm from the root lockfile and Turborepo from `turbo.json`.
-5. Add Preview-scoped `MONGODB_URI`, `MONGODB_DATABASE` and `APP_URL`. Use a dedicated non-production
+2. Keep Root Directory at the repository root (`./`) and Framework Preset at Next.js.
+3. Let Vercel detect pnpm from the root lockfile and Turborepo from `turbo.json`.
+4. Add Preview-scoped `MONGODB_URI`, `MONGODB_DATABASE` and `APP_URL`. Use a dedicated non-production
    database; never reuse production data in a pull-request deployment.
-6. Leave technical spikes disabled until their separate token and provider configuration are ready.
-7. Protect Preview URLs if they contain test data.
+5. Leave technical spikes disabled until their separate token and provider configuration are ready.
+6. Protect Preview URLs if they contain test data.
 
 Every pull request then receives a unique Preview Deployment through the Vercel Git integration.
 The production branch remains `main` unless explicitly changed in Project Settings.
@@ -33,6 +32,11 @@ VERCEL_OIDC_TOKEN=<injected and rotated by Vercel>
 Connect the private Blob Store to the Preview environment. Never log the token, credentials or
 returned signed URLs. Keep `TECHNICAL_SPIKES_ENABLED=false` in Production.
 
+For a deployment protected by Vercel Authentication, create an automation bypass secret and expose
+it only to the machine running the smoke test as `VERCEL_AUTOMATION_BYPASS_SECRET`. The verifier
+injects that header only into requests to the deployment origin; it never forwards the secret to
+Blob upload/download origins.
+
 ## Preview smoke test
 
 1. Confirm the Vercel deployment and GitHub checks are green.
@@ -41,7 +45,13 @@ returned signed URLs. Keep `TECHNICAL_SPIKES_ENABLED=false` in Production.
 4. Public pages have static-compatible CSP; `/studio/new` has nonce CSP.
 5. `/studio/spikes` completes template PLAY → COMPLETE → DESTROY → reload.
 6. With spike configuration, run MongoDB and one non-sensitive Vercel Blob upload probe.
-7. Confirm logs contain request ID/error name only—not URI, token, gift content or signed URL.
+7. Prefer `pnpm test:spikes`; it verifies the signed derivative and then deletes both temporary Blob
+   objects through the protected cleanup endpoint.
+8. Confirm logs contain request ID/error name only—not URI, token, gift content or signed URL.
+
+Before enabling a production database, keep `/api/health/ready` behind the platform's deployment
+protection or add a Vercel Firewall rate-limit rule. Liveness can remain public; readiness performs a
+real dependency probe and should not be an unrestricted high-volume endpoint.
 
 ## Application rollback
 

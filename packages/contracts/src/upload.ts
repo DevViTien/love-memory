@@ -39,6 +39,7 @@ export const UploadInitDataSchema = z
 export const UploadInitResponseSchema = createApiSuccessSchema(UploadInitDataSchema);
 
 export const UploadCompleteRequestSchema = z.object({ assetId: UploadAssetIdSchema }).strict();
+export const UploadCleanupRequestSchema = UploadCompleteRequestSchema;
 
 export const UploadCompleteDataSchema = z
   .object({
@@ -52,6 +53,17 @@ export const UploadCompleteDataSchema = z
 
 export const UploadCompleteResponseSchema = createApiSuccessSchema(UploadCompleteDataSchema);
 
+export const UploadCleanupDataSchema = z
+  .object({
+    assetId: UploadAssetIdSchema,
+    deleted: z.literal(true),
+  })
+  .strict();
+
+export const UploadCleanupResponseSchema = createApiSuccessSchema(UploadCleanupDataSchema);
+
+export type UploadCleanupData = z.infer<typeof UploadCleanupDataSchema>;
+export type UploadCleanupRequest = z.infer<typeof UploadCleanupRequestSchema>;
 export type UploadCompleteData = z.infer<typeof UploadCompleteDataSchema>;
 export type UploadCompleteRequest = z.infer<typeof UploadCompleteRequestSchema>;
 export type UploadInitData = z.infer<typeof UploadInitDataSchema>;

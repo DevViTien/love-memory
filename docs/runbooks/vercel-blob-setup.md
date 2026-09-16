@@ -9,7 +9,9 @@ pipeline. Do not paste credentials into chat, issues, screenshots or commits.
 2. In that Project, open **Storage → Create Database → Blob**.
 3. Name the store `love-memory-media-dev` and choose **Private** access.
 4. Choose a region near the primary users and MongoDB Atlas deployment.
-5. Connect the store to Development and Preview. Keep Production isolated until the release gate.
+5. Connect the store to Development and Preview. Keep Production isolated until the release gate
+   when creating a dedicated development store. If it was initially connected to Production, keep
+   technical spikes disabled there.
 6. Confirm the Project has Blob credentials. Current Vercel deployments should use OIDC-backed
    `VERCEL_OIDC_TOKEN` plus `BLOB_STORE_ID`; a connected legacy store may expose
    `BLOB_READ_WRITE_TOKEN`.
@@ -22,19 +24,27 @@ photos.
 The Next.js application reads environment variables from `apps/web/.env.local`, not the repository
 root `.env` used as a personal source file.
 
-Copy the non-secret keys from `.env.example`, then set locally:
+Link the repository root to the Vercel Project, then pull an environment where the development store
+is connected directly into the Next.js app directory:
+
+```powershell
+pnpm dlx vercel@latest link --yes --project love-memory
+pnpm dlx vercel@latest env pull apps/web/.env.local --environment=preview --yes
+```
+
+The CLI-generated OIDC token is short-lived. Re-run `env pull` when it expires. Add the application
+configuration below to `apps/web/.env.local` without replacing the pulled Blob variables:
 
 ```dotenv
 MONGODB_URI=<existing Atlas URI>
 MONGODB_DATABASE=love_memory
 APP_URL=http://localhost:3000
-BLOB_READ_WRITE_TOKEN=<local development token from the connected private store>
 TECHNICAL_SPIKES_ENABLED=true
 TECHNICAL_SPIKE_TOKEN=<random secret with at least 24 characters>
 ```
 
-Never prefix Blob credentials with `NEXT_PUBLIC_`. Do not manually copy `VERCEL_OIDC_TOKEN` from a
-deployment; OIDC is supplied and rotated by Vercel.
+For a legacy token-backed store, `BLOB_READ_WRITE_TOKEN` remains a supported fallback. Never prefix
+Blob credentials with `NEXT_PUBLIC_`; use `vercel env pull` rather than copying OIDC values manually.
 
 ## Verification
 
@@ -44,7 +54,9 @@ deployment; OIDC is supplied and rotated by Vercel.
 4. Confirm direct upload, server validation, WebP derivative and expiring signed preview all pass.
 5. Run the MongoDB probe.
 6. In Vercel Preview, repeat the upload and confirm functions authenticate through OIDC.
-7. Confirm logs contain request IDs and error names only—never tokens, signed URLs, filenames or
+7. Run `pnpm test:spikes` for automated verification; the command removes its source and derivative
+   test objects before exiting.
+8. Confirm logs contain request IDs and error names only—never tokens, signed URLs, filenames or
    gift content.
 
 If Blob fails, turn `TECHNICAL_SPIKES_ENABLED` off. Existing objects remain private. If a static
