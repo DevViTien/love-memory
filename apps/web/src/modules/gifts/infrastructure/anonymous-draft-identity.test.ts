@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ANONYMOUS_DRAFT_COOKIE,
   createAnonymousDraftIdentity,
+  createIdempotentAnonymousDraftIdentity,
   parseAnonymousDraftIdentity,
   readCookie,
   serializeAnonymousDraftCookie,
@@ -26,5 +27,17 @@ describe("anonymous draft identity", () => {
 
     expect(readCookie(request, ANONYMOUS_DRAFT_COOKIE)).toBe("invalid");
     expect(parseAnonymousDraftIdentity("invalid")).toBeNull();
+  });
+
+  it("derives stable, purpose-separated credentials for idempotent retries", () => {
+    const first = createIdempotentAnonymousDraftIdentity("request-1", "s".repeat(32));
+    const retry = createIdempotentAnonymousDraftIdentity("request-1", "s".repeat(32));
+    const other = createIdempotentAnonymousDraftIdentity("request-2", "s".repeat(32));
+
+    expect(retry).toEqual(first);
+    expect(other).not.toEqual(first);
+    expect(first.anonymousDraftId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(first.claimToken).toHaveLength(43);
+    expect(first.claimTokenHash).toHaveLength(64);
   });
 });

@@ -65,6 +65,7 @@ class GiftCollection {
 describe("Mongo gift repository", () => {
   const gifts = new GiftCollection();
   const revisions = new GiftCollection();
+  const idempotencyKeys = new GiftCollection();
   const draft = createGiftDraft({
     anonymousDraftId: "2f7d675f-55d2-4e4b-b017-b0e0f9277ac2",
     claimTokenHash: "a".repeat(64),
@@ -79,14 +80,32 @@ describe("Mongo gift repository", () => {
     ownerId: null,
     publicId: "q1w2e3r4t5y6u7i8",
   });
+  const idempotency = {
+    accessor: {
+      anonymousDraftId: draft.ownership.anonymousDraftId!,
+      claimTokenHash: draft.ownership.claimTokenHash!,
+      kind: "anonymous" as const,
+    },
+    actorKey: `anonymous:${draft.ownership.anonymousDraftId}`,
+    expiresAt: new Date("2026-09-17T00:00:00.000Z"),
+    key: "4449d41a-6750-43c1-8dc4-b567ebb20cf2",
+    requestFingerprint: JSON.stringify(["memory-box", "1.0.0"]),
+    scope: "gift-create" as const,
+  };
 
   beforeEach(() => {
     gifts.documents = [];
     revisions.documents = [];
+    idempotencyKeys.documents = [];
     databaseMocks.getDatabase.mockReset();
     databaseMocks.getMongoClient.mockReset();
     databaseMocks.getDatabase.mockResolvedValue({
-      collection: (name: string) => (name === COLLECTIONS.gifts ? gifts : revisions),
+      collection: (name: string) =>
+        name === COLLECTIONS.gifts
+          ? gifts
+          : name === COLLECTIONS.giftRevisions
+            ? revisions
+            : idempotencyKeys,
     });
     databaseMocks.getMongoClient.mockResolvedValue({
       withSession: async (operation: (session: unknown) => Promise<void>) =>
@@ -95,30 +114,33 @@ describe("Mongo gift repository", () => {
   });
 
   it("creates the initial immutable revision and enforces anonymous access", async () => {
-    await mongoGiftRepository.createDraft(draft);
+    await expect(mongoGiftRepository.createDraft(draft, idempotency)).resolves.toMatchObject({
+      status: "created",
+    });
 
     await expect(
-      mongoGiftRepository.findAuthorized(draft.publicId, {
-        anonymousDraftId: draft.ownership.anonymousDraftId!,
-        claimTokenHash: draft.ownership.claimTokenHash!,
-        kind: "anonymous",
-      }),
+      mongoGiftRepository.findAuthorized(draft.publicId, [
+        {
+          anonymousDraftId: draft.ownership.anonymousDraftId!,
+          claimTokenHash: draft.ownership.claimTokenHash!,
+          kind: "anonymous",
+        },
+      ]),
     ).resolves.toMatchObject({ publicId: draft.publicId });
     await expect(
-      mongoGiftRepository.findAuthorized(draft.publicId, {
-        isAdmin: false,
-        kind: "user",
-        userId: "other-user",
-      }),
+      mongoGiftRepository.findAuthorized(draft.publicId, [
+        {
+          isAdmin: false,
+          kind: "user",
+          userId: "other-user",
+        },
+      ]),
     ).resolves.toBeNull();
-    await expect(mongoGiftRepository.findByPublicId(draft.publicId)).resolves.toMatchObject({
-      revision: 0,
-    });
     expect(revisions.documents).toHaveLength(1);
   });
 
   it("updates atomically only for the authorized expected revision", async () => {
-    await mongoGiftRepository.createDraft(draft);
+    await mongoGiftRepository.createDraft(draft, idempotency);
     const updated = updateGiftDraft(draft, {
       content: { ...draft.content, data: { headline: "Our story" } },
       expectedRevision: 0,
@@ -134,17 +156,17 @@ describe("Mongo gift repository", () => {
       kind: "anonymous" as const,
     };
 
-    await expect(mongoGiftRepository.updateDraft(updated.data, 0, accessor)).resolves.toMatchObject(
-      {
-        revision: 1,
-      },
-    );
-    await expect(mongoGiftRepository.updateDraft(updated.data, 0, accessor)).resolves.toBeNull();
+    await expect(
+      mongoGiftRepository.updateDraft(updated.data, 0, [accessor]),
+    ).resolves.toMatchObject({
+      revision: 1,
+    });
+    await expect(mongoGiftRepository.updateDraft(updated.data, 0, [accessor])).resolves.toBeNull();
     expect(revisions.documents).toHaveLength(2);
   });
 
   it("claims with both anonymous credentials and clears them", async () => {
-    await mongoGiftRepository.createDraft(draft);
+    await mongoGiftRepository.createDraft(draft, idempotency);
 
     await expect(
       mongoGiftRepository.claimDraft(
@@ -166,5 +188,40 @@ describe("Mongo gift repository", () => {
     ).resolves.toMatchObject({
       ownership: { anonymousDraftId: null, claimTokenHash: null, ownerId: "user-1" },
     });
+  });
+
+  it("replays only while actor, request and current ownership still match", async () => {
+    await mongoGiftRepository.createDraft(draft, idempotency);
+
+    await expect(mongoGiftRepository.createDraft(draft, idempotency)).resolves.toMatchObject({
+      gift: { id: draft.id },
+      status: "replayed",
+    });
+    await expect(
+      mongoGiftRepository.createDraft(draft, {
+        ...idempotency,
+        accessor: { isAdmin: false, kind: "user", userId: "other" },
+        actorKey: "user:other",
+      }),
+    ).resolves.toEqual({ status: "conflict" });
+    await expect(
+      mongoGiftRepository.createDraft(draft, {
+        ...idempotency,
+        requestFingerprint: JSON.stringify(["another-template", "1.0.0"]),
+      }),
+    ).resolves.toEqual({ status: "conflict" });
+
+    await mongoGiftRepository.claimDraft(
+      draft.publicId,
+      "user-1",
+      draft.ownership.anonymousDraftId!,
+      draft.ownership.claimTokenHash!,
+      new Date(),
+    );
+    await expect(mongoGiftRepository.createDraft(draft, idempotency)).resolves.toEqual({
+      status: "conflict",
+    });
+    expect(gifts.documents).toHaveLength(1);
+    expect(revisions.documents).toHaveLength(1);
   });
 });

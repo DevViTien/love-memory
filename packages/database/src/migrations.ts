@@ -1,5 +1,6 @@
 import "server-only";
 
+import { isDeepStrictEqual } from "node:util";
 import {
   type CreateIndexesOptions,
   type Db,
@@ -9,7 +10,7 @@ import {
 
 import { COLLECTIONS, type CollectionName } from "./collections";
 
-export const DATABASE_SCHEMA_VERSION = 1;
+export const DATABASE_SCHEMA_VERSION = 3;
 
 type DatabaseMigrationDocument = Readonly<{
   _id: string;
@@ -27,6 +28,16 @@ type CollectionDefinition = Readonly<{
   indexes: readonly IndexDefinition[];
   name: CollectionName;
   validator?: Document;
+}>;
+
+type ExistingIndex = Readonly<{
+  collation?: Document;
+  expireAfterSeconds?: number;
+  key: Document;
+  name?: string;
+  partialFilterExpression?: Document;
+  sparse?: boolean;
+  unique?: boolean;
 }>;
 
 const timestampsValidator = {
@@ -73,6 +84,30 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
   {
     indexes: [{ key: { key: 1 }, options: { name: "auth_rate_limits_key_unique", unique: true } }],
     name: COLLECTIONS.authRateLimits,
+  },
+  {
+    indexes: [
+      {
+        key: { expiresAt: 1 },
+        options: { expireAfterSeconds: 0, name: "api_rate_limits_expiry_ttl" },
+      },
+    ],
+    name: COLLECTIONS.apiRateLimits,
+    validator: {
+      $jsonSchema: {
+        additionalProperties: true,
+        bsonType: "object",
+        properties: {
+          _id: { bsonType: "string" },
+          count: { bsonType: "int", minimum: 1 },
+          expiresAt: { bsonType: "date" },
+          scope: { enum: ["gift-claim", "gift-create", "gift-update"] },
+          subjectHash: { bsonType: "string", pattern: "^[a-f0-9]{64}$" },
+          ...timestampsValidator,
+        },
+        required: ["_id", "count", "scope", "subjectHash", "expiresAt", "createdAt", "updatedAt"],
+      },
+    },
   },
   {
     indexes: [{ key: { status: 1, sortOrder: 1 }, options: { name: "templates_status_order" } }],
@@ -123,7 +158,7 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
         key: { "ownership.ownerId": 1, updatedAt: -1 },
         options: { name: "gifts_owner_updated" },
       },
-      { key: { status: 1, unlockAt: 1 }, options: { name: "gifts_status_unlock" } },
+      { key: { status: 1, "access.unlockAt": 1 }, options: { name: "gifts_status_unlock" } },
       { key: { status: 1, expiresAt: 1 }, options: { name: "gifts_status_expiry" } },
     ],
     name: COLLECTIONS.gifts,
@@ -134,7 +169,26 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
         properties: {
           _id: { bsonType: "string" },
           content: { bsonType: "object" },
-          ownership: { bsonType: "object" },
+          ownership: {
+            bsonType: "object",
+            oneOf: [
+              {
+                properties: {
+                  anonymousDraftId: { bsonType: "string" },
+                  claimTokenHash: { bsonType: "string" },
+                  ownerId: { bsonType: "null" },
+                },
+              },
+              {
+                properties: {
+                  anonymousDraftId: { bsonType: "null" },
+                  claimTokenHash: { bsonType: "null" },
+                  ownerId: { bsonType: "string" },
+                },
+              },
+            ],
+            required: ["anonymousDraftId", "claimTokenHash", "ownerId"],
+          },
           publicId: { bsonType: "string" },
           revision: { bsonType: "int", minimum: 0 },
           status: {
@@ -233,12 +287,25 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
         bsonType: "object",
         properties: {
           _id: { bsonType: "string" },
+          actorKey: { bsonType: "string", minLength: 1 },
           expiresAt: { bsonType: "date" },
+          giftId: { bsonType: "string", minLength: 1 },
           key: { bsonType: "string" },
+          requestFingerprint: { bsonType: "string", minLength: 1 },
           scope: { bsonType: "string" },
           ...timestampsValidator,
         },
-        required: ["_id", "scope", "key", "expiresAt", "createdAt", "updatedAt"],
+        required: [
+          "_id",
+          "actorKey",
+          "giftId",
+          "scope",
+          "key",
+          "requestFingerprint",
+          "expiresAt",
+          "createdAt",
+          "updatedAt",
+        ],
       },
     },
   },
@@ -278,6 +345,17 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
   },
 ] as const;
 
+function indexMatches(existing: ExistingIndex, expected: IndexDefinition): boolean {
+  return (
+    isDeepStrictEqual(existing.key, expected.key) &&
+    Boolean(existing.unique) === Boolean(expected.options.unique) &&
+    Boolean(existing.sparse) === Boolean(expected.options.sparse) &&
+    isDeepStrictEqual(existing.expireAfterSeconds, expected.options.expireAfterSeconds) &&
+    isDeepStrictEqual(existing.partialFilterExpression, expected.options.partialFilterExpression) &&
+    isDeepStrictEqual(existing.collation, expected.options.collation)
+  );
+}
+
 async function ensureCollection(database: Db, definition: CollectionDefinition): Promise<void> {
   const exists = await database
     .listCollections({ name: definition.name }, { nameOnly: true })
@@ -293,7 +371,12 @@ async function ensureCollection(database: Db, definition: CollectionDefinition):
 
   if (definition.indexes.length > 0) {
     const collection = database.collection(definition.name);
+    const existingIndexes = await collection.indexes();
     for (const index of definition.indexes) {
+      const existing = existingIndexes.find((candidate) => candidate.name === index.options.name);
+      if (existing && !indexMatches(existing, index)) {
+        await collection.dropIndex(index.options.name);
+      }
       await collection.createIndex(index.key, index.options);
     }
   }
@@ -316,22 +399,40 @@ export async function runDatabaseMigrations(database: Db): Promise<void> {
 
 export async function verifyDatabaseSchema(database: Db): Promise<void> {
   for (const definition of CORE_COLLECTION_DEFINITIONS) {
-    const exists = await database
-      .listCollections({ name: definition.name }, { nameOnly: true })
-      .hasNext();
+    const collectionInfo = await database
+      .listCollections({ name: definition.name }, { nameOnly: false })
+      .next();
 
-    if (!exists) {
+    if (!collectionInfo) {
       throw new Error(`Missing MongoDB collection: ${definition.name}`);
     }
 
-    const existingIndexNames = new Set(
-      (await database.collection(definition.name).indexes()).map((index) => index.name),
-    );
+    if (
+      definition.validator &&
+      !isDeepStrictEqual(collectionInfo.options?.["validator"], definition.validator)
+    ) {
+      throw new Error(`MongoDB validator mismatch: ${definition.name}`);
+    }
+
+    const existingIndexes = await database.collection(definition.name).indexes();
 
     for (const index of definition.indexes) {
-      if (!existingIndexNames.has(index.options.name)) {
+      const existing = existingIndexes.find((candidate) => candidate.name === index.options.name);
+      if (!existing) {
         throw new Error(`Missing MongoDB index: ${definition.name}.${index.options.name}`);
       }
+      if (!indexMatches(existing, index)) {
+        throw new Error(`MongoDB index mismatch: ${definition.name}.${index.options.name}`);
+      }
     }
+  }
+
+  const migration = await database
+    .collection<DatabaseMigrationDocument>(COLLECTIONS.databaseMigrations)
+    .findOne({ _id: "core" });
+  if (migration?.version !== DATABASE_SCHEMA_VERSION) {
+    throw new Error(
+      `MongoDB schema version mismatch: expected ${DATABASE_SCHEMA_VERSION}, received ${migration?.version ?? "missing"}.`,
+    );
   }
 }

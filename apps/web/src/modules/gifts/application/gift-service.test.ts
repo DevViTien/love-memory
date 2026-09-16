@@ -2,7 +2,12 @@ import { type Gift } from "@love-memory/domain";
 import { parseTemplateManifest } from "@love-memory/template-sdk";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { createGiftService, type GiftAccessor, type GiftRepository } from "./gift-service";
+import {
+  createGiftService,
+  type GiftAccessor,
+  type GiftCreateIdempotency,
+  type GiftRepository,
+} from "./gift-service";
 
 const manifest = parseTemplateManifest({
   budgets: { initialJsKbGzip: 10, initialMediaKb: 0, maxTextureMb: 4 },
@@ -34,9 +39,13 @@ function canAccess(gift: Gift, accessor: GiftAccessor): boolean {
   );
 }
 
-function createMemoryRepository(): GiftRepository & { current: Gift | null } {
+function createMemoryRepository(): GiftRepository & {
+  current: Gift | null;
+  idempotency: GiftCreateIdempotency | null;
+} {
   return {
     current: null,
+    idempotency: null,
     claimDraft(publicId, ownerId, anonymousDraftId, claimTokenHash, now) {
       const gift = this.current;
       if (
@@ -54,21 +63,34 @@ function createMemoryRepository(): GiftRepository & { current: Gift | null } {
       };
       return Promise.resolve(this.current);
     },
-    createDraft(gift) {
+    createDraft(gift, idempotency) {
+      if (this.idempotency?.key === idempotency.key) {
+        return Promise.resolve(
+          this.idempotency.actorKey === idempotency.actorKey &&
+            this.idempotency.requestFingerprint === idempotency.requestFingerprint &&
+            this.current &&
+            canAccess(this.current, idempotency.accessor)
+            ? { gift: this.current, status: "replayed" as const }
+            : { status: "conflict" as const },
+        );
+      }
       this.current = gift;
-      return Promise.resolve();
+      this.idempotency = idempotency;
+      return Promise.resolve({ gift, status: "created" });
     },
-    findAuthorized(publicId, accessor) {
+    findAuthorized(publicId, accessors) {
       const gift = this.current;
       return Promise.resolve(
-        gift?.publicId === publicId && canAccess(gift, accessor) ? gift : null,
+        gift?.publicId === publicId && accessors.some((accessor) => canAccess(gift, accessor))
+          ? gift
+          : null,
       );
     },
-    findByPublicId(publicId) {
-      return Promise.resolve(this.current?.publicId === publicId ? this.current : null);
-    },
-    updateDraft(gift, expectedRevision, accessor) {
-      if (this.current?.revision !== expectedRevision || !canAccess(this.current, accessor)) {
+    updateDraft(gift, expectedRevision, accessors) {
+      if (
+        this.current?.revision !== expectedRevision ||
+        !accessors.some((accessor) => canAccess(this.current!, accessor))
+      ) {
         return Promise.resolve(null);
       }
       this.current = gift;
@@ -95,7 +117,11 @@ describe("gift application service", () => {
       createPublicId: () => "q1w2e3r4t5y6u7i8",
       gifts: repository,
       templates: {
-        findPublishedManifest: (templateId, version) =>
+        findCreatableManifest: (templateId, version) =>
+          Promise.resolve(
+            templateId === manifest.id && version === manifest.version ? manifest : null,
+          ),
+        findEditableManifest: (templateId, version) =>
           Promise.resolve(
             templateId === manifest.id && version === manifest.version ? manifest : null,
           ),
@@ -105,6 +131,7 @@ describe("gift application service", () => {
 
   async function createAnonymousDraft() {
     return service.createDraft({
+      idempotencyKey: "4449d41a-6750-43c1-8dc4-b567ebb20cf2",
       ownerId: null,
       templateId: manifest.id,
       templateVersion: manifest.version,
@@ -124,15 +151,17 @@ describe("gift application service", () => {
   it("authorizes the matching anonymous identity and denies another owner", async () => {
     await createAnonymousDraft();
     const anonymous = await service.getDraft({
-      accessor: {
-        anonymousDraftId: anonymousIdentity.anonymousDraftId,
-        claimTokenHash: anonymousIdentity.claimTokenHash,
-        kind: "anonymous",
-      },
+      accessors: [
+        {
+          anonymousDraftId: anonymousIdentity.anonymousDraftId,
+          claimTokenHash: anonymousIdentity.claimTokenHash,
+          kind: "anonymous",
+        },
+      ],
       publicId: "q1w2e3r4t5y6u7i8",
     });
     const otherUser = await service.getDraft({
-      accessor: { isAdmin: false, kind: "user", userId: "other-user" },
+      accessors: [{ isAdmin: false, kind: "user", userId: "other-user" }],
       publicId: "q1w2e3r4t5y6u7i8",
     });
 
@@ -149,19 +178,19 @@ describe("gift application service", () => {
     };
 
     const saved = await service.updateDraft({
-      accessor,
+      accessors: [accessor],
       content: { headline: "Our story" },
       expectedRevision: 0,
       publicId: "q1w2e3r4t5y6u7i8",
     });
     const stale = await service.updateDraft({
-      accessor,
+      accessors: [accessor],
       content: { headline: "Stale" },
       expectedRevision: 0,
       publicId: "q1w2e3r4t5y6u7i8",
     });
     const invalid = await service.updateDraft({
-      accessor,
+      accessors: [accessor],
       content: { unknown: "not declared" },
       expectedRevision: 1,
       publicId: "q1w2e3r4t5y6u7i8",
@@ -174,6 +203,33 @@ describe("gift application service", () => {
     });
     expect(invalid).toMatchObject({ error: { code: "INVALID_CONTENT" }, ok: false });
     expect(repository.current?.content.data).toEqual({ headline: "Our story" });
+  });
+
+  it("returns an opaque not-found if ownership changes during an update", async () => {
+    await createAnonymousDraft();
+    const accessor: GiftAccessor = {
+      anonymousDraftId: anonymousIdentity.anonymousDraftId,
+      claimTokenHash: anonymousIdentity.claimTokenHash,
+      kind: "anonymous",
+    };
+    repository.updateDraft = () => {
+      repository.current = repository.current
+        ? {
+            ...repository.current,
+            ownership: { anonymousDraftId: null, claimTokenHash: null, ownerId: "user-2" },
+          }
+        : null;
+      return Promise.resolve(null);
+    };
+
+    await expect(
+      service.updateDraft({
+        accessors: [accessor],
+        content: { headline: "Race" },
+        expectedRevision: 0,
+        publicId: "q1w2e3r4t5y6u7i8",
+      }),
+    ).resolves.toEqual({ error: { code: "NOT_FOUND" }, ok: false });
   });
 
   it("claims only with both authenticated user and matching anonymous credentials", async () => {

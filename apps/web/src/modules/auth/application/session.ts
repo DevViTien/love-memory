@@ -6,7 +6,9 @@ const CurrentUserSchema = z
   .object({
     email: z.email(),
     id: z.string().min(1),
-    name: z.string().min(1),
+    // Better Auth's magic-link plugin creates passwordless users with an empty
+    // name when the sign-in form only asks for an email address.
+    name: z.string(),
     role: z.enum(["creator", "admin"]).default("creator"),
   })
   .passthrough();

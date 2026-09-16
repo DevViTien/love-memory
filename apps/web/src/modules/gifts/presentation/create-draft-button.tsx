@@ -12,6 +12,7 @@ export function CreateDraftButton({
 }: Readonly<{ templateId: string; templateVersion: string }>) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
+  const [idempotencyKey] = useState(() => crypto.randomUUID());
   const [isPending, setIsPending] = useState(false);
 
   async function createDraft() {
@@ -21,7 +22,10 @@ export function CreateDraftButton({
     try {
       const response = await fetch("/api/gifts", {
         body: JSON.stringify({ templateId, templateVersion }),
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKey,
+        },
         method: "POST",
       });
       const payload: unknown = await response.json();

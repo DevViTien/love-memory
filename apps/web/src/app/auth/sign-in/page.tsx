@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 };
 
 type SignInPageProps = Readonly<{
-  searchParams: Promise<{ next?: string | string[] }>;
+  searchParams: Promise<{ error?: string | string[]; next?: string | string[] }>;
 }>;
 
 function safeCallbackUrl(value: string | string[] | undefined): string {
@@ -23,8 +23,14 @@ function safeCallbackUrl(value: string | string[] | undefined): string {
 }
 
 export default async function SignInPage({ searchParams }: SignInPageProps) {
+  const query = await searchParams;
   const user = await getCurrentUser(await headers());
-  const callbackUrl = safeCallbackUrl((await searchParams).next);
+  const callbackUrl = safeCallbackUrl(query.next);
+  const rawError = Array.isArray(query.error) ? query.error[0] : query.error;
+  const errorMessage =
+    rawError === "invalid-link"
+      ? "Liên kết đăng nhập không hợp lệ, đã hết hạn hoặc đã được sử dụng. Vui lòng yêu cầu liên kết mới."
+      : null;
 
   return (
     <main>
@@ -40,6 +46,15 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
               : "Nhập email để nhận liên kết dùng một lần. Người nhận quà không cần tạo tài khoản."}
           </p>
           <div className="mt-8">
+            {!user && errorMessage ? (
+              <p
+                aria-live="polite"
+                className="mb-5 rounded-2xl bg-red-50 p-4 text-sm font-semibold text-red-800"
+                role="alert"
+              >
+                {errorMessage}
+              </p>
+            ) : null}
             {user ? <SignOutButton /> : <MagicLinkForm callbackUrl={callbackUrl} />}
           </div>
         </section>

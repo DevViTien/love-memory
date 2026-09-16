@@ -1,5 +1,7 @@
 import "server-only";
 
+import { appendFile, mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
 import { Resend } from "resend";
 
 export type MagicLinkEmail = Readonly<{
@@ -50,4 +52,22 @@ export function createAuthEmailSender(client: EmailClient, from: string): AuthEm
 
 export function createResendAuthEmailSender(apiKey: string, from: string): AuthEmailSender {
   return createAuthEmailSender(new Resend(apiKey), from);
+}
+
+type CaptureWriter = (path: string, message: MagicLinkEmail) => Promise<void>;
+
+const writeCapture: CaptureWriter = async (path, message) => {
+  await mkdir(dirname(path), { recursive: true });
+  await appendFile(path, `${JSON.stringify(message)}\n`, { encoding: "utf8" });
+};
+
+export function createCaptureAuthEmailSender(
+  path: string,
+  writer: CaptureWriter = writeCapture,
+): AuthEmailSender {
+  return {
+    sendMagicLink(message) {
+      return writer(path, message);
+    },
+  };
 }

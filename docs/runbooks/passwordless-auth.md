@@ -40,6 +40,11 @@ the web runtime credential only needs application read/write permissions.
 concurrency and claim behavior against real MongoDB, then removes the draft and its revisions in a
 `finally` cleanup.
 
+Playwright runs automatically suffix the configured database with `_e2e` (unless it already has the
+suffix) and seed that database before starting the production server. `AUTH_EMAIL_CAPTURE_PATH` is
+accepted only when the configured auth URL is loopback, so the file-backed test sender cannot be
+enabled on a deployed environment.
+
 ## Vercel setup
 
 1. Add all four auth variables to Preview first.

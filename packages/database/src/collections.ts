@@ -1,6 +1,7 @@
 export const COLLECTIONS = {
   accounts: "accounts",
   abuseReports: "abuseReports",
+  apiRateLimits: "apiRateLimits",
   assets: "assets",
   authRateLimits: "authRateLimits",
   databaseMigrations: "databaseMigrations",

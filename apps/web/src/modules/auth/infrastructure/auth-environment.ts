@@ -10,6 +10,7 @@ const emailFromSchema = z.string().refine((value) => {
 const AuthEnvironmentSchema = z
   .object({
     APP_URL: z.url().optional(),
+    AUTH_EMAIL_CAPTURE_PATH: z.string().min(1).optional(),
     AUTH_EMAIL_FROM: emailFromSchema,
     BETTER_AUTH_SECRET: z.string().min(32),
     BETTER_AUTH_URL: z.url().optional(),
@@ -23,9 +24,13 @@ const AuthEnvironmentSchema = z
     if (environment.NODE_ENV === "production" && baseUrl.protocol !== "https:" && !isLoopback) {
       throw new Error("BETTER_AUTH_URL must use HTTPS in production.");
     }
+    if (environment.AUTH_EMAIL_CAPTURE_PATH && !isLoopback) {
+      throw new Error("AUTH_EMAIL_CAPTURE_PATH is allowed only for loopback test environments.");
+    }
 
     return {
       baseUrl,
+      capturePath: environment.AUTH_EMAIL_CAPTURE_PATH,
       emailFrom: environment.AUTH_EMAIL_FROM,
       isProduction: environment.NODE_ENV === "production",
       resendApiKey: environment.RESEND_API_KEY,

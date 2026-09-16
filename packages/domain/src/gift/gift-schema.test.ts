@@ -69,4 +69,32 @@ describe("GiftSchema", () => {
 
     expect(result.success).toBe(false);
   });
+
+  it.each([
+    {
+      anonymousDraftId: "2f7d675f-55d2-4e4b-b017-b0e0f9277ac2",
+      claimTokenHash: null,
+      ownerId: "owner-1",
+    },
+    { anonymousDraftId: null, claimTokenHash: "a".repeat(64), ownerId: "owner-1" },
+  ])("rejects owned gifts with residual anonymous credentials", (ownership) => {
+    const result = GiftSchema.safeParse({
+      access: { mode: "unlisted" },
+      content: {
+        data: {},
+        schemaVersion: 1,
+        templateId: "memory-box",
+        templateVersion: "1.0.0",
+      },
+      createdAt: new Date(),
+      id: "7afd9fe9-d30d-41cc-8f9a-0fe907f7df89",
+      ownership,
+      publicId: "q1w2e3r4t5y6u7i8",
+      revision: 0,
+      status: "draft",
+      updatedAt: new Date(),
+    });
+
+    expect(result.success).toBe(false);
+  });
 });

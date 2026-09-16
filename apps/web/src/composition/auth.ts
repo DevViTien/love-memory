@@ -5,13 +5,19 @@ import { COLLECTIONS, getDatabase, getMongoClient } from "@love-memory/database"
 import { betterAuth } from "better-auth/minimal";
 import { magicLink } from "better-auth/plugins";
 
-import { createResendAuthEmailSender } from "@/modules/auth/infrastructure/auth-email-sender";
+import {
+  createCaptureAuthEmailSender,
+  createResendAuthEmailSender,
+} from "@/modules/auth/infrastructure/auth-email-sender";
 import { getAuthEnvironment } from "@/modules/auth/infrastructure/auth-environment";
 
 async function createAuth() {
   const environment = getAuthEnvironment();
   const [database, client] = await Promise.all([getDatabase(), getMongoClient()]);
-  const emailSender = createResendAuthEmailSender(environment.resendApiKey, environment.emailFrom);
+  const emailSender = environment.capturePath
+    ? createCaptureAuthEmailSender(environment.capturePath)
+    : createResendAuthEmailSender(environment.resendApiKey, environment.emailFrom);
+  const magicLinkRateLimit = { max: environment.capturePath ? 100 : 5, window: 300 };
 
   return betterAuth({
     account: { modelName: COLLECTIONS.accounts },
@@ -28,14 +34,14 @@ async function createAuth() {
     plugins: [
       magicLink({
         expiresIn: 600,
-        rateLimit: { max: 5, window: 300 },
+        rateLimit: magicLinkRateLimit,
         sendMagicLink: ({ email, url }) => emailSender.sendMagicLink({ email, url }),
         storeToken: "hashed",
       }),
     ],
     rateLimit: {
       customRules: {
-        "/sign-in/magic-link": { max: 5, window: 300 },
+        "/sign-in/magic-link": magicLinkRateLimit,
       },
       enabled: true,
       max: 60,

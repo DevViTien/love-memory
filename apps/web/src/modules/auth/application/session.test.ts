@@ -36,4 +36,13 @@ describe("authorization helpers", () => {
 
     await expect(sessions.getCurrentUser(new Headers())).resolves.toBeNull();
   });
+
+  it("accepts the empty display name created by passwordless sign-up", async () => {
+    const passwordlessUser = { ...creator, name: "" };
+    const sessions = createSessionService({
+      getSession: () => Promise.resolve({ session: { id: "session-1" }, user: passwordlessUser }),
+    });
+
+    await expect(sessions.getCurrentUser(new Headers())).resolves.toEqual(passwordlessUser);
+  });
 });

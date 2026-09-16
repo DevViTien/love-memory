@@ -9,8 +9,10 @@ import {
   createApiErrorResponse,
   createInvalidBodyResponse,
   readJsonBody,
+  validateJsonMutationRequest,
 } from "@/http/api-response";
 import {
+  enforceGiftMutationRateLimit,
   getGiftRequestContext,
   giftDraftResponse,
   giftServiceErrorResponse,
@@ -40,12 +42,12 @@ export async function GET(request: Request, routeContext: GiftRouteContext): Pro
       return publicId;
     }
 
-    const { accessor } = await getGiftRequestContext(request);
-    if (!accessor) {
+    const { accessors } = await getGiftRequestContext(request);
+    if (accessors.length === 0) {
       return giftServiceErrorResponse({ code: "NOT_FOUND" }, id);
     }
 
-    const result = await giftService.getDraft({ accessor, publicId });
+    const result = await giftService.getDraft({ accessors, publicId });
     return result.ok
       ? giftDraftResponse(result.data, id)
       : giftServiceErrorResponse(result.error, id);
@@ -64,9 +66,20 @@ export async function PATCH(request: Request, routeContext: GiftRouteContext): P
   const id = requestId(request);
 
   try {
+    const rejectedMutation = validateJsonMutationRequest(request, id);
+    if (rejectedMutation) {
+      return rejectedMutation;
+    }
+
     const publicId = await parsePublicId(routeContext, id);
     if (publicId instanceof Response) {
       return publicId;
+    }
+
+    const context = await getGiftRequestContext(request);
+    const rateLimited = await enforceGiftMutationRateLimit(request, context, "gift-update", id);
+    if (rateLimited) {
+      return rateLimited;
     }
 
     const body = await readJsonBody(request, UpdateGiftDraftRequestSchema);
@@ -74,13 +87,13 @@ export async function PATCH(request: Request, routeContext: GiftRouteContext): P
       return createInvalidBodyResponse(body.error, id);
     }
 
-    const { accessor } = await getGiftRequestContext(request);
-    if (!accessor) {
+    const { accessors } = context;
+    if (accessors.length === 0) {
       return giftServiceErrorResponse({ code: "NOT_FOUND" }, id);
     }
 
     const result = await giftService.updateDraft({
-      accessor,
+      accessors,
       content: body.data.content,
       expectedRevision: body.data.expectedRevision,
       publicId,

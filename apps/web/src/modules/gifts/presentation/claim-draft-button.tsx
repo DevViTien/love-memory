@@ -12,19 +12,24 @@ export function ClaimDraftButton({ publicId }: Readonly<{ publicId: string }>) {
   async function claim() {
     setError(null);
     setIsPending(true);
-    const response = await fetch(`/api/gifts/${publicId}/claim`, {
-      body: "{}",
-      headers: { "Content-Type": "application/json" },
-      method: "POST",
-    });
+    try {
+      const response = await fetch(`/api/gifts/${publicId}/claim`, {
+        body: "{}",
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
 
-    if (!response.ok) {
-      setError("Không thể liên kết bản nháp này với tài khoản.");
+      if (!response.ok) {
+        setError("Không thể liên kết bản nháp này với tài khoản.");
+        setIsPending(false);
+        return;
+      }
+
+      router.refresh();
+    } catch {
+      setError("Mất kết nối khi liên kết bản nháp. Vui lòng thử lại.");
       setIsPending(false);
-      return;
     }
-
-    router.refresh();
   }
 
   return (

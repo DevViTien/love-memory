@@ -1,13 +1,19 @@
-import { API_ERROR_CODES, CreateGiftDraftRequestSchema } from "@love-memory/contracts";
+import {
+  API_ERROR_CODES,
+  CreateGiftDraftRequestSchema,
+  GiftIdempotencyKeySchema,
+} from "@love-memory/contracts";
 
 import { giftService } from "@/composition/gifts";
 import {
   createApiErrorResponse,
   createInvalidBodyResponse,
   readJsonBody,
+  validateJsonMutationRequest,
 } from "@/http/api-response";
 import { serializeAnonymousDraftCookie } from "@/modules/gifts/infrastructure/anonymous-draft-identity";
 import {
+  enforceGiftMutationRateLimit,
   getGiftRequestContext,
   giftDraftResponse,
   giftServiceErrorResponse,
@@ -18,14 +24,38 @@ export async function POST(request: Request): Promise<Response> {
   const id = requestId(request);
 
   try {
+    const rejectedMutation = validateJsonMutationRequest(request, id);
+    if (rejectedMutation) {
+      return rejectedMutation;
+    }
+
+    const idempotencyKey = GiftIdempotencyKeySchema.safeParse(
+      request.headers.get("idempotency-key"),
+    );
+    if (!idempotencyKey.success) {
+      return createApiErrorResponse({
+        code: API_ERROR_CODES.validation,
+        fieldErrors: { idempotencyKey: "A UUID Idempotency-Key header is required." },
+        message: "Request headers are invalid.",
+        requestId: id,
+        status: 400,
+      });
+    }
+
+    const context = await getGiftRequestContext(request);
+    const rateLimited = await enforceGiftMutationRateLimit(request, context, "gift-create", id);
+    if (rateLimited) {
+      return rateLimited;
+    }
+
     const body = await readJsonBody(request, CreateGiftDraftRequestSchema);
     if (!body.ok) {
       return createInvalidBodyResponse(body.error, id);
     }
 
-    const context = await getGiftRequestContext(request);
     const result = await giftService.createDraft({
       ...(context.anonymousIdentity ? { anonymousIdentity: context.anonymousIdentity } : {}),
+      idempotencyKey: idempotencyKey.data,
       ownerId: context.userId,
       templateId: body.data.templateId,
       templateVersion: body.data.templateVersion,

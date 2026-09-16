@@ -28,10 +28,12 @@ describe("gift route helpers", () => {
       new Request("https://example.com/api/gifts", { headers: { cookie } }),
     );
 
-    expect(anonymous.accessor).toMatchObject({
-      anonymousDraftId: identity.anonymousDraftId,
-      kind: "anonymous",
-    });
+    expect(anonymous.accessors).toContainEqual(
+      expect.objectContaining({
+        anonymousDraftId: identity.anonymousDraftId,
+        kind: "anonymous",
+      }),
+    );
 
     sessionMocks.getCurrentUser.mockResolvedValue({
       email: "admin@example.com",
@@ -40,7 +42,24 @@ describe("gift route helpers", () => {
       role: "admin",
     });
     const authenticated = await getGiftRequestContext(new Request("https://example.com/api/gifts"));
-    expect(authenticated.accessor).toEqual({ isAdmin: true, kind: "user", userId: "admin-1" });
+    expect(authenticated.accessors).toEqual([{ isAdmin: true, kind: "user", userId: "admin-1" }]);
+  });
+
+  it("keeps both account and anonymous credentials after sign-in", async () => {
+    const identity = createAnonymousDraftIdentity();
+    const cookie = serializeAnonymousDraftCookie(identity).split(";")[0] ?? "";
+    sessionMocks.getCurrentUser.mockResolvedValue({
+      email: "creator@example.com",
+      id: "creator-1",
+      name: "",
+      role: "creator",
+    });
+
+    const context = await getGiftRequestContext(
+      new Request("https://example.com/api/gifts", { headers: { cookie } }),
+    );
+
+    expect(context.accessors.map((accessor) => accessor.kind)).toEqual(["user", "anonymous"]);
   });
 
   it("preserves bounded request ids and creates one for untrusted values", () => {
@@ -58,6 +77,7 @@ describe("gift route helpers", () => {
     [{ code: "NOT_FOUND" } as const, 404],
     [{ code: "NOT_AUTHENTICATED" } as const, 401],
     [{ code: "INVALID_STATE" } as const, 409],
+    [{ code: "IDEMPOTENCY_CONFLICT" } as const, 409],
     [{ code: "INVALID_CONTENT", fieldErrors: { headline: "Too long" } } as const, 400],
     [{ actualRevision: 2, code: "REVISION_CONFLICT", expectedRevision: 1 } as const, 409],
   ])("maps %j to an API response", async (error, status) => {

@@ -7,6 +7,8 @@ import { z } from "zod";
 
 export { PublicGiftIdSchema };
 
+export const GiftIdempotencyKeySchema = z.uuid();
+
 export const CreateGiftDraftRequestSchema = z
   .object({
     templateId: GiftTemplateIdSchema,

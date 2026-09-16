@@ -34,20 +34,30 @@ const draft = createGiftDraft({
   ownerId: null,
   publicId,
 });
+const idempotency = {
+  accessor: anonymousAccessor,
+  actorKey: `anonymous:${anonymousDraftId}`,
+  expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+  key: randomUUID(),
+  requestFingerprint: JSON.stringify([draft.content.templateId, draft.content.templateVersion]),
+  scope: "gift-create" as const,
+};
 
 const database = await getDatabase();
 
 try {
-  await mongoGiftRepository.createDraft(draft);
+  await mongoGiftRepository.createDraft(draft, idempotency);
 
-  const authorized = await mongoGiftRepository.findAuthorized(publicId, anonymousAccessor);
+  const authorized = await mongoGiftRepository.findAuthorized(publicId, [anonymousAccessor]);
   assert(authorized?.id === giftId, "Anonymous authorization did not return the created draft.");
 
-  const denied = await mongoGiftRepository.findAuthorized(publicId, {
-    isAdmin: false,
-    kind: "user",
-    userId: "different-owner",
-  });
+  const denied = await mongoGiftRepository.findAuthorized(publicId, [
+    {
+      isAdmin: false,
+      kind: "user",
+      userId: "different-owner",
+    },
+  ]);
   assert(denied === null, "Owner isolation failed.");
 
   const next = updateGiftDraft(draft, {
@@ -57,10 +67,10 @@ try {
   });
   assert(next.ok, "Domain update failed.");
 
-  const persisted = await mongoGiftRepository.updateDraft(next.data, 0, anonymousAccessor);
+  const persisted = await mongoGiftRepository.updateDraft(next.data, 0, [anonymousAccessor]);
   assert(persisted?.revision === 1, "Optimistic update did not persist revision 1.");
 
-  const stale = await mongoGiftRepository.updateDraft(next.data, 0, anonymousAccessor);
+  const stale = await mongoGiftRepository.updateDraft(next.data, 0, [anonymousAccessor]);
   assert(stale === null, "A stale revision unexpectedly overwrote current content.");
 
   const claimed = await mongoGiftRepository.claimDraft(
@@ -72,6 +82,12 @@ try {
   );
   assert(claimed?.ownership.ownerId === "verification-user", "Draft claim failed.");
 
+  const revokedReplay = await mongoGiftRepository.createDraft(draft, idempotency);
+  assert(
+    revokedReplay.status === "conflict",
+    "Anonymous idempotency replay remained valid after claim.",
+  );
+
   process.stdout.write("Gift persistence verification completed successfully.\n");
 } finally {
   await Promise.all([
@@ -79,6 +95,7 @@ try {
     database
       .collection<{ _id: string; giftId: string }>(COLLECTIONS.giftRevisions)
       .deleteMany({ giftId }),
+    database.collection<{ giftId: string }>(COLLECTIONS.idempotencyKeys).deleteMany({ giftId }),
   ]);
   const client = await getMongoClient().catch(() => undefined);
   await client?.close();

@@ -12,6 +12,18 @@ export type AnonymousDraftIdentity = Readonly<{
   claimTokenHash: string;
 }>;
 
+export type GiftCreateIdempotency = Readonly<{
+  accessor: GiftAccessor;
+  actorKey: string;
+  expiresAt: Date;
+  key: string;
+  requestFingerprint: string;
+  scope: "gift-create";
+}>;
+
+export type GiftCreatePersistenceResult =
+  Readonly<{ gift: Gift; status: "created" | "replayed" }> | Readonly<{ status: "conflict" }>;
+
 export interface GiftRepository {
   claimDraft(
     publicId: string,
@@ -20,19 +32,24 @@ export interface GiftRepository {
     claimTokenHash: string,
     now: Date,
   ): Promise<Gift | null>;
-  createDraft(gift: Gift): Promise<void>;
-  findAuthorized(publicId: string, accessor: GiftAccessor): Promise<Gift | null>;
-  findByPublicId(publicId: string): Promise<Gift | null>;
-  updateDraft(gift: Gift, expectedRevision: number, accessor: GiftAccessor): Promise<Gift | null>;
+  createDraft(gift: Gift, idempotency: GiftCreateIdempotency): Promise<GiftCreatePersistenceResult>;
+  findAuthorized(publicId: string, accessors: readonly GiftAccessor[]): Promise<Gift | null>;
+  updateDraft(
+    gift: Gift,
+    expectedRevision: number,
+    accessors: readonly GiftAccessor[],
+  ): Promise<Gift | null>;
 }
 
 export interface GiftTemplateRepository {
-  findPublishedManifest(templateId: string, version: string): Promise<TemplateManifest | null>;
+  findCreatableManifest(templateId: string, version: string): Promise<TemplateManifest | null>;
+  findEditableManifest(templateId: string, version: string): Promise<TemplateManifest | null>;
 }
 
 export type GiftServiceError = Readonly<
   | { code: "NOT_FOUND" }
   | { code: "NOT_AUTHENTICATED" }
+  | { code: "IDEMPOTENCY_CONFLICT" }
   | { code: "INVALID_CONTENT"; fieldErrors: Readonly<Record<string, string>> }
   | { code: "INVALID_STATE" }
   | { actualRevision: number; code: "REVISION_CONFLICT"; expectedRevision: number }
@@ -55,7 +72,7 @@ export type GiftDraftDto = Readonly<{
 
 export type GiftServiceDependencies = Readonly<{
   clock: () => Date;
-  createAnonymousIdentity: () => AnonymousDraftIdentity;
+  createAnonymousIdentity: (idempotencyKey: string) => AnonymousDraftIdentity;
   createId: () => string;
   createPublicId: () => string;
   gifts: GiftRepository;
@@ -126,6 +143,7 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
     async createDraft(
       input: Readonly<{
         anonymousIdentity?: AnonymousDraftIdentity;
+        idempotencyKey: string;
         ownerId: string | null;
         templateId: string;
         templateVersion: string;
@@ -135,7 +153,7 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
         Readonly<{ anonymousIdentity: AnonymousDraftIdentity | null; gift: GiftDraftDto }>
       >
     > {
-      const manifest = await dependencies.templates.findPublishedManifest(
+      const manifest = await dependencies.templates.findCreatableManifest(
         input.templateId,
         input.templateVersion,
       );
@@ -145,7 +163,14 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
 
       const anonymousIdentity = input.ownerId
         ? null
-        : (input.anonymousIdentity ?? dependencies.createAnonymousIdentity());
+        : (input.anonymousIdentity ?? dependencies.createAnonymousIdentity(input.idempotencyKey));
+      const accessor: GiftAccessor = input.ownerId
+        ? { isAdmin: false, kind: "user", userId: input.ownerId }
+        : {
+            anonymousDraftId: anonymousIdentity!.anonymousDraftId,
+            claimTokenHash: anonymousIdentity!.claimTokenHash,
+            kind: "anonymous",
+          };
       const draft = createGiftDraft({
         anonymousDraftId: anonymousIdentity?.anonymousDraftId ?? null,
         claimTokenHash: anonymousIdentity?.claimTokenHash ?? null,
@@ -161,34 +186,47 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
         publicId: dependencies.createPublicId(),
       });
 
-      await dependencies.gifts.createDraft(draft);
-      return success({ anonymousIdentity, gift: toDto(draft) });
+      const persisted = await dependencies.gifts.createDraft(draft, {
+        accessor,
+        actorKey: input.ownerId
+          ? `user:${input.ownerId}`
+          : `anonymous:${anonymousIdentity!.anonymousDraftId}`,
+        expiresAt: new Date(dependencies.clock().getTime() + 24 * 60 * 60 * 1000),
+        key: input.idempotencyKey,
+        requestFingerprint: JSON.stringify([manifest.id, manifest.version]),
+        scope: "gift-create",
+      });
+      if (persisted.status === "conflict") {
+        return failure({ code: "IDEMPOTENCY_CONFLICT" });
+      }
+
+      return success({ anonymousIdentity, gift: toDto(persisted.gift) });
     },
 
     async getDraft(
       input: Readonly<{
-        accessor: GiftAccessor;
+        accessors: readonly GiftAccessor[];
         publicId: string;
       }>,
     ): Promise<GiftServiceResult<GiftDraftDto>> {
-      const gift = await dependencies.gifts.findAuthorized(input.publicId, input.accessor);
+      const gift = await dependencies.gifts.findAuthorized(input.publicId, input.accessors);
       return gift?.status === "draft" ? success(toDto(gift)) : failure({ code: "NOT_FOUND" });
     },
 
     async updateDraft(
       input: Readonly<{
-        accessor: GiftAccessor;
+        accessors: readonly GiftAccessor[];
         content: Readonly<Record<string, unknown>>;
         expectedRevision: number;
         publicId: string;
       }>,
     ): Promise<GiftServiceResult<GiftDraftDto>> {
-      const gift = await dependencies.gifts.findAuthorized(input.publicId, input.accessor);
+      const gift = await dependencies.gifts.findAuthorized(input.publicId, input.accessors);
       if (!gift) {
         return failure({ code: "NOT_FOUND" });
       }
 
-      const manifest = await dependencies.templates.findPublishedManifest(
+      const manifest = await dependencies.templates.findEditableManifest(
         gift.content.templateId,
         gift.content.templateVersion,
       );
@@ -225,20 +263,24 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
       const persisted = await dependencies.gifts.updateDraft(
         updated.data,
         input.expectedRevision,
-        input.accessor,
+        input.accessors,
       );
       if (persisted) {
         return success(toDto(persisted));
       }
 
-      const current = await dependencies.gifts.findByPublicId(input.publicId);
-      return current
-        ? failure({
-            actualRevision: current.revision,
-            code: "REVISION_CONFLICT",
-            expectedRevision: input.expectedRevision,
-          })
-        : failure({ code: "NOT_FOUND" });
+      const current = await dependencies.gifts.findAuthorized(input.publicId, input.accessors);
+      if (!current) {
+        return failure({ code: "NOT_FOUND" });
+      }
+      if (current.status !== "draft") {
+        return failure({ code: "INVALID_STATE" });
+      }
+      return failure({
+        actualRevision: current.revision,
+        code: "REVISION_CONFLICT",
+        expectedRevision: input.expectedRevision,
+      });
     },
   } as const;
 }

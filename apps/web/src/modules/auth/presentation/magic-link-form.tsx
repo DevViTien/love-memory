@@ -15,15 +15,19 @@ export function MagicLinkForm({ callbackUrl = "/studio/new" }: Readonly<{ callba
     setIsPending(true);
     setState("editing");
 
-    const result = await authClient.signIn.magicLink({
-      callbackURL: callbackUrl,
-      email,
-      errorCallbackURL: "/auth/sign-in?error=invalid-link",
-      newUserCallbackURL: callbackUrl,
-    });
-
-    setIsPending(false);
-    setState(result.error ? "error" : "sent");
+    try {
+      const result = await authClient.signIn.magicLink({
+        callbackURL: callbackUrl,
+        email,
+        errorCallbackURL: "/auth/sign-in?error=invalid-link",
+        newUserCallbackURL: callbackUrl,
+      });
+      setState(result.error ? "error" : "sent");
+    } catch {
+      setState("error");
+    } finally {
+      setIsPending(false);
+    }
   }
 
   if (state === "sent") {

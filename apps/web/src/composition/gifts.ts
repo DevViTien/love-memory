@@ -1,13 +1,15 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { createGiftService } from "@/modules/gifts/application/gift-service";
-import { createAnonymousDraftIdentity } from "@/modules/gifts/infrastructure/anonymous-draft-identity";
+import { getAuthEnvironment } from "@/modules/auth/infrastructure/auth-environment";
+import { createIdempotentAnonymousDraftIdentity } from "@/modules/gifts/infrastructure/anonymous-draft-identity";
 import { mongoGiftRepository } from "@/modules/gifts/infrastructure/mongo-gift-repository";
 import { mongoGiftTemplateRepository } from "@/modules/gifts/infrastructure/mongo-gift-template-repository";
 
 export const giftService = createGiftService({
   clock: () => new Date(),
-  createAnonymousIdentity: createAnonymousDraftIdentity,
+  createAnonymousIdentity: (idempotencyKey) =>
+    createIdempotentAnonymousDraftIdentity(idempotencyKey, getAuthEnvironment().secret),
   createId: randomUUID,
   createPublicId: () => randomBytes(18).toString("base64url"),
   gifts: mongoGiftRepository,
@@ -15,5 +17,5 @@ export const giftService = createGiftService({
 });
 
 export function getGiftTemplateManifest(templateId: string, version: string) {
-  return mongoGiftTemplateRepository.findPublishedManifest(templateId, version);
+  return mongoGiftTemplateRepository.findEditableManifest(templateId, version);
 }

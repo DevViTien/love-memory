@@ -24,26 +24,9 @@ export default async function StudioDraftPage({ params }: StudioDraftPageProps) 
     new Request("http://love-memory.local/studio", { headers: requestHeaders }),
   );
 
-  const accessors = [
-    context.accessor,
-    context.anonymousIdentity
-      ? {
-          anonymousDraftId: context.anonymousIdentity.anonymousDraftId,
-          claimTokenHash: context.anonymousIdentity.claimTokenHash,
-          kind: "anonymous" as const,
-        }
-      : null,
-  ].filter((accessor) => accessor !== null);
+  const result = await giftService.getDraft({ accessors: context.accessors, publicId });
 
-  let result: Awaited<ReturnType<typeof giftService.getDraft>> | null = null;
-  for (const accessor of accessors) {
-    result = await giftService.getDraft({ accessor, publicId });
-    if (result.ok) {
-      break;
-    }
-  }
-
-  if (!result?.ok) {
+  if (!result.ok) {
     notFound();
   }
 

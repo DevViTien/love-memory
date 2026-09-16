@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 
 import { z } from "zod";
 
@@ -32,6 +32,32 @@ export function createAnonymousDraftIdentity(): AnonymousDraftIdentity {
   const claimToken = randomBytes(32).toString("base64url");
   return {
     anonymousDraftId: randomUUID(),
+    claimToken,
+    claimTokenHash: hashClaimToken(claimToken),
+  };
+}
+
+function deterministicUuid(bytes: Buffer): string {
+  const value = Buffer.from(bytes.subarray(0, 16));
+  value[6] = (value[6]! & 0x0f) | 0x40;
+  value[8] = (value[8]! & 0x3f) | 0x80;
+  const hex = value.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export function createIdempotentAnonymousDraftIdentity(
+  idempotencyKey: string,
+  secret: string,
+): AnonymousDraftIdentity {
+  const anonymousDraftId = deterministicUuid(
+    createHmac("sha256", secret).update(`gift-draft-id:${idempotencyKey}`).digest(),
+  );
+  const claimToken = createHmac("sha256", secret)
+    .update(`gift-claim-token:${idempotencyKey}`)
+    .digest("base64url");
+
+  return {
+    anonymousDraftId,
     claimToken,
     claimTokenHash: hashClaimToken(claimToken),
   };

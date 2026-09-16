@@ -11,11 +11,19 @@ type TemplateVersionDocument = Readonly<{
 }>;
 
 export const mongoGiftTemplateRepository: GiftTemplateRepository = {
-  async findPublishedManifest(templateId, version) {
+  async findCreatableManifest(templateId, version) {
     const database = await getDatabase();
     const document = await database
       .collection<TemplateVersionDocument>(COLLECTIONS.templateVersions)
       .findOne({ status: "published", templateId, version });
+
+    return document ? parseTemplateManifest(document.manifest) : null;
+  },
+  async findEditableManifest(templateId, version) {
+    const database = await getDatabase();
+    const document = await database
+      .collection<TemplateVersionDocument>(COLLECTIONS.templateVersions)
+      .findOne({ status: { $in: ["published", "retired"] }, templateId, version });
 
     return document ? parseTemplateManifest(document.manifest) : null;
   },

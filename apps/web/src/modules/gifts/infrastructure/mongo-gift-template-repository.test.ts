@@ -37,12 +37,18 @@ describe("Mongo gift template repository", () => {
     });
   });
 
-  it("returns only an exact published template version", async () => {
+  it("returns only an exact published template version for new drafts", async () => {
     await expect(
-      mongoGiftTemplateRepository.findPublishedManifest("memory-box", "1.0.0"),
+      mongoGiftTemplateRepository.findCreatableManifest("memory-box", "1.0.0"),
     ).resolves.toMatchObject({ id: "memory-box", version: "1.0.0" });
     await expect(
-      mongoGiftTemplateRepository.findPublishedManifest("memory-box", "2.0.0"),
+      mongoGiftTemplateRepository.findCreatableManifest("memory-box", "2.0.0"),
     ).resolves.toBeNull();
+  });
+
+  it("allows immutable retired versions when editing an existing draft", async () => {
+    await expect(
+      mongoGiftTemplateRepository.findEditableManifest("memory-box", "1.0.0"),
+    ).resolves.toMatchObject({ id: "memory-box", version: "1.0.0" });
   });
 });

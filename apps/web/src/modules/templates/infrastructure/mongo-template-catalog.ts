@@ -10,6 +10,13 @@ type TemplateVersionDocument = Readonly<{
   version: string;
 }>;
 
+type TemplateDocument = Readonly<{
+  _id: string;
+  currentVersion: string;
+  sortOrder: number;
+  status: "draft" | "published" | "retired";
+}>;
+
 function toSummary(document: TemplateVersionDocument): TemplateSummary {
   const manifest = parseTemplateManifest(document.manifest);
   const imageField = manifest.fields.find((field) => field.type === "imageList");
@@ -30,20 +37,47 @@ function toSummary(document: TemplateVersionDocument): TemplateSummary {
 export const mongoTemplateCatalog: TemplateCatalog = {
   async findPublishedById(id) {
     const database = await getDatabase();
+    const template = await database
+      .collection<TemplateDocument>(COLLECTIONS.templates)
+      .findOne({ _id: id, status: "published" });
+    if (!template) {
+      return undefined;
+    }
+
     const document = await database
       .collection<TemplateVersionDocument>(COLLECTIONS.templateVersions)
-      .findOne({ status: "published", templateId: id });
+      .findOne({ status: "published", templateId: id, version: template.currentVersion });
 
     return document ? toSummary(document) : undefined;
   },
   async listPublished() {
     const database = await getDatabase();
-    const documents = await database
-      .collection<TemplateVersionDocument>(COLLECTIONS.templateVersions)
+    const templates = await database
+      .collection<TemplateDocument>(COLLECTIONS.templates)
       .find({ status: "published" })
-      .sort({ templateId: 1 })
+      .sort({ sortOrder: 1, _id: 1 })
       .toArray();
+    if (templates.length === 0) {
+      return [];
+    }
 
-    return documents.map(toSummary);
+    const versions = await database
+      .collection<TemplateVersionDocument>(COLLECTIONS.templateVersions)
+      .find({
+        $or: templates.map((template) => ({
+          templateId: template._id,
+          version: template.currentVersion,
+        })),
+        status: "published",
+      })
+      .toArray();
+    const currentVersions = new Map(
+      versions.map((document) => [`${document.templateId}@${document.version}`, document]),
+    );
+
+    return templates.flatMap((template) => {
+      const document = currentVersions.get(`${template._id}@${template.currentVersion}`);
+      return document ? [toSummary(document)] : [];
+    });
   },
 };

@@ -49,10 +49,15 @@ export const GiftOwnershipSchema = z
   .strict()
   .superRefine((ownership, context) => {
     const isAnonymous = ownership.ownerId === null;
-    const hasAnonymousCredentials =
+    const hasAllAnonymousCredentials =
       ownership.anonymousDraftId !== null && ownership.claimTokenHash !== null;
+    const hasAnyAnonymousCredential =
+      ownership.anonymousDraftId !== null || ownership.claimTokenHash !== null;
 
-    if (isAnonymous !== hasAnonymousCredentials) {
+    if (
+      (isAnonymous && !hasAllAnonymousCredentials) ||
+      (!isAnonymous && hasAnyAnonymousCredential)
+    ) {
       context.addIssue({
         code: "custom",
         message:

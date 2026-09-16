@@ -39,4 +39,17 @@ describe("auth environment", () => {
       }).baseUrl.origin,
     ).toBe("http://127.0.0.1:3100");
   });
+
+  it("allows email capture only for loopback browser tests", () => {
+    expect(
+      parseAuthEnvironment({
+        ...valid,
+        AUTH_EMAIL_CAPTURE_PATH: ".tmp/auth.jsonl",
+        BETTER_AUTH_URL: "http://127.0.0.1:3100",
+      }).capturePath,
+    ).toBe(".tmp/auth.jsonl");
+    expect(() =>
+      parseAuthEnvironment({ ...valid, AUTH_EMAIL_CAPTURE_PATH: ".tmp/auth.jsonl" }),
+    ).toThrow("loopback");
+  });
 });

@@ -9,8 +9,10 @@ import {
   createApiErrorResponse,
   createInvalidBodyResponse,
   readJsonBody,
+  validateJsonMutationRequest,
 } from "@/http/api-response";
 import {
+  enforceGiftMutationRateLimit,
   getGiftRequestContext,
   giftDraftResponse,
   giftServiceErrorResponse,
@@ -23,9 +25,20 @@ export async function POST(request: Request, routeContext: ClaimRouteContext): P
   const id = requestId(request);
 
   try {
+    const rejectedMutation = validateJsonMutationRequest(request, id);
+    if (rejectedMutation) {
+      return rejectedMutation;
+    }
+
     const publicId = PublicGiftIdSchema.safeParse((await routeContext.params).publicId);
     if (!publicId.success) {
       return giftServiceErrorResponse({ code: "NOT_FOUND" }, id);
+    }
+
+    const context = await getGiftRequestContext(request);
+    const rateLimited = await enforceGiftMutationRateLimit(request, context, "gift-claim", id);
+    if (rateLimited) {
+      return rateLimited;
     }
 
     const body = await readJsonBody(request, ClaimGiftDraftRequestSchema);
@@ -33,7 +46,6 @@ export async function POST(request: Request, routeContext: ClaimRouteContext): P
       return createInvalidBodyResponse(body.error, id);
     }
 
-    const context = await getGiftRequestContext(request);
     const result = await giftService.claimDraft({
       anonymousDraftId: context.anonymousIdentity?.anonymousDraftId ?? null,
       claimTokenHash: context.anonymousIdentity?.claimTokenHash ?? null,
