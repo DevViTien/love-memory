@@ -10,7 +10,7 @@
 | Preview configuration leaks production data/secrets         | Medium      | Critical | prod URI/bucket reused in PR           | Separate Atlas DB/bucket prefix, Vercel environment scope, no secret logs                    | Preview-scoped setup verified 2026-09-16           |
 | Gift schema becomes arbitrary                               | Medium      | High     | duplicate validators/invariants        | Zod canonical schemas, repository boundary, migrations                                       | Foundation in place                                |
 | Template bundle grows with each design                      | High        | High     | Viewer JS/media regression             | Independent workspace, measured manifest budgets, CI failure                                 | Gate in place                                      |
-| Auth implementation permits IDOR                            | Medium      | Critical | route-only UI checks                   | Better Auth ADR, DAL, ownership in application use cases, authorization tests                | Sprint 1 gate                                      |
+| Auth implementation permits IDOR                            | Medium      | Critical | route-only UI checks                   | Better Auth ADR, DAL, authorization in Mongo filters, opaque 404s and claim-token hash       | Unit + live owner-isolation pass 2026-09-16        |
 | Browser support is inferred from emulation                  | High        | High     | desktop green/mobile field failures    | Physical-device matrix before Viewer exit/pilot                                              | Explicitly deferred, not closed                    |
 
 Risk owner is the Tech Lead until a sprint story assigns a named owner. A risk may be closed only by

@@ -2,7 +2,7 @@ import { parseTemplateManifest, TEMPLATE_ENGINE_VERSION } from "@love-memory/tem
 
 import { type TemplateCatalog, type TemplateSummary } from "../domain/template-summary";
 
-const manifests = [
+export const seedTemplateManifests = [
   parseTemplateManifest({
     budgets: { initialJsKbGzip: 120, initialMediaKb: 700, maxTextureMb: 32 },
     capabilities: ["audio", "dom"],
@@ -116,7 +116,7 @@ const manifests = [
 ] as const;
 
 const templates = Object.freeze(
-  manifests.map<TemplateSummary>((manifest) => {
+  seedTemplateManifests.map<TemplateSummary>((manifest) => {
     const imageField = manifest.fields.find((field) => field.type === "imageList");
 
     return {
@@ -135,9 +135,9 @@ const templates = Object.freeze(
 
 export const seedTemplateCatalog: TemplateCatalog = {
   findPublishedById(id) {
-    return templates.find((template) => template.id === id);
+    return Promise.resolve(templates.find((template) => template.id === id));
   },
   listPublished() {
-    return templates;
+    return Promise.resolve(templates);
   },
 };

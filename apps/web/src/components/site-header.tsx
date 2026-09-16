@@ -20,6 +20,12 @@ export function SiteHeader() {
           >
             Template
           </Link>
+          <Link
+            className="hidden px-3 py-2 text-sm font-semibold text-stone-600 hover:text-rose-700 sm:block"
+            href={{ pathname: ROUTES.authSignIn }}
+          >
+            Đăng nhập
+          </Link>
           <Link className={buttonVariants({ size: "sm" })} href={ROUTES.studioNew}>
             Tạo kỷ niệm
           </Link>

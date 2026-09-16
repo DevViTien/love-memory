@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { describe, expect, it } from "vitest";
 
-import { createApiSuccessResponse, createInvalidBodyResponse, readJsonBody } from "./api-response";
+import {
+  createApiSuccessResponse,
+  createInvalidBodyResponse,
+  readJsonBody,
+  validateJsonMutationRequest,
+} from "./api-response";
 
 describe("API response helpers", () => {
   it("parses and validates JSON bodies", async () => {
@@ -9,11 +14,102 @@ describe("API response helpers", () => {
       readJsonBody(
         new Request("https://example.test", {
           body: JSON.stringify({ name: "An" }),
+          headers: { "content-type": "application/json" },
           method: "POST",
         }),
         z.object({ name: z.string().min(1) }),
       ),
     ).resolves.toEqual({ data: { name: "An" }, ok: true });
+  });
+
+  it("requires JSON and rejects cross-origin browser mutations", () => {
+    expect(
+      validateJsonMutationRequest(
+        new Request("https://love.example.test/api/gifts", {
+          body: "{}",
+          headers: { "content-type": "text/plain" },
+          method: "POST",
+        }),
+        "request-1",
+      )?.status,
+    ).toBe(415);
+    expect(
+      validateJsonMutationRequest(
+        new Request("https://love.example.test/api/gifts", {
+          body: "{}",
+          headers: {
+            "content-type": "application/json",
+            origin: "https://attacker.example.test",
+            "sec-fetch-site": "same-site",
+          },
+          method: "POST",
+        }),
+        "request-1",
+      )?.status,
+    ).toBe(403);
+    expect(
+      validateJsonMutationRequest(
+        new Request("https://love.example.test/api/gifts", {
+          body: "{}",
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            origin: "https://love.example.test",
+            "sec-fetch-site": "same-origin",
+          },
+          method: "POST",
+        }),
+        "request-1",
+      ),
+    ).toBeNull();
+    expect(
+      validateJsonMutationRequest(
+        new Request("http://internal:3000/api/gifts", {
+          body: "{}",
+          headers: {
+            "content-type": "application/json",
+            host: "love.example.test",
+            origin: "https://love.example.test",
+            "sec-fetch-site": "same-origin",
+            "x-forwarded-proto": "https",
+          },
+          method: "POST",
+        }),
+        "request-1",
+      ),
+    ).toBeNull();
+    expect(
+      validateJsonMutationRequest(
+        new Request("http://internal:3000/api/gifts", {
+          body: "{}",
+          headers: {
+            "content-type": "application/json",
+            host: "internal:3000",
+            origin: "https://love.example.test",
+            "sec-fetch-site": "same-origin",
+            "x-forwarded-host": "LOVE.EXAMPLE.TEST:443",
+            "x-forwarded-proto": "https",
+          },
+          method: "POST",
+        }),
+        "request-1",
+      ),
+    ).toBeNull();
+    expect(
+      validateJsonMutationRequest(
+        new Request("http://internal:3000/api/gifts", {
+          body: "{}",
+          headers: {
+            "content-type": "application/json",
+            origin: "https://love.example.test",
+            "sec-fetch-site": "same-origin",
+            "x-forwarded-host": "invalid host",
+            "x-forwarded-proto": "https",
+          },
+          method: "POST",
+        }),
+        "request-1",
+      )?.status,
+    ).toBe(403);
   });
 
   it("normalizes malformed and invalid bodies", async () => {

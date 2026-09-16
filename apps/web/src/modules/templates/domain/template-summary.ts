@@ -12,6 +12,6 @@ export type TemplateSummary = Readonly<{
 }>;
 
 export interface TemplateCatalog {
-  findPublishedById(id: string): TemplateSummary | undefined;
-  listPublished(): readonly TemplateSummary[];
+  findPublishedById(id: string): Promise<TemplateSummary | undefined>;
+  listPublished(): Promise<readonly TemplateSummary[]>;
 }

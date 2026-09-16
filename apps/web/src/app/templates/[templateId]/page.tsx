@@ -4,22 +4,18 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { getPublishedTemplateById, getPublishedTemplates } from "@/composition/templates";
+import { getPublishedTemplateById } from "@/composition/templates";
 import { toTemplateCardViewModel } from "@/modules/templates/presentation/template-card-view-model";
 
 type TemplateDetailPageProps = Readonly<{
   params: Promise<{ templateId: string }>;
 }>;
 
-export function generateStaticParams() {
-  return getPublishedTemplates().map((template) => ({
-    templateId: template.id,
-  }));
-}
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: TemplateDetailPageProps): Promise<Metadata> {
   const { templateId } = await params;
-  const template = getPublishedTemplateById(templateId);
+  const template = await getPublishedTemplateById(templateId);
 
   if (!template) {
     return { title: "Không tìm thấy template" };
@@ -33,7 +29,7 @@ export async function generateMetadata({ params }: TemplateDetailPageProps): Pro
 
 export default async function TemplateDetailPage({ params }: TemplateDetailPageProps) {
   const { templateId } = await params;
-  const template = getPublishedTemplateById(templateId);
+  const template = await getPublishedTemplateById(templateId);
 
   if (!template) {
     notFound();

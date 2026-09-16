@@ -39,6 +39,26 @@ jobs:
     needs: quality
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      AUTH_EMAIL_CAPTURE_PATH: .tmp/e2e-auth-emails.jsonl
+      AUTH_EMAIL_FROM: LoveMemory <hello@example.com>
+      BETTER_AUTH_SECRET: playwright-secret-with-at-least-32-characters
+      BETTER_AUTH_URL: http://127.0.0.1:3100
+      MONGODB_DATABASE: love_memory_e2e
+      MONGODB_URI: mongodb://127.0.0.1:27017/?replicaSet=rs0&directConnection=true
+      RESEND_API_KEY: re_playwright_not_used
+    services:
+      mongodb:
+        image: mongo:8.0
+        ports:
+          - 27017:27017
+        options: >-
+          --replSet rs0
+          --bind_ip_all
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
@@ -49,5 +69,17 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Initialize MongoDB replica set
+        run: |
+          docker exec ${{ job.services.mongodb.id }} mongosh --quiet --eval 'rs.initiate({_id:"rs0",members:[{_id:0,host:"127.0.0.1:27017"}]})'
+          for attempt in {1..30}; do
+            if docker exec ${{ job.services.mongodb.id }} mongosh --quiet --eval 'quit(db.hello().isWritablePrimary ? 0 : 1)'; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
       - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm db:seed
+      - run: pnpm db:verify-gifts
       - run: pnpm test:e2e

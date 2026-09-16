@@ -11,8 +11,10 @@ const productPromises = [
   "Xem đẹp trên điện thoại",
 ] as const;
 
-export default function HomePage() {
-  const templates = getPublishedTemplates();
+export const dynamic = "force-dynamic";
+
+export default async function HomePage() {
+  const templates = await getPublishedTemplates();
 
   return (
     <main>

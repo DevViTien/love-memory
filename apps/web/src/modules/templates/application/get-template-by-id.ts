@@ -1,5 +1,8 @@
 import { type TemplateCatalog, type TemplateSummary } from "../domain/template-summary";
 
-export function getTemplateById(catalog: TemplateCatalog, id: string): TemplateSummary | undefined {
+export async function getTemplateById(
+  catalog: TemplateCatalog,
+  id: string,
+): Promise<TemplateSummary | undefined> {
   return catalog.findPublishedById(id);
 }

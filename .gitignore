@@ -10,6 +10,7 @@ coverage/
 dist/
 playwright-report/
 test-results/
+.tmp/
 *.tsbuildinfo
 apps/web/next-env.d.ts
 

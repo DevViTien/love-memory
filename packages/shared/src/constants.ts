@@ -6,6 +6,7 @@ export const APP_CONFIG = {
 } as const;
 
 export const ROUTES = {
+  authSignIn: "/auth/sign-in",
   health: "/api/health",
   home: "/",
   studioNew: "/studio/new",

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { parseTemplateManifest } from "./manifest";
-import { parseTemplatePayload } from "./payload";
+import { parseTemplateDraftPayload, parseTemplatePayload } from "./payload";
 
 const manifest = parseTemplateManifest({
   budgets: { initialJsKbGzip: 20, initialMediaKb: 100, maxTextureMb: 16 },
@@ -63,5 +63,11 @@ describe("template payload schema", () => {
       }),
     ).toThrow();
     expect(() => parseTemplatePayload(manifest, { photos: [], title: "Memory" })).toThrow();
+  });
+
+  it("allows incomplete draft data while validating supplied fields", () => {
+    expect(parseTemplateDraftPayload(manifest, {})).toEqual({});
+    expect(() => parseTemplateDraftPayload(manifest, { title: "" })).toThrow();
+    expect(() => parseTemplateDraftPayload(manifest, { unknown: "value" })).toThrow();
   });
 });
