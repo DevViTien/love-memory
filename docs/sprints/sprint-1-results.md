@@ -23,6 +23,7 @@ Branch: `feat/sprint-1-core-domain-auth`
 ## Verification
 
 - MongoDB migration and seed completed against the configured Atlas development database.
+- The Vercel branch Preview uses a separately migrated and seeded `love_memory_preview` database.
 - `db:verify` confirmed all required collections and named indexes.
 - `db:verify-gifts` passed against Atlas: anonymous owner access, cross-owner denial, revision 0 to 1,
   stale-write rejection and authenticated claim. Temporary documents were removed in `finally`.
@@ -31,10 +32,14 @@ Branch: `feat/sprint-1-core-domain-auth`
 - Chromium desktop/mobile production smoke: 12 tests passed.
 - Installed Chrome on Windows production smoke: 6 tests passed.
 - Production Next.js build, TypeScript, ESLint, Prettier, dependency audit and secret scan passed.
+- Passwordless delivery was verified on the protected Vercel Preview with Resend's
+  `onboarding@resend.dev` test sender. Runtime logs confirmed the sign-in request, magic-link
+  callback and redirect to `/studio/new` without server errors.
 
-## External configuration still required
+## Known Preview limitation
 
-Passwordless delivery cannot be verified live until Preview has `BETTER_AUTH_URL`,
-`BETTER_AUTH_SECRET`, `AUTH_EMAIL_FROM` and `RESEND_API_KEY`. The sender domain must be verified by
-the email provider. Follow [the passwordless runbook](../runbooks/passwordless-auth.md), then test
-single use, expiry and logout in Preview before calling the authentication deliverable complete.
+The shared `resend.dev` test sender can send only to the email address associated with the Resend
+account, and the verification email landed in Gmail Spam during the live check. Production still
+requires a verified sender domain and separate Production auth secret, database and environment
+configuration. Follow [the passwordless runbook](../runbooks/passwordless-auth.md) before promoting
+the authentication flow to Production.
