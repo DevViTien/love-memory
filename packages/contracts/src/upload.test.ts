@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   UPLOAD_LIMITS,
+  UploadCleanupResponseSchema,
   UploadCompleteResponseSchema,
   UploadInitRequestSchema,
   UploadInitResponseSchema,
@@ -54,5 +55,9 @@ describe("upload contracts", () => {
         },
       }).data.contentType,
     ).toBe("image/webp");
+
+    expect(
+      UploadCleanupResponseSchema.parse({ data: { assetId, deleted: true } }).data.deleted,
+    ).toBe(true);
   });
 });

@@ -1,4 +1,4 @@
-import { writeFile, unlink } from "node:fs/promises";
+import { unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -6,6 +6,7 @@ import { chromium } from "@playwright/test";
 
 const baseUrl = new URL(process.env.LIVE_SPIKE_BASE_URL ?? "http://localhost:3000");
 const token = process.env.TECHNICAL_SPIKE_TOKEN;
+const protectionBypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
 
 if (!token || token.length < 24) {
   throw new Error("TECHNICAL_SPIKE_TOKEN with at least 24 characters is required.");
@@ -17,7 +18,25 @@ const onePixelPng = Buffer.from(
   "base64",
 );
 const authorization = { authorization: `Bearer ${token}` };
+const deploymentHeaders = protectionBypass
+  ? { "x-vercel-protection-bypass": protectionBypass }
+  : {};
+const authenticatedHeaders = { ...authorization, ...deploymentHeaders };
 const browser = await chromium.launch();
+
+function isBlobRequest(urlValue) {
+  const url = new URL(urlValue);
+  return (
+    url.hostname === "blob.vercel-storage.com" ||
+    url.hostname.endsWith(".blob.vercel-storage.com") ||
+    (url.hostname === "vercel.com" && url.pathname.startsWith("/api/blob/"))
+  );
+}
+
+function isResponseFor(response, pathname) {
+  const url = new URL(response.url());
+  return url.origin === baseUrl.origin && url.pathname === pathname;
+}
 
 function requireSuccessfulResponse(response, label) {
   if (!response.ok()) {
@@ -25,18 +44,35 @@ function requireSuccessfulResponse(response, label) {
   }
 }
 
+let assetId;
+let context;
+let runFailure;
+let verificationResult;
+
 try {
   await writeFile(imagePath, onePixelPng, { flag: "wx" });
 
-  const context = await browser.newContext();
-  const health = await context.request.get(new URL("/api/health", baseUrl).toString());
+  context = await browser.newContext();
+  if (protectionBypass) {
+    await context.route(`${baseUrl.origin}/**`, async (route) => {
+      await route.continue({
+        headers: { ...route.request().headers(), ...deploymentHeaders },
+      });
+    });
+  }
+
+  const health = await context.request.get(new URL("/api/health", baseUrl).toString(), {
+    headers: deploymentHeaders,
+  });
   requireSuccessfulResponse(health, "Liveness check");
 
-  const readiness = await context.request.get(new URL("/api/health/ready", baseUrl).toString());
+  const readiness = await context.request.get(new URL("/api/health/ready", baseUrl).toString(), {
+    headers: deploymentHeaders,
+  });
   requireSuccessfulResponse(readiness, "Readiness check");
 
   const mongo = await context.request.post(new URL("/api/spikes/mongodb", baseUrl).toString(), {
-    headers: authorization,
+    headers: authenticatedHeaders,
   });
   requireSuccessfulResponse(mongo, "MongoDB spike");
   const mongoBody = await mongo.json();
@@ -62,14 +98,12 @@ try {
     }
   });
   page.on("requestfailed", (request) => {
-    const hostname = new URL(request.url()).hostname;
-    if (hostname.endsWith(".blob.vercel-storage.com")) {
+    if (isBlobRequest(request.url())) {
       blobRequestFailure = request.failure()?.errorText;
     }
   });
   page.on("response", (response) => {
-    const hostname = new URL(response.url()).hostname;
-    if (hostname.endsWith(".blob.vercel-storage.com")) {
+    if (isBlobRequest(response.url())) {
       blobResponses.push({ method: response.request().method(), status: response.status() });
     }
   });
@@ -79,7 +113,21 @@ try {
   const uploadSection = page.locator("section").filter({
     has: page.getByRole("heading", { name: /Vercel Blob direct upload/ }),
   });
+  const initResponsePromise = page.waitForResponse((response) =>
+    isResponseFor(response, "/api/spikes/uploads/init"),
+  );
+  const completeResponsePromise = page.waitForResponse((response) =>
+    isResponseFor(response, "/api/spikes/uploads/complete"),
+  );
   await uploadSection.locator('input[type="file"]').setInputFiles(imagePath);
+
+  const initResponse = await initResponsePromise;
+  requireSuccessfulResponse(initResponse, "Upload initialization");
+  const initBody = await initResponse.json();
+  assetId = initBody?.data?.assetId;
+  if (typeof assetId !== "string") {
+    throw new Error("Upload initialization did not return an asset ID.");
+  }
 
   const downloadLink = uploadSection.locator('a[target="_blank"]');
   const uploadStatus = uploadSection.locator('p[aria-live="polite"]');
@@ -108,6 +156,13 @@ try {
     );
   }
 
+  const completeResponse = await completeResponsePromise;
+  requireSuccessfulResponse(completeResponse, "Upload completion");
+  const completeBody = await completeResponse.json();
+  if (completeBody?.data?.assetId !== assetId) {
+    throw new Error("Upload completion returned an unexpected asset ID.");
+  }
+
   const downloadUrl = await downloadLink.getAttribute("href");
   if (!downloadUrl) {
     throw new Error("Blob spike did not return a signed download URL.");
@@ -122,17 +177,52 @@ try {
     throw new Error("Signed download did not return a non-empty WebP derivative.");
   }
 
-  process.stdout.write(
-    `${JSON.stringify({
-      blobBrowserUpload: "pass",
-      derivativeBytes: downloadBytes.length,
-      derivativeContentType: downloadContentType,
-      health: "pass",
-      mongo: "pass",
-      readiness: "pass",
-    })}\n`,
-  );
+  verificationResult = {
+    blobBrowserUpload: "pass",
+    derivativeBytes: downloadBytes.length,
+    derivativeContentType: downloadContentType,
+    health: "pass",
+    mongo: "pass",
+    readiness: "pass",
+  };
+} catch (error) {
+  runFailure = error;
+  throw error;
 } finally {
+  let cleanupFailure;
+
+  if (context && assetId) {
+    try {
+      const cleanup = await context.request.post(
+        new URL("/api/spikes/uploads/cleanup", baseUrl).toString(),
+        {
+          data: { assetId },
+          headers: authenticatedHeaders,
+        },
+      );
+      requireSuccessfulResponse(cleanup, "Spike object cleanup");
+    } catch (error) {
+      cleanupFailure = error;
+    }
+  }
+
+  await context?.close();
   await browser.close();
   await unlink(imagePath).catch(() => undefined);
+
+  if (cleanupFailure) {
+    if (runFailure) {
+      process.stderr.write(
+        "Spike object cleanup also failed; inspect the request IDs in server logs.\n",
+      );
+    } else {
+      throw cleanupFailure;
+    }
+  }
+}
+
+if (verificationResult) {
+  process.stdout.write(
+    `${JSON.stringify({ ...verificationResult, spikeObjectCleanup: "pass" })}\n`,
+  );
 }

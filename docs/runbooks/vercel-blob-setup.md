@@ -54,7 +54,9 @@ Blob credentials with `NEXT_PUBLIC_`; use `vercel env pull` rather than copying 
 4. Confirm direct upload, server validation, WebP derivative and expiring signed preview all pass.
 5. Run the MongoDB probe.
 6. In Vercel Preview, repeat the upload and confirm functions authenticate through OIDC.
-7. Confirm logs contain request IDs and error names only—never tokens, signed URLs, filenames or
+7. Run `pnpm test:spikes` for automated verification; the command removes its source and derivative
+   test objects before exiting.
+8. Confirm logs contain request IDs and error names only—never tokens, signed URLs, filenames or
    gift content.
 
 If Blob fails, turn `TECHNICAL_SPIKES_ENABLED` off. Existing objects remain private. If a static

@@ -55,6 +55,7 @@ describe("content security policy", () => {
     ["/templates/memory-box", "static"],
     ["/studio", "nonce"],
     ["/studio/new", "nonce"],
+    ["/g/a-public-gift-slug", "nonce"],
     ["/template-spikes/memory-box", "template"],
   ] as const)("selects %s as %s policy", (pathname, mode) => {
     expect(getContentSecurityPolicyMode(pathname)).toBe(mode);

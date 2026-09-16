@@ -20,7 +20,9 @@
     "start": "pnpm --filter @love-memory/web start",
     "test": "pnpm build:templates && vitest run",
     "test:coverage": "pnpm build:templates && vitest run --coverage",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test --project=chromium --project=mobile-chromium",
+    "test:e2e:chrome": "playwright test --project=installed-chrome --workers=1",
+    "test:secrets": "node scripts/check-secrets.mjs",
     "test:spikes": "node scripts/verify-live-spikes.mjs",
     "test:watch": "vitest",
     "type-check": "tsc --noEmit -p tsconfig.json && turbo run type-check"

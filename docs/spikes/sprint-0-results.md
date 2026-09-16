@@ -34,7 +34,8 @@ Implemented:
 - random identity-free object keys;
 - private Blob metadata/byte verification;
 - bounded object read, Sharp decode, MIME sniff, auto-orientation and EXIF-free WebP derivative;
-- private signed download and source cleanup;
+- idempotent completion recovery after a lost response, private signed download and source cleanup;
+- protected explicit cleanup for verifier-created source and derivative objects;
 - CSP allowlist for Vercel Blob control/private origins and explicit cleanup behavior;
 - protected browser lab and safe API responses.
 

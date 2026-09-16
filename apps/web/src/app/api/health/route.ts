@@ -1,15 +1,10 @@
-import { NextResponse } from "next/server";
-
 import { WEB_APP_VERSION } from "@/config/application";
+import { createApiSuccessResponse } from "@/http/api-response";
 import { getHealthStatus } from "@/modules/health/application/get-health-status";
 
 export function GET() {
-  return NextResponse.json(
-    { data: getHealthStatus({ version: WEB_APP_VERSION }) },
-    {
-      headers: {
-        "Cache-Control": "no-store",
-      },
-    },
+  return createApiSuccessResponse(
+    getHealthStatus({ version: WEB_APP_VERSION }),
+    crypto.randomUUID(),
   );
 }

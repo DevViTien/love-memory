@@ -32,7 +32,10 @@ Vitest provides the Jest-compatible unit/component test API. Playwright covers b
 - New template fields require schema tests.
 - New gift states require transition tests.
 - Security or payment fixes require a regression test.
-- Coverage must include untested source files and satisfy both aggregate and per-file gates.
+- Unit coverage includes untested domain, application, infrastructure, security and non-React
+  presentation modules, and must satisfy aggregate and per-file gates. Next.js entrypoint wiring and
+  React page composition are verified by production-build Playwright journeys instead of being
+  hidden inside the unit-coverage percentage.
 
 ## Pull requests
 

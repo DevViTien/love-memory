@@ -32,6 +32,11 @@ VERCEL_OIDC_TOKEN=<injected and rotated by Vercel>
 Connect the private Blob Store to the Preview environment. Never log the token, credentials or
 returned signed URLs. Keep `TECHNICAL_SPIKES_ENABLED=false` in Production.
 
+For a deployment protected by Vercel Authentication, create an automation bypass secret and expose
+it only to the machine running the smoke test as `VERCEL_AUTOMATION_BYPASS_SECRET`. The verifier
+injects that header only into requests to the deployment origin; it never forwards the secret to
+Blob upload/download origins.
+
 ## Preview smoke test
 
 1. Confirm the Vercel deployment and GitHub checks are green.
@@ -40,7 +45,13 @@ returned signed URLs. Keep `TECHNICAL_SPIKES_ENABLED=false` in Production.
 4. Public pages have static-compatible CSP; `/studio/new` has nonce CSP.
 5. `/studio/spikes` completes template PLAY → COMPLETE → DESTROY → reload.
 6. With spike configuration, run MongoDB and one non-sensitive Vercel Blob upload probe.
-7. Confirm logs contain request ID/error name only—not URI, token, gift content or signed URL.
+7. Prefer `pnpm test:spikes`; it verifies the signed derivative and then deletes both temporary Blob
+   objects through the protected cleanup endpoint.
+8. Confirm logs contain request ID/error name only—not URI, token, gift content or signed URL.
+
+Before enabling a production database, keep `/api/health/ready` behind the platform's deployment
+protection or add a Vercel Firewall rate-limit rule. Liveness can remain public; readiness performs a
+real dependency probe and should not be an unrestricted high-volume endpoint.
 
 ## Application rollback
 

@@ -3,13 +3,15 @@ import { randomUUID } from "node:crypto";
 import {
   UPLOAD_LIMITS,
   UploadContentTypeSchema,
+  type UploadCleanupData,
+  type UploadCleanupRequest,
   type UploadCompleteData,
   type UploadCompleteRequest,
   type UploadInitData,
   type UploadInitRequest,
 } from "@love-memory/contracts";
 import { processUploadedImage, type ProcessedImage } from "@love-memory/media";
-import { type ObjectStorage } from "@love-memory/storage";
+import { ObjectNotFoundError, type ObjectMetadata, type ObjectStorage } from "@love-memory/storage";
 
 export class UploadVerificationError extends Error {
   override readonly name = "UploadVerificationError";
@@ -34,10 +36,59 @@ export function createMediaSpikeService({
   processImage = processUploadedImage,
   storage,
 }: MediaSpikeServiceDependencies) {
+  async function createCompletionData(
+    assetId: string,
+    processed: ProcessedImage,
+  ): Promise<UploadCompleteData> {
+    return {
+      assetId,
+      contentType: processed.contentType,
+      downloadUrl: await storage.createDownloadUrl(getDerivativeKey(assetId)),
+      height: processed.height,
+      width: processed.width,
+    };
+  }
+
+  async function recoverCompletedUpload(assetId: string): Promise<UploadCompleteData> {
+    const bytes = await storage.getObject(getDerivativeKey(assetId), UPLOAD_LIMITS.imageMaxBytes);
+    const processed = await processImage(bytes);
+
+    if (processed.sourceContentType !== "image/webp") {
+      throw new UploadVerificationError("Stored derivative is not a WebP image.");
+    }
+
+    return createCompletionData(assetId, processed);
+  }
+
   return {
+    cleanupUpload: async ({ assetId }: UploadCleanupRequest): Promise<UploadCleanupData> => {
+      const deletions = await Promise.allSettled([
+        storage.deleteObject(getSourceKey(assetId)),
+        storage.deleteObject(getDerivativeKey(assetId)),
+      ]);
+      const failures = deletions
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result): unknown => result.reason as unknown);
+
+      if (failures.length > 0) {
+        throw new AggregateError(failures, "Technical spike object cleanup failed.");
+      }
+
+      return { assetId, deleted: true };
+    },
+
     completeUpload: async ({ assetId }: UploadCompleteRequest): Promise<UploadCompleteData> => {
       const sourceKey = getSourceKey(assetId);
-      const metadata = await storage.getObjectMetadata(sourceKey);
+      let metadata: ObjectMetadata;
+
+      try {
+        metadata = await storage.getObjectMetadata(sourceKey);
+      } catch (error) {
+        if (error instanceof ObjectNotFoundError) {
+          return recoverCompletedUpload(assetId);
+        }
+        throw error;
+      }
 
       if (
         metadata.contentLength <= 0 ||
@@ -65,20 +116,16 @@ export function createMediaSpikeService({
 
       const derivativeKey = getDerivativeKey(assetId);
       await storage.putObject({
+        allowOverwrite: true,
         body: processed.bytes,
         cacheControlMaxAge: 60,
         contentType: processed.contentType,
         key: derivativeKey,
       });
+      const completion = await createCompletionData(assetId, processed);
       await storage.deleteObject(sourceKey);
 
-      return {
-        assetId,
-        contentType: processed.contentType,
-        downloadUrl: await storage.createDownloadUrl(derivativeKey),
-        height: processed.height,
-        width: processed.width,
-      };
+      return completion;
     },
 
     initializeUpload: async ({

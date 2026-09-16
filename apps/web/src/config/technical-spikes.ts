@@ -29,6 +29,15 @@ const TechnicalSpikeEnvironmentSchema = z
 
 export type TechnicalSpikeEnvironment = z.output<typeof TechnicalSpikeEnvironmentSchema>;
 
+export function isTechnicalSpikePagePath(pathname: string): boolean {
+  return (
+    pathname === "/studio/spikes" ||
+    pathname.startsWith("/studio/spikes/") ||
+    pathname === "/template-spikes" ||
+    pathname.startsWith("/template-spikes/")
+  );
+}
+
 export function parseTechnicalSpikeEnvironment(
   source: Readonly<Record<string, string | undefined>>,
 ): TechnicalSpikeEnvironment {

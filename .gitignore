@@ -13,10 +13,8 @@ test-results/
 *.tsbuildinfo
 apps/web/next-env.d.ts
 
-# environment
-.env
-.env.local
-.env.*.local
+# environment (deny every variant by default)
+.env*
 !.env.example
 
 # editors and OS

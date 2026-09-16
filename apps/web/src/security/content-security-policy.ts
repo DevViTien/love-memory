@@ -16,7 +16,12 @@ export function getContentSecurityPolicyMode(pathname: string): ContentSecurityP
     return "template";
   }
 
-  return pathname === "/studio" || pathname.startsWith("/studio/") ? "nonce" : "static";
+  return pathname === "/studio" ||
+    pathname.startsWith("/studio/") ||
+    pathname === "/g" ||
+    pathname.startsWith("/g/")
+    ? "nonce"
+    : "static";
 }
 
 export function createContentSecurityPolicy({
