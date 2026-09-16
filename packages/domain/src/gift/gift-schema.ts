@@ -36,17 +36,56 @@ export const GiftContentSnapshotSchema = z
   })
   .strict();
 
+export const GiftOwnershipSchema = z
+  .object({
+    anonymousDraftId: z.uuid().nullable(),
+    claimTokenHash: z
+      .string()
+      .length(64)
+      .regex(/^[a-f0-9]+$/)
+      .nullable(),
+    ownerId: z.string().min(1).nullable(),
+  })
+  .strict()
+  .superRefine((ownership, context) => {
+    const isAnonymous = ownership.ownerId === null;
+    const hasAnonymousCredentials =
+      ownership.anonymousDraftId !== null && ownership.claimTokenHash !== null;
+
+    if (isAnonymous !== hasAnonymousCredentials) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Anonymous drafts require an id and claim-token hash; owned drafts require neither.",
+      });
+    }
+  });
+
 export const GiftSchema = z
   .object({
     access: GiftAccessPolicySchema,
     content: GiftContentSnapshotSchema,
-    ownerId: z.string().min(1),
+    createdAt: z.coerce.date(),
+    id: z.uuid(),
+    ownership: GiftOwnershipSchema,
     publicId: PublicGiftIdSchema,
     revision: z.number().int().nonnegative(),
     status: GiftStatusSchema,
+    updatedAt: z.coerce.date(),
+  })
+  .strict();
+
+export const GiftRevisionSchema = z
+  .object({
+    content: GiftContentSnapshotSchema,
+    createdAt: z.coerce.date(),
+    giftId: z.uuid(),
+    revision: z.number().int().nonnegative(),
   })
   .strict();
 
 export type Gift = z.infer<typeof GiftSchema>;
 export type GiftAccessPolicy = z.infer<typeof GiftAccessPolicySchema>;
 export type GiftContentSnapshot = z.infer<typeof GiftContentSnapshotSchema>;
+export type GiftOwnership = z.infer<typeof GiftOwnershipSchema>;
+export type GiftRevision = z.infer<typeof GiftRevisionSchema>;

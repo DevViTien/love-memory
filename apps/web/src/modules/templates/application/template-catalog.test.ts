@@ -14,17 +14,17 @@ const template: TemplateSummary = {
 };
 
 const catalog: TemplateCatalog = {
-  findPublishedById: (id) => (id === template.id ? template : undefined),
-  listPublished: () => [template],
+  findPublishedById: (id) => Promise.resolve(id === template.id ? template : undefined),
+  listPublished: () => Promise.resolve([template]),
 };
 
 describe("template catalog application services", () => {
-  it("lists templates through the catalog port", () => {
-    expect(listPublishedTemplates(catalog)).toEqual([template]);
+  it("lists templates through the catalog port", async () => {
+    await expect(listPublishedTemplates(catalog)).resolves.toEqual([template]);
   });
 
-  it("finds a template through the catalog port", () => {
-    expect(getTemplateById(catalog, "memory-box")).toBe(template);
-    expect(getTemplateById(catalog, "missing")).toBeUndefined();
+  it("finds a template through the catalog port", async () => {
+    await expect(getTemplateById(catalog, "memory-box")).resolves.toBe(template);
+    await expect(getTemplateById(catalog, "missing")).resolves.toBeUndefined();
   });
 });

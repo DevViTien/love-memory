@@ -1,6 +1,9 @@
 export const COLLECTIONS = {
+  accounts: "accounts",
   abuseReports: "abuseReports",
   assets: "assets",
+  authRateLimits: "authRateLimits",
+  databaseMigrations: "databaseMigrations",
   giftRevisions: "giftRevisions",
   gifts: "gifts",
   idempotencyKeys: "idempotencyKeys",
@@ -8,10 +11,12 @@ export const COLLECTIONS = {
   orders: "orders",
   paymentAttempts: "paymentAttempts",
   reactions: "reactions",
+  sessions: "sessions",
   templateVersions: "templateVersions",
   templates: "templates",
   technicalSpikes: "technicalSpikes",
   users: "users",
+  verifications: "verifications",
 } as const;
 
 export type CollectionName = (typeof COLLECTIONS)[keyof typeof COLLECTIONS];

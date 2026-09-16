@@ -40,12 +40,14 @@ export async function readJsonBody<TSchema extends z.ZodType>(
 
 export function createApiErrorResponse({
   code,
+  details,
   fieldErrors,
   message,
   requestId,
   status,
 }: Readonly<{
   code: ApiErrorCode;
+  details?: Readonly<Record<string, boolean | number | string>>;
   fieldErrors?: Readonly<Record<string, string>>;
   message: string;
   requestId: string;
@@ -55,6 +57,7 @@ export function createApiErrorResponse({
     {
       error: {
         code,
+        ...(details ? { details } : {}),
         ...(fieldErrors ? { fieldErrors } : {}),
         message,
         requestId,

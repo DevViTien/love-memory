@@ -31,6 +31,11 @@ export default defineConfig({
   webServer: {
     command: "pnpm build && pnpm --filter @love-memory/web start --port " + port,
     env: {
+      AUTH_EMAIL_FROM: process.env["AUTH_EMAIL_FROM"] ?? "LoveMemory <hello@example.com>",
+      BETTER_AUTH_SECRET:
+        process.env["BETTER_AUTH_SECRET"] ?? "playwright-secret-with-at-least-32-characters",
+      BETTER_AUTH_URL: process.env["BETTER_AUTH_URL"] ?? baseURL,
+      RESEND_API_KEY: process.env["RESEND_API_KEY"] ?? "re_playwright_not_used",
       TECHNICAL_SPIKES_ENABLED: "true",
       TECHNICAL_SPIKE_TOKEN: "playwright-technical-spike-token",
     },

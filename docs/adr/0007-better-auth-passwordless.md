@@ -22,6 +22,9 @@ owner only after verification.
 - Magic-link/OTP values are hashed at rest and never logged.
 - Admin identity requires a distinct role and MFA before admin features become active.
 - Auth types must not leak into the gift domain package.
+- Better Auth 1.7.5 currently requires an explicit `@better-auth/utils` 0.4.2 peer pin alongside
+  `better-call`'s private 0.5.x dependency; keep both resolved versions until the upstream peer
+  topology converges.
 
 ## Revisit when
 

@@ -9,8 +9,10 @@ export const metadata: Metadata = {
   title: "Kho template",
 };
 
-export default function TemplatesPage() {
-  const templates = getPublishedTemplates();
+export const dynamic = "force-dynamic";
+
+export default async function TemplatesPage() {
+  const templates = await getPublishedTemplates();
 
   return (
     <main>
@@ -25,7 +27,13 @@ export default function TemplatesPage() {
             biết thiết kế.
           </p>
         </div>
-        <TemplateGallery className="mt-12" templates={templates} />
+        {templates.length > 0 ? (
+          <TemplateGallery className="mt-12" templates={templates} />
+        ) : (
+          <div className="mt-12 rounded-3xl border border-dashed border-rose-200 bg-white/70 p-8 text-stone-600">
+            Kho template chưa có mẫu được xuất bản. Hãy chạy seed database của Sprint 1.
+          </div>
+        )}
       </Container>
     </main>
   );

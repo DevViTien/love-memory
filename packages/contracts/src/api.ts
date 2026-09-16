@@ -29,6 +29,7 @@ export const ApiErrorCodeSchema = z.enum([
 export const ApiErrorSchema = z
   .object({
     code: ApiErrorCodeSchema,
+    details: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
     fieldErrors: z.record(z.string(), z.string()).optional(),
     message: z.string().min(1).max(300),
     requestId: z.string().min(1).max(API_LIMITS.requestIdMaxLength),

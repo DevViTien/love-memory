@@ -44,7 +44,7 @@ test("applies nonce CSP to the dynamically rendered Studio", async ({ page }) =>
 
   expect(policy).toContain("strict-dynamic");
   expect(policy).not.toContain("script-src 'self' 'unsafe-inline'");
-  await expect(page.getByRole("heading", { name: "Studio · Hộp ký ức" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Bắt đầu với Hộp ký ức" })).toBeVisible();
 
   const scriptsHaveNonces = await page
     .locator("script")
@@ -69,6 +69,21 @@ test("exposes a validated liveness endpoint", async ({ request }) => {
     status: "ok",
     version: "0.1.0",
   });
+});
+
+test("requests a passwordless sign-in link without exposing account existence", async ({
+  page,
+}) => {
+  await page.route("**/api/auth/sign-in/magic-link", async (route) => {
+    await route.fulfill({ body: JSON.stringify({ data: { status: true } }), status: 200 });
+  });
+
+  await page.goto("/auth/sign-in");
+  await page.getByLabel("Email của bạn").fill("creator@example.com");
+  await page.getByRole("button", { name: "Gửi liên kết đăng nhập" }).click();
+
+  await expect(page.getByText("Kiểm tra hộp thư của bạn")).toBeVisible();
+  await expect(page.getByText(/Nếu địa chỉ hợp lệ/)).toBeVisible();
 });
 
 test("isolates, controls, destroys and reloads the template spike", async ({ page, request }) => {

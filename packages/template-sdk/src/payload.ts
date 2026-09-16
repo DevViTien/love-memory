@@ -34,6 +34,22 @@ export function createTemplatePayloadSchema(
   return z.object(shape).strict();
 }
 
+export function createTemplateDraftPayloadSchema(
+  manifest: TemplateManifest,
+): z.ZodObject<Record<string, z.ZodOptional<z.ZodType>>> {
+  const shape: Record<string, z.ZodOptional<z.ZodType>> = {};
+
+  for (const field of manifest.fields) {
+    shape[field.id] = createFieldValueSchema(field).optional();
+  }
+
+  return z.object(shape).strict();
+}
+
 export function parseTemplatePayload(manifest: TemplateManifest, input: unknown) {
   return createTemplatePayloadSchema(manifest).parse(input);
+}
+
+export function parseTemplateDraftPayload(manifest: TemplateManifest, input: unknown) {
+  return createTemplateDraftPayloadSchema(manifest).parse(input);
 }
