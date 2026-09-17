@@ -21,8 +21,9 @@ photos.
 
 ## Local environment
 
-The Next.js application reads environment variables from `apps/web/.env.local`, not the repository
-root `.env` used as a personal source file.
+The workspace web scripts preload the repository root `.env` before starting Next.js. Next.js also
+reads `apps/web/.env.local`, which remains the target for Vercel-pulled development variables.
+Already exported process variables take precedence over values in `.env.local`.
 
 Link the repository root to the Vercel Project, then pull an environment where the development store
 is connected directly into the Next.js app directory:

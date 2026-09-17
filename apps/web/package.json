@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "next build",
-    "dev": "next dev",
-    "start": "next start",
+    "build": "node scripts/next-with-root-env.mjs build",
+    "dev": "node scripts/next-with-root-env.mjs dev",
+    "start": "node scripts/next-with-root-env.mjs start",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

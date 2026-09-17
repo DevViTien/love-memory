@@ -44,7 +44,9 @@ pnpm dev
 
 Open http://localhost:3000.
 
-To configure the application, copy **.env.example** to **apps/web/.env.local**. Sprint 1 requires
+To configure the application, copy **.env.example** to the repository root as **.env**. The web
+scripts preload this file before Next.js starts; **apps/web/.env.local** remains available for
+Next.js-specific or Vercel-pulled overrides. Sprint 1 requires
 MongoDB plus the Better Auth/Resend values described in
 [the passwordless authentication guide](./docs/runbooks/passwordless-auth.md). Initialize a new
 development or staging database with `pnpm db:seed`, then verify it with `pnpm db:verify`.
