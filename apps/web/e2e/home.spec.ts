@@ -260,6 +260,7 @@ test("creates, edits and claims a draft through a real passwordless session", as
   }
   await page.goto(magicLink);
   await expect(page).toHaveURL(new RegExp(`/studio/${publicId}$`));
+  await expect(page.getByRole("link", { name: "Tài khoản" })).toBeVisible();
   await page.getByRole("button", { name: "Lưu bản nháp vào tài khoản" }).click();
   await expect(page.getByRole("button", { name: "Lưu bản nháp vào tài khoản" })).toHaveCount(0);
 
@@ -277,6 +278,7 @@ test("creates, edits and claims a draft through a real passwordless session", as
 
   await page.getByRole("button", { name: "Đăng xuất" }).click();
   await expect(page.getByLabel("Email của bạn")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Đăng nhập" })).toBeVisible();
   await expect.poll(() => idempotencyGiftOwnerKind(idempotencyKey)).toBe("user");
 
   const revokedReplayStatus = await page.evaluate(async (key) => {

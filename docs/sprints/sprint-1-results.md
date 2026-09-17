@@ -48,6 +48,8 @@ Branch: `feat/sprint-1-core-domain-auth`
   hashes, and unauthenticated IP limits accept only Vercel's sanitized forwarding header.
 - Sign-in and sign-out controls recover from provider and transport failures without remaining
   disabled.
+- Global navigation reflects the live Better Auth session, showing `Tài khoản` after a successful
+  magic-link callback and returning to `Đăng nhập` after logout.
 
 ## Verification
 
@@ -57,7 +59,7 @@ Branch: `feat/sprint-1-core-domain-auth`
 - `db:verify` confirmed all required collections and named indexes.
 - `db:verify-gifts` passed against Atlas: anonymous owner access, cross-owner denial, revision 0 to 1,
   stale-write rejection and authenticated claim. Temporary documents were removed in `finally`.
-- Unit/integration coverage: 55 files, 203 tests; 91.59% statements and 84.15% branches at the final
+- Unit/integration coverage: 56 files, 205 tests; 91.59% statements and 84.15% branches at the final
   implementation checkpoint.
 - Chromium desktop/mobile production smoke: 18 tests passed, including payload-bound replay,
   anonymous create/edit, real passwordless sign-in, claim, post-claim edit, revoked anonymous

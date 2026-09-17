@@ -2,6 +2,8 @@ import { APP_CONFIG, ROUTES } from "@love-memory/shared";
 import { buttonVariants, Container } from "@love-memory/ui";
 import Link from "next/link";
 
+import { AuthStatusLink } from "@/modules/auth/presentation/auth-status-link";
+
 export function SiteHeader() {
   return (
     <header className="border-b border-rose-100/80 bg-white/70 backdrop-blur">
@@ -20,12 +22,7 @@ export function SiteHeader() {
           >
             Template
           </Link>
-          <Link
-            className="hidden px-3 py-2 text-sm font-semibold text-stone-600 hover:text-rose-700 sm:block"
-            href={{ pathname: ROUTES.authSignIn }}
-          >
-            Đăng nhập
-          </Link>
+          <AuthStatusLink />
           <Link className={buttonVariants({ size: "sm" })} href={ROUTES.studioNew}>
             Tạo kỷ niệm
           </Link>
