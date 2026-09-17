@@ -5,7 +5,21 @@
 1. Copy **.env.example** to **apps/web/.env.local** and set local values.
 2. Install with **pnpm install**.
 3. Start the web app with **pnpm dev**.
-4. Before opening a pull request, run the quality commands from README.
+4. Create feature branches from **dev** and keep development local until the change is ready.
+5. Before pushing to a deployment branch, run **pnpm verify:local**.
+
+## Branch and deployment workflow
+
+- **dev** is the integration branch and deploys to the stable development Preview URL.
+- **stg** accepts promotions from **dev** and deploys to the stable staging Preview URL.
+- **main** accepts promotions from **stg** and deploys to Production.
+- Feature and dependency-update branches may be pushed for review, but Vercel is configured not to
+  deploy them.
+- Promote the same tested commit in order: **dev -> stg -> main**. Do not run ad-hoc Vercel CLI
+  deployments during normal development.
+
+The complete environment matrix, promotion checks and rollback procedure are documented in
+[the deployment runbook](./docs/runbooks/preview-deploy-and-rollback.md).
 
 ## Architecture rules
 

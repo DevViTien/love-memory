@@ -1,77 +1,96 @@
-# Preview deployment and rollback runbook
+# Deployment pipeline and rollback runbook
 
 ## Purpose
 
-Deploy the Turborepo from GitHub to Vercel, prove health/security/spikes with non-production data and
-restore a known-good deployment without destructive database rollback.
+Keep Vercel Hobby usage predictable while promoting the same tested code through development,
+staging and production. Vercel's Git integration is the only deployment mechanism. GitHub Actions
+validates code but never deploys it.
 
-## One-time Vercel setup
+Vercel Hobby does not provide Custom Environments. Development and staging therefore use two
+long-lived Preview branches with branch-specific URLs and environment-variable overrides.
 
-1. Import the GitHub repository as a new Vercel Project.
-2. Keep Root Directory at the repository root (`./`) and Framework Preset at Next.js.
-3. Let Vercel detect pnpm from the root lockfile and Turborepo from `turbo.json`.
-4. Add Preview-scoped `MONGODB_URI`, `MONGODB_DATABASE` and `APP_URL`. Use a dedicated non-production
-   database; never reuse production data in a pull-request deployment.
-5. Leave technical spikes disabled until their separate token and provider configuration are ready.
-6. Protect Preview URLs if they contain test data.
+## Environment matrix
 
-Every pull request then receives a unique Preview Deployment through the Vercel Git integration.
-The production branch remains `main` unless explicitly changed in Project Settings.
+| Tier        | Git branch | Vercel target | Stable URL                                                   | MongoDB database          |
+| ----------- | ---------- | ------------- | ------------------------------------------------------------ | ------------------------- |
+| Local       | feature/*  | None          | `http://localhost:3000`                                      | `love_memory_local`       |
+| Development | `dev`      | Preview       | `https://love-memory-git-dev-devvitiens-projects.vercel.app` | `love_memory_development` |
+| Staging     | `stg`      | Preview       | `https://love-memory-git-stg-devvitiens-projects.vercel.app` | `love_memory_staging`     |
+| Production  | `main`     | Production    | `https://love-memory-tawny.vercel.app`                       | `love_memory_production`  |
 
-## Optional protected spike setup
+Development and staging can share provider accounts, but they must not share MongoDB databases or
+authentication base URLs. Production secrets remain Production-scoped. Preview values that differ
+between `dev` and `stg` are configured as branch-specific overrides.
 
-Add only to Local/Preview:
+## Deployment allowlist
 
-```text
-TECHNICAL_SPIKES_ENABLED=true
-TECHNICAL_SPIKE_TOKEN=<random 24+ character secret>
-BLOB_STORE_ID=<injected by the connected private Blob Store>
-VERCEL_OIDC_TOKEN=<injected and rotated by Vercel>
-```
+`apps/web/vercel.json` allows automatic deployments only for `dev`, `stg` and `main`. Its catch-all
+rule disables deployments for every other branch, including feature and Dependabot branches.
 
-Connect the private Blob Store to the Preview environment. Never log the token, credentials or
-returned signed URLs. Keep `TECHNICAL_SPIKES_ENABLED=false` in Production.
+Do not use `vercel`, `vercel deploy` or `vercel --prod` in the normal delivery flow. Those commands
+bypass the branch promotion history and create additional deployments. Use the CLI only for
+read-only diagnostics or an explicitly documented recovery.
 
-For a deployment protected by Vercel Authentication, create an automation bypass secret and expose
-it only to the machine running the smoke test as `VERCEL_AUTOMATION_BYPASS_SECRET`. The verifier
-injects that header only into requests to the deployment origin; it never forwards the secret to
-Blob upload/download origins.
+## Development and promotion flow
 
-## Preview smoke test
+1. Pull `dev` and create a local `feature/<name>` or `fix/<name>` branch.
+2. Implement and exercise the change with `pnpm dev` at `http://localhost:3000`.
+3. Run `pnpm verify:local`. It checks secrets, formatting, lint, types, unit coverage, dependency
+   audit, production build and the installed-Chrome E2E suite.
+4. Merge the tested change into `dev` and push `dev`. Vercel updates only the development URL.
+5. Smoke-test `/`, `/api/health/ready` and the changed journey on the development URL.
+6. Promote `dev` into `stg` without adding unrelated changes, then push `stg`.
+7. Repeat the smoke test on the staging URL.
+8. Promote `stg` into `main`. The push to `main` is the only normal Production deployment trigger.
+9. Verify Production health, logs and the affected journey.
 
-1. Confirm the Vercel deployment and GitHub checks are green.
-2. `GET /api/health` returns 200, a semantic app version and `x-request-id`.
-3. `GET /api/health/ready` returns 200 against the preview Atlas database.
-4. Public pages have static-compatible CSP; `/studio/new` has nonce CSP.
-5. `/studio/spikes` completes template PLAY → COMPLETE → DESTROY → reload.
-6. With spike configuration, run MongoDB and one non-sensitive Vercel Blob upload probe.
-7. Prefer `pnpm test:spikes`; it verifies the signed derivative and then deletes both temporary Blob
-   objects through the protected cleanup endpoint.
-8. Confirm logs contain request ID/error name only—not URI, token, gift content or signed URL.
+If a feature branch must be pushed for collaboration or a pull request, it still runs the applicable
+GitHub checks but does not create a Vercel deployment.
 
-Before enabling a production database, keep `/api/health/ready` behind the platform's deployment
-protection or add a Vercel Firewall rate-limit rule. Liveness can remain public; readiness performs a
-real dependency probe and should not be an unrestricted high-volume endpoint.
+## Environment variables
 
-## Application rollback
+Configure shared Preview secrets once and override environment identity per branch:
 
-1. Identify the last green deployment and the first bad deployment.
-2. Stop promotion. If a feature flag can contain impact, disable it first.
-3. In Vercel Deployments, select the last green deployment and promote/redeploy it, or revert the bad
-   Git commit so Git history reflects the rollback.
-4. Do not reverse a database migration unless its reviewed rollback is known safe. Sprint 1 database
-   changes use expand/contract compatibility so the previous app can still run.
-5. Re-run health, readiness and the affected smoke test.
-6. Record deployment IDs, commit SHAs, impact, mitigation and follow-up owner.
+| Variable             | `dev` Preview branch                                      | `stg` Preview branch                                  | Production                  |
+| -------------------- | --------------------------------------------------------- | ----------------------------------------------------- | --------------------------- |
+| `APP_URL`            | Development stable URL                                    | Staging stable URL                                    | Production stable URL       |
+| `BETTER_AUTH_URL`    | Development stable URL                                    | Staging stable URL                                    | Production stable URL       |
+| `MONGODB_DATABASE`   | `love_memory_development`                                 | `love_memory_staging`                                 | `love_memory_production`    |
+| `MONGODB_URI`        | Shared Preview secret or dedicated development credential | Shared Preview secret or dedicated staging credential | Dedicated Production secret |
+| `BETTER_AUTH_SECRET` | Shared Preview secret or a branch-specific secret         | Shared Preview secret or a branch-specific secret     | Dedicated Production secret |
+| `RESEND_API_KEY`     | Preview secret                                            | Preview secret                                        | Production secret           |
 
-## Template rollback
+`AUTH_EMAIL_FROM` and the Vercel Blob connection may be shared across Preview branches during the
+current stage. Technical-spike endpoints stay disabled unless a time-boxed verification explicitly
+requires them.
 
-Published artifacts are immutable. Roll back the registry pointer for new gifts or activate the
-template kill switch; never overwrite an artifact referenced by existing gifts.
+## Smoke test
+
+For each deployed tier:
+
+1. Confirm the deployment is `Ready` and the stable branch/domain alias points to it.
+2. Confirm `GET /` and `GET /api/health/ready` return `200`.
+3. Confirm the template catalog loads from the database assigned to that tier.
+4. Test magic-link authentication using that tier's stable URL; callback URLs must not cross tiers.
+5. Review Vercel error logs without exposing URIs, tokens, gift content or signed Blob URLs.
+
+## Rollback
+
+1. Stop promotion at the first failing tier.
+2. Revert the bad Git commit on that branch and push the revert. Do not deploy an untracked local
+   build over the branch domain.
+3. If Production is affected, revert on `main`, then reconcile `stg` and `dev` so branch history does
+   not reintroduce the defect.
+4. Do not reverse a database migration unless its reviewed rollback is known safe. Prefer compatible
+   expand/contract migrations.
+5. Re-run readiness and the affected smoke test, and record the commit and deployment IDs.
+
+Published template artifacts are immutable. Roll back their registry pointer or activate the
+template kill switch; never overwrite an artifact referenced by an existing gift.
 
 ## Escalation
 
-- Readiness failure: verify Atlas allowlist/credentials and region before changing code.
-- Viewer/template failure: disable the affected version and retain the static fallback.
-- Blob failure: disable upload initialization; existing private objects remain private.
-- Suspected credential exposure: disable spike endpoints, revoke/rotate credentials and review logs.
+- Readiness failure: verify the tier-specific database name, Atlas allowlist and credential scope.
+- Authentication failure: verify `APP_URL` and `BETTER_AUTH_URL` match the stable URL for that branch.
+- Blob failure: disable new uploads while retaining existing private objects.
+- Suspected credential exposure: stop promotion, revoke or rotate the credential and review logs.

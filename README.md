@@ -67,6 +67,7 @@ Vercel Blob and the `TECHNICAL_SPIKE_*` values described in
 | pnpm test:e2e:chrome | Run production UI tests in installed Chrome             |
 | pnpm test:secrets    | Reject tracked environment files and secret signatures  |
 | pnpm build           | Build production artifacts                              |
+| pnpm verify:local    | Run the complete Windows/Chrome pre-deployment gate     |
 | pnpm db:migrate      | Apply idempotent MongoDB validators and named indexes   |
 | pnpm db:seed         | Apply migrations and upsert the three template fixtures |
 | pnpm db:verify       | Verify required collections and indexes                 |

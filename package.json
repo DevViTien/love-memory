@@ -29,7 +29,8 @@
     "test:secrets": "node scripts/check-secrets.mjs",
     "test:spikes": "node scripts/verify-live-spikes.mjs",
     "test:watch": "vitest",
-    "type-check": "tsc --noEmit -p tsconfig.json && turbo run type-check"
+    "type-check": "tsc --noEmit -p tsconfig.json && turbo run type-check",
+    "verify:local": "pnpm test:secrets && pnpm format:check && pnpm lint && pnpm type-check && pnpm test:coverage && pnpm audit && pnpm build && pnpm test:e2e:chrome"
   },
   "pnpm": {
     "ignoredBuiltDependencies": [
