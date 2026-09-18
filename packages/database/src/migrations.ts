@@ -10,7 +10,7 @@ import {
 
 import { COLLECTIONS, type CollectionName } from "./collections";
 
-export const DATABASE_SCHEMA_VERSION = 3;
+export const DATABASE_SCHEMA_VERSION = 6;
 
 type DatabaseMigrationDocument = Readonly<{
   _id: string;
@@ -44,6 +44,10 @@ const timestampsValidator = {
   createdAt: { bsonType: "date" },
   updatedAt: { bsonType: "date" },
 } as const;
+
+const LEGACY_INDEX_NAMES: Readonly<Partial<Record<CollectionName, readonly string[]>>> = {
+  [COLLECTIONS.assets]: ["assets_storage_key_unique"],
+};
 
 export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
   {
@@ -101,7 +105,7 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
           _id: { bsonType: "string" },
           count: { bsonType: "int", minimum: 1 },
           expiresAt: { bsonType: "date" },
-          scope: { enum: ["gift-claim", "gift-create", "gift-update"] },
+          scope: { enum: ["gift-claim", "gift-create", "gift-update", "media-upload"] },
           subjectHash: { bsonType: "string", pattern: "^[a-f0-9]{64}$" },
           ...timestampsValidator,
         },
@@ -244,11 +248,53 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
   },
   {
     indexes: [
-      { key: { storageKey: 1 }, options: { name: "assets_storage_key_unique", unique: true } },
+      {
+        key: { sourceKey: 1 },
+        options: {
+          name: "assets_source_key_unique",
+          partialFilterExpression: { sourceKey: { $type: "string" } },
+          unique: true,
+        },
+      },
       {
         key: { ownerId: 1, status: 1, createdAt: -1 },
         options: { name: "assets_owner_status_created" },
       },
+      {
+        key: { anonymousDraftId: 1, status: 1, createdAt: -1 },
+        options: { name: "assets_anonymous_status_created" },
+      },
+      {
+        key: { giftId: 1, fieldId: 1, createdAt: 1 },
+        options: { name: "assets_gift_field_created" },
+      },
+      {
+        key: { giftId: 1, giftSlot: 1 },
+        options: {
+          name: "assets_active_gift_slot_unique",
+          partialFilterExpression: {
+            giftSlot: { $type: "number" },
+            status: {
+              $in: ["initiated", "uploaded", "processing", "ready", "failed", "deleting"],
+            },
+          },
+          unique: true,
+        },
+      },
+      {
+        key: { giftId: 1, fieldId: 1, fieldSlot: 1 },
+        options: {
+          name: "assets_active_field_slot_unique",
+          partialFilterExpression: {
+            fieldSlot: { $type: "number" },
+            status: {
+              $in: ["initiated", "uploaded", "processing", "ready", "failed", "deleting"],
+            },
+          },
+          unique: true,
+        },
+      },
+      { key: { status: 1, expiresAt: 1 }, options: { name: "assets_status_expiry" } },
     ],
     name: COLLECTIONS.assets,
     validator: {
@@ -258,14 +304,46 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
         properties: {
           _id: { bsonType: "string" },
           anonymousDraftId: { bsonType: ["string", "null"] },
+          attempts: { bsonType: "int", minimum: 0 },
+          checksumSha256: { bsonType: ["string", "null"] },
+          declaredContentType: { enum: ["image/jpeg", "image/png", "image/webp"] },
+          declaredSizeBytes: { bsonType: ["int", "long"], minimum: 1 },
+          derivatives: { bsonType: "array" },
+          expiresAt: { bsonType: ["date", "null"] },
+          failureCode: { bsonType: ["string", "null"] },
+          fieldId: { bsonType: "string" },
+          fieldSlot: { bsonType: ["int", "long", "null"], minimum: 0 },
+          giftId: { bsonType: "string" },
+          giftSlot: { bsonType: ["int", "long", "null"], minimum: 0 },
           ownerId: { bsonType: ["string", "null"] },
+          placeholderDataUrl: { bsonType: ["string", "null"] },
           status: {
             enum: ["initiated", "uploaded", "processing", "ready", "failed", "deleting", "deleted"],
           },
-          storageKey: { bsonType: "string" },
+          sourceKey: { bsonType: "string" },
           ...timestampsValidator,
         },
-        required: ["_id", "storageKey", "status", "createdAt", "updatedAt"],
+        required: [
+          "_id",
+          "giftId",
+          "fieldId",
+          "giftSlot",
+          "fieldSlot",
+          "ownerId",
+          "anonymousDraftId",
+          "sourceKey",
+          "declaredContentType",
+          "declaredSizeBytes",
+          "status",
+          "attempts",
+          "derivatives",
+          "placeholderDataUrl",
+          "checksumSha256",
+          "failureCode",
+          "expiresAt",
+          "createdAt",
+          "updatedAt",
+        ],
       },
     },
   },
@@ -372,6 +450,11 @@ async function ensureCollection(database: Db, definition: CollectionDefinition):
   if (definition.indexes.length > 0) {
     const collection = database.collection(definition.name);
     const existingIndexes = await collection.indexes();
+    for (const legacyName of LEGACY_INDEX_NAMES[definition.name] ?? []) {
+      if (existingIndexes.some((candidate) => candidate.name === legacyName)) {
+        await collection.dropIndex(legacyName);
+      }
+    }
     for (const index of definition.indexes) {
       const existing = existingIndexes.find((candidate) => candidate.name === index.options.name);
       if (existing && !indexMatches(existing, index)) {
@@ -382,9 +465,14 @@ async function ensureCollection(database: Db, definition: CollectionDefinition):
   }
 }
 
-export async function runDatabaseMigrations(database: Db): Promise<void> {
+export async function runDatabaseMigrations(
+  database: Db,
+  onProgress: (collection: CollectionName, phase: "complete" | "start") => void = () => undefined,
+): Promise<void> {
   for (const definition of CORE_COLLECTION_DEFINITIONS) {
+    onProgress(definition.name, "start");
     await ensureCollection(database, definition);
+    onProgress(definition.name, "complete");
   }
 
   await database.collection<DatabaseMigrationDocument>(COLLECTIONS.databaseMigrations).updateOne(
@@ -415,6 +503,12 @@ export async function verifyDatabaseSchema(database: Db): Promise<void> {
     }
 
     const existingIndexes = await database.collection(definition.name).indexes();
+
+    for (const legacyName of LEGACY_INDEX_NAMES[definition.name] ?? []) {
+      if (existingIndexes.some((candidate) => candidate.name === legacyName)) {
+        throw new Error(`Legacy MongoDB index remains: ${definition.name}.${legacyName}`);
+      }
+    }
 
     for (const index of definition.indexes) {
       const existing = existingIndexes.find((candidate) => candidate.name === index.options.name);

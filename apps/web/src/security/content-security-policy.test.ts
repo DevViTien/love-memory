@@ -47,6 +47,9 @@ describe("content security policy", () => {
 
     expect(policy).toContain("frame-ancestors 'self'");
     expect(policy).toContain("connect-src 'none'");
+    expect(policy).toContain("https://*.private.blob.vercel-storage.com");
+    expect(policy).toContain("script-src 'self'");
+    expect(policy).not.toContain("script-src 'unsafe-inline'");
     expect(policy).not.toContain("strict-dynamic");
   });
 
@@ -57,6 +60,8 @@ describe("content security policy", () => {
     ["/studio/new", "nonce"],
     ["/g/a-public-gift-slug", "nonce"],
     ["/template-spikes/memory-box", "template"],
+    ["/template-artifacts/memory-box-spike/0.1.0", "template"],
+    ["/viewer/memory-box-spike/0.1.0", "nonce"],
   ] as const)("selects %s as %s policy", (pathname, mode) => {
     expect(getContentSecurityPolicyMode(pathname)).toBe(mode);
   });

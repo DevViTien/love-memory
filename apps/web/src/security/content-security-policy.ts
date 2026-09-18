@@ -12,12 +12,17 @@ const VERCEL_BLOB_OIDC_CONTROL_PATH = "https://vercel.com/api/blob/";
 const VERCEL_PRIVATE_BLOB_ORIGIN = "https://*.private.blob.vercel-storage.com";
 
 export function getContentSecurityPolicyMode(pathname: string): ContentSecurityPolicyMode {
-  if (pathname === "/template-spikes" || pathname.startsWith("/template-spikes/")) {
+  if (
+    pathname === "/template-spikes" ||
+    pathname.startsWith("/template-spikes/") ||
+    pathname.startsWith("/template-artifacts/")
+  ) {
     return "template";
   }
 
   return pathname === "/studio" ||
     pathname.startsWith("/studio/") ||
+    pathname.startsWith("/viewer/") ||
     pathname === "/g" ||
     pathname.startsWith("/g/")
     ? "nonce"
@@ -42,10 +47,10 @@ export function createContentSecurityPolicy({
       "font-src 'none'",
       "form-action 'none'",
       "frame-ancestors 'self'",
-      "img-src data:",
+      `img-src data: ${[VERCEL_PRIVATE_BLOB_ORIGIN, assetOrigin].filter(Boolean).join(" ")}`,
       "media-src 'none'",
       "object-src 'none'",
-      "script-src 'unsafe-inline'",
+      "script-src 'self'",
       "style-src 'unsafe-inline'",
       "worker-src 'none'",
     ].join("; ");

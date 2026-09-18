@@ -33,18 +33,21 @@ const StorageEnvironmentSchema = z
     }
   })
   .transform((environment) => {
-    if (environment.BLOB_STORE_ID) {
+    if (environment.BLOB_STORE_ID && environment.VERCEL_OIDC_TOKEN) {
       // Do not pass VERCEL_OIDC_TOKEN explicitly. The Blob SDK resolves a local
-      // token from the environment and a deployed token from Vercel's request
-      // context, where it is rotated automatically.
+      // token from the environment, where it can be rotated automatically.
       return { storeId: environment.BLOB_STORE_ID } as const;
     }
 
-    const token = environment.BLOB_READ_WRITE_TOKEN;
-    if (!token) {
-      throw new Error("Storage environment validation did not produce usable credentials.");
+    if (environment.BLOB_READ_WRITE_TOKEN) {
+      // Non-Vercel runtimes such as Trigger.dev do not have a Vercel request
+      // context. Prefer the explicit token there, even when a store id was
+      // synchronized alongside it.
+      return { token: environment.BLOB_READ_WRITE_TOKEN } as const;
     }
-    return { token } as const;
+
+    // On Vercel, the SDK resolves the rotating OIDC token from request context.
+    return { storeId: environment.BLOB_STORE_ID! } as const;
   });
 
 export type StorageEnvironment = z.output<typeof StorageEnvironmentSchema>;

@@ -67,6 +67,13 @@ describe("template message protocol", () => {
 
     expect(events).toEqual(["READY", "READY"]);
     expect(postMessage).toHaveBeenCalledTimes(4);
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assets: {},
+        protocolVersion: TEMPLATE_MESSAGE_PROTOCOL_VERSION,
+        type: "INIT",
+      }),
+    );
     expect(unsubscribe).toHaveBeenCalledTimes(2);
   });
 });

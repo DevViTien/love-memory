@@ -7,12 +7,11 @@ import {
 } from "@love-memory/contracts";
 import { type TemplateManifest } from "@love-memory/template-sdk";
 import { Button } from "@love-memory/ui";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
-type DraftEditorProps = Readonly<{
-  gift: GiftDraftDto;
-  manifest: TemplateManifest;
-}>;
+import { MediaImageListField } from "@/modules/media/presentation/media-image-list-field";
+
+type DraftEditorProps = Readonly<{ gift: GiftDraftDto; manifest: TemplateManifest }>;
 
 export function DraftEditor({ gift: initialGift, manifest }: DraftEditorProps) {
   const [content, setContent] = useState<Readonly<Record<string, unknown>>>(initialGift.content);
@@ -20,22 +19,18 @@ export function DraftEditor({ gift: initialGift, manifest }: DraftEditorProps) {
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
 
-  function setField(id: string, value: string) {
+  const setValue = useCallback((id: string, value: unknown) => {
     setContent((current) => {
       const next = { ...current };
-      if (value === "") {
-        delete next[id];
-      } else {
-        next[id] = value;
-      }
+      if (value === "" || (Array.isArray(value) && value.length === 0)) delete next[id];
+      else next[id] = value;
       return next;
     });
-  }
+  }, []);
 
   async function save() {
     setIsPending(true);
     setMessage(null);
-
     try {
       const response = await fetch(`/api/gifts/${gift.publicId}`, {
         body: JSON.stringify({ content, expectedRevision: gift.revision }),
@@ -43,7 +38,6 @@ export function DraftEditor({ gift: initialGift, manifest }: DraftEditorProps) {
         method: "PATCH",
       });
       const payload: unknown = await response.json();
-
       if (response.status === 409) {
         const conflict = ApiErrorResponseSchema.safeParse(payload);
         const actual = conflict.success ? conflict.data.error.details?.["actualRevision"] : null;
@@ -54,7 +48,6 @@ export function DraftEditor({ gift: initialGift, manifest }: DraftEditorProps) {
         );
         return;
       }
-
       const parsed = GiftDraftResponseSchema.safeParse(
         typeof payload === "object" && payload !== null && "data" in payload ? payload.data : null,
       );
@@ -67,7 +60,6 @@ export function DraftEditor({ gift: initialGift, manifest }: DraftEditorProps) {
         );
         return;
       }
-
       setGift(parsed.data.gift);
       setContent(parsed.data.gift.content);
       setMessage(`Đã lưu revision ${parsed.data.gift.revision}.`);
@@ -82,8 +74,26 @@ export function DraftEditor({ gift: initialGift, manifest }: DraftEditorProps) {
     <div className="space-y-6">
       {manifest.fields.map((field) => {
         const value = typeof content[field.id] === "string" ? String(content[field.id]) : "";
-
-        if (field.type === "imageList" || field.type === "audio") {
+        if (field.type === "imageList") {
+          const fieldContent = content[field.id];
+          const initialIds = Array.isArray(fieldContent)
+            ? fieldContent.filter((item: unknown): item is string => typeof item === "string")
+            : [];
+          return (
+            <MediaImageListField
+              aspectRatio={field.aspectRatio}
+              fieldId={field.id}
+              giftPublicId={gift.publicId}
+              initialAssetIds={initialIds}
+              key={field.id}
+              label={field.label}
+              maxItems={field.maxItems}
+              minItems={field.minItems}
+              onChange={setValue}
+            />
+          );
+        }
+        if (field.type === "audio") {
           return (
             <div
               className="rounded-2xl border border-dashed border-rose-200 bg-rose-50/60 p-5"
@@ -91,23 +101,23 @@ export function DraftEditor({ gift: initialGift, manifest }: DraftEditorProps) {
             >
               <p className="font-bold text-stone-800">{field.label}</p>
               <p className="mt-1 text-sm text-stone-600">
-                Trình tải media sẽ được nối vào asset pipeline trong Sprint 2.
+                Âm thanh sẽ được chọn từ thư viện có bản quyền; trình phát chỉ bắt đầu sau thao tác
+                của người xem.
               </p>
             </div>
           );
         }
-
         if (field.type === "theme") {
           return (
             <label className="block" key={field.id}>
               <span className="text-sm font-bold text-stone-800">{field.label}</span>
               <select
                 className="mt-2 h-12 w-full rounded-2xl border border-rose-200 bg-white px-4"
-                onChange={(event) => setField(field.id, event.target.value)}
+                onChange={(event) => setValue(field.id, event.target.value)}
                 required={field.required}
                 value={value}
               >
-                <option value="">Chọn một chủ đề</option>
+                <option value="">Chọn giao diện</option>
                 {field.options.map((option) => (
                   <option key={option} value={option}>
                     {option}
@@ -117,7 +127,6 @@ export function DraftEditor({ gift: initialGift, manifest }: DraftEditorProps) {
             </label>
           );
         }
-
         return (
           <label className="block" key={field.id}>
             <span className="text-sm font-bold text-stone-800">{field.label}</span>
@@ -125,7 +134,7 @@ export function DraftEditor({ gift: initialGift, manifest }: DraftEditorProps) {
               <textarea
                 className="mt-2 min-h-32 w-full rounded-2xl border border-rose-200 bg-white p-4"
                 maxLength={field.maxLength}
-                onChange={(event) => setField(field.id, event.target.value)}
+                onChange={(event) => setValue(field.id, event.target.value)}
                 required={field.required}
                 value={value}
               />
@@ -133,7 +142,7 @@ export function DraftEditor({ gift: initialGift, manifest }: DraftEditorProps) {
               <input
                 className="mt-2 h-12 w-full rounded-2xl border border-rose-200 bg-white px-4"
                 maxLength={field.type === "shortText" ? field.maxLength : undefined}
-                onChange={(event) => setField(field.id, event.target.value)}
+                onChange={(event) => setValue(field.id, event.target.value)}
                 required={field.required}
                 type={field.type === "date" ? "date" : "text"}
                 value={value}

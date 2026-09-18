@@ -15,14 +15,23 @@ const previewFixtures: Readonly<Record<string, Readonly<Record<string, unknown>>
   "memory-box": {
     "final-message": "Cảm ơn vì đã cùng mình tạo nên những ký ức thật đẹp.",
     headline: "Mở hộp ký ức của chúng mình",
-    photos: ["fixture-photo-1", "fixture-photo-2", "fixture-photo-3"],
+    photos: [
+      "550e8400-e29b-41d4-a716-446655440001",
+      "550e8400-e29b-41d4-a716-446655440002",
+      "550e8400-e29b-41d4-a716-446655440003",
+    ],
   },
   "midnight-wish": {
     "receiver-name": "Người thương",
     wishes: "Mỗi vì sao là một điều mình trân trọng về chúng ta.",
   },
   "our-timeline": {
-    milestones: ["fixture-photo-1", "fixture-photo-2", "fixture-photo-3", "fixture-photo-4"],
+    milestones: [
+      "550e8400-e29b-41d4-a716-446655440101",
+      "550e8400-e29b-41d4-a716-446655440102",
+      "550e8400-e29b-41d4-a716-446655440103",
+      "550e8400-e29b-41d4-a716-446655440104",
+    ],
     title: "Hành trình của hai đứa",
   },
 };
@@ -100,7 +109,11 @@ async function main(): Promise<void> {
 
   switch (command) {
     case "migrate":
-      await runDatabaseMigrations(database);
+      await runDatabaseMigrations(database, (collection, phase) => {
+        process.stdout.write(
+          `${JSON.stringify({ collection, event: "database_migration", phase })}\n`,
+        );
+      });
       await verifyDatabaseSchema(database);
       break;
     case "seed":

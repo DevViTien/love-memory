@@ -24,6 +24,21 @@ type GiftIdempotencyDocument = Readonly<{
   updatedAt: Date;
 }>;
 
+type MediaReferenceDocument = Readonly<{
+  _id: string;
+  giftId: string;
+  fieldId: string;
+  status: string;
+}>;
+
+const referenceableMediaStatuses = [
+  "initiated",
+  "uploaded",
+  "processing",
+  "ready",
+  "failed",
+] as const;
+
 function toDocument(gift: Gift): GiftDocument {
   const { id, ...document } = gift;
   return { _id: id, ...document };
@@ -183,6 +198,31 @@ export const mongoGiftRepository: GiftRepository = {
       .findOne({ ...accessFilter(accessors), publicId });
 
     return document ? toDomain(document) : null;
+  },
+
+  async validateMediaReferences(giftId, references) {
+    const expected = references.flatMap(({ assetIds, fieldId }) =>
+      assetIds.map((assetId) => `${fieldId}:${assetId}`),
+    );
+    if (expected.length === 0) return true;
+
+    const database = await getDatabase();
+    const documents = await database
+      .collection<MediaReferenceDocument>(COLLECTIONS.assets)
+      .find(
+        {
+          $or: references.map(({ assetIds, fieldId }) => ({
+            _id: { $in: [...assetIds] },
+            fieldId,
+          })),
+          giftId,
+          status: { $in: [...referenceableMediaStatuses] },
+        },
+        { projection: { _id: 1, fieldId: 1 } },
+      )
+      .toArray();
+    const found = new Set(documents.map((document) => `${document.fieldId}:${document._id}`));
+    return expected.every((reference) => found.has(reference));
   },
 
   async updateDraft(gift, expectedRevision, accessors) {

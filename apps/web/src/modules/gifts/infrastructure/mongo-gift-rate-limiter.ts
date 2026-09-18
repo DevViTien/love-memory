@@ -4,7 +4,7 @@ import { COLLECTIONS, getDatabase } from "@love-memory/database";
 import { createHmac } from "node:crypto";
 import { isIP } from "node:net";
 
-export type GiftMutationScope = "gift-claim" | "gift-create" | "gift-update";
+export type GiftMutationScope = "gift-claim" | "gift-create" | "gift-update" | "media-upload";
 
 const RATE_LIMITS: Readonly<
   Record<GiftMutationScope, Readonly<{ max: number; windowSeconds: number }>>
@@ -12,6 +12,7 @@ const RATE_LIMITS: Readonly<
   "gift-claim": { max: 10, windowSeconds: 5 * 60 },
   "gift-create": { max: 10, windowSeconds: 10 * 60 },
   "gift-update": { max: 60, windowSeconds: 60 },
+  "media-upload": { max: 30, windowSeconds: 10 * 60 },
 };
 
 type ApiRateLimitDocument = Readonly<{

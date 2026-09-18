@@ -25,6 +25,15 @@ describe("storage environment", () => {
     });
   });
 
+  it("prefers a static token outside Vercel when a store id was also synchronized", () => {
+    expect(
+      parseStorageEnvironment({
+        BLOB_READ_WRITE_TOKEN: "worker-token",
+        BLOB_STORE_ID: "store_abc123",
+      }),
+    ).toEqual({ token: "worker-token" });
+  });
+
   it("rejects missing or incomplete credentials", () => {
     expect(() => parseStorageEnvironment({})).toThrow();
     expect(() => parseStorageEnvironment({ VERCEL_OIDC_TOKEN: "oidc-token" })).toThrow();

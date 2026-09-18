@@ -21,6 +21,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings=0",
+    "media:work": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local --conditions=react-server --import tsx scripts/media-worker.ts",
+    "jobs:dev": "pnpm dlx trigger.dev@4.6.3 dev --config apps/web/trigger.config.ts",
+    "jobs:deploy": "pnpm dlx trigger.dev@4.6.3 deploy --config apps/web/trigger.config.ts",
     "start": "pnpm --filter @love-memory/web start",
     "test": "pnpm build:templates && vitest run",
     "test:coverage": "pnpm build:templates && vitest run --coverage",
@@ -35,7 +38,10 @@
   "pnpm": {
     "ignoredBuiltDependencies": [
       "unrs-resolver"
-    ]
+    ],
+    "overrides": {
+      "ws": "8.21.3"
+    }
   },
   "devDependencies": {
     "@love-memory/template-sdk": "workspace:*",

@@ -40,11 +40,13 @@ const manifest = parseTemplateManifest({
   version: "1.0.0",
 });
 
+const assetId = "550e8400-e29b-41d4-a716-446655440000";
+
 describe("template payload schema", () => {
   it("derives required, optional and constrained fields from one manifest", () => {
     expect(
       parseTemplatePayload(manifest, {
-        photos: ["asset-1"],
+        photos: [assetId],
         theme: "rose",
         title: "Memory",
       }),
@@ -53,16 +55,25 @@ describe("template payload schema", () => {
 
   it("rejects extra fields, invalid themes and field limits", () => {
     expect(() =>
-      parseTemplatePayload(manifest, { photos: ["asset-1"], theme: "other", title: "Memory" }),
+      parseTemplatePayload(manifest, { photos: [assetId], theme: "other", title: "Memory" }),
     ).toThrow();
     expect(() =>
       parseTemplatePayload(manifest, {
-        photos: ["asset-1"],
+        photos: [assetId],
         private: "not-declared",
         title: "Memory",
       }),
     ).toThrow();
     expect(() => parseTemplatePayload(manifest, { photos: [], title: "Memory" })).toThrow();
+    expect(() =>
+      parseTemplatePayload(manifest, {
+        photos: ["data:image/gif;base64,R0lGODlhAQABAIAAAA"],
+        title: "Memory",
+      }),
+    ).toThrow();
+    expect(() =>
+      parseTemplatePayload(manifest, { photos: [assetId, assetId], title: "Memory" }),
+    ).toThrow();
   });
 
   it("allows incomplete draft data while validating supplied fields", () => {

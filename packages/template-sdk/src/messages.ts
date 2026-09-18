@@ -7,6 +7,7 @@ const TemplatePayloadSchema = z.record(z.string(), z.json());
 export const TemplateHostMessageSchema = z.discriminatedUnion("type", [
   z
     .object({
+      assets: z.record(z.string().min(1).max(160), z.url()).default({}),
       context: z
         .object({
           locale: z.string().min(2).max(35),
@@ -42,6 +43,7 @@ export const TemplateEventSchema = z.discriminatedUnion("type", [
 
 export type TemplateEvent = z.infer<typeof TemplateEventSchema>;
 export type TemplateHostMessage = z.infer<typeof TemplateHostMessageSchema>;
+export type TemplateMessagePayload = z.input<typeof TemplatePayloadSchema>;
 
 export function readTrustedTemplateEvent(
   event: MessageEvent<unknown>,
@@ -79,8 +81,13 @@ export function createTemplateBridge({
       postMessage({ type: "DESTROY" });
       disconnect();
     },
-    initialize(payload: z.input<typeof TemplatePayloadSchema>, prefersReducedMotion: boolean) {
+    initialize(
+      payload: TemplateMessagePayload,
+      prefersReducedMotion: boolean,
+      assets: Readonly<Record<string, string>> = {},
+    ) {
       postMessage({
+        assets,
         context: { locale: "vi-VN", prefersReducedMotion },
         payload,
         protocolVersion: TEMPLATE_MESSAGE_PROTOCOL_VERSION,

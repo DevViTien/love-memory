@@ -24,6 +24,6 @@ describe("memory box spike artifact route", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
-    await expect(response.text()).resolves.toContain("<!doctype html>");
+    await expect(response.text()).resolves.toContain('src="runtime.mjs"');
   });
 });

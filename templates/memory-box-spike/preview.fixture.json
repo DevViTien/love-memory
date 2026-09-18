@@ -2,7 +2,11 @@
   "anniversary-date": "2024-09-15",
   "audio": "licensed-preview-01",
   "opening-message": "Cảm ơn vì đã biến những ngày bình thường thành ký ức đặc biệt.",
-  "photos": ["fixture-memory-01", "fixture-memory-02", "fixture-memory-03"],
+  "photos": [
+    "550e8400-e29b-41d4-a716-446655440001",
+    "550e8400-e29b-41d4-a716-446655440002",
+    "550e8400-e29b-41d4-a716-446655440003"
+  ],
   "receiver-name": "An",
   "theme": "rose-night"
 }

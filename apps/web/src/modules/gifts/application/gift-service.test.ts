@@ -14,7 +14,18 @@ const manifest = parseTemplateManifest({
   capabilities: ["dom"],
   engineVersion: "1.0.0",
   entry: "index.js",
-  fields: [{ id: "headline", label: "Headline", maxLength: 20, required: true, type: "shortText" }],
+  fields: [
+    { id: "headline", label: "Headline", maxLength: 20, required: true, type: "shortText" },
+    {
+      aspectRatio: "4:3",
+      id: "photos",
+      label: "Photos",
+      maxItems: 2,
+      minItems: 0,
+      required: false,
+      type: "imageList",
+    },
+  ],
   id: "memory-box",
   meta: {
     description: "A memory box",
@@ -42,10 +53,12 @@ function canAccess(gift: Gift, accessor: GiftAccessor): boolean {
 function createMemoryRepository(): GiftRepository & {
   current: Gift | null;
   idempotency: GiftCreateIdempotency | null;
+  mediaReferencesValid: boolean;
 } {
   return {
     current: null,
     idempotency: null,
+    mediaReferencesValid: true,
     claimDraft(publicId, ownerId, anonymousDraftId, claimTokenHash, now) {
       const gift = this.current;
       if (
@@ -85,6 +98,9 @@ function createMemoryRepository(): GiftRepository & {
           ? gift
           : null,
       );
+    },
+    validateMediaReferences() {
+      return Promise.resolve(this.mediaReferencesValid);
     },
     updateDraft(gift, expectedRevision, accessors) {
       if (
@@ -203,6 +219,34 @@ describe("gift application service", () => {
     });
     expect(invalid).toMatchObject({ error: { code: "INVALID_CONTENT" }, ok: false });
     expect(repository.current?.content.data).toEqual({ headline: "Our story" });
+  });
+
+  it("rejects media references that are not owned by the current gift field", async () => {
+    await createAnonymousDraft();
+    repository.mediaReferencesValid = false;
+
+    const result = await service.updateDraft({
+      accessors: [
+        {
+          anonymousDraftId: anonymousIdentity.anonymousDraftId,
+          claimTokenHash: anonymousIdentity.claimTokenHash,
+          kind: "anonymous",
+        },
+      ],
+      content: {
+        headline: "Our story",
+        photos: ["550e8400-e29b-41d4-a716-446655440000"],
+      },
+      expectedRevision: 0,
+      publicId: "q1w2e3r4t5y6u7i8",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected draft validation to fail.");
+    expect(result.error).toEqual({
+      code: "INVALID_CONTENT",
+      fieldErrors: { photos: "Image assets must exist and belong to this gift field." },
+    });
+    expect(repository.current?.revision).toBe(0);
   });
 
   it("returns an opaque not-found if ownership changes during an update", async () => {

@@ -5,6 +5,7 @@ import {
   ImageTooLargeError,
   InvalidImageError,
   processUploadedImage,
+  processUploadedImageSet,
   UnsupportedImageFormatError,
 } from "./image-processor";
 
@@ -62,5 +63,31 @@ describe("image processor", () => {
     await expect(processUploadedImage(Uint8Array.from([1, 2, 3]))).rejects.toBeInstanceOf(
       InvalidImageError,
     );
+  });
+
+  it("creates deterministic responsive derivatives, a placeholder and a source checksum", async () => {
+    const source = await sharp({
+      create: { background: "#be123c", channels: 3, height: 600, width: 800 },
+    })
+      .jpeg()
+      .withMetadata({ exif: { IFD0: { Copyright: "private" } } })
+      .toBuffer();
+
+    const first = await processUploadedImageSet(source, { outputWidths: [768, 320] });
+    const second = await processUploadedImageSet(source, { outputWidths: [320, 768] });
+
+    expect(first.derivatives.map((item) => item.targetWidth)).toEqual([320, 768]);
+    expect(first.placeholderDataUrl).toMatch(/^data:image\/webp;base64,/);
+    expect(first.checksumSha256).toBe(second.checksumSha256);
+    for (const derivative of first.derivatives) {
+      const metadata = await sharp(derivative.bytes).metadata();
+      expect(metadata.exif).toBeUndefined();
+    }
+  });
+
+  it("rejects unsafe derivative dimensions", async () => {
+    await expect(
+      processUploadedImageSet(Uint8Array.from([1]), { outputWidths: [] }),
+    ).rejects.toBeInstanceOf(RangeError);
   });
 });

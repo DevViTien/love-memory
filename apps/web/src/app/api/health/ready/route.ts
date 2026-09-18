@@ -1,9 +1,11 @@
 import { API_ERROR_CODES } from "@love-memory/contracts";
 import { pingDatabase } from "@love-memory/database";
+import { getStorageEnvironment } from "@love-memory/storage";
 import { NextResponse } from "next/server";
 
 import { WEB_APP_VERSION } from "@/config/application";
 import { getHealthStatus } from "@/modules/health/application/get-health-status";
+import { assertMediaRuntimeReady } from "@/modules/media/infrastructure/media-job-scheduler";
 import { reportReadinessFailure } from "@/observability/operational-errors";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +15,8 @@ export async function GET() {
   const requestId = crypto.randomUUID();
 
   try {
+    getStorageEnvironment();
+    assertMediaRuntimeReady(process.env);
     await pingDatabase();
 
     return NextResponse.json(

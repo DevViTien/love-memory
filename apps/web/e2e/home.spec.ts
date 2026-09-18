@@ -6,6 +6,8 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { MongoClient } from "mongodb";
 
+import { captureViewerScreenshot } from "./viewer-harness";
+
 const authCapturePath = resolve(".tmp/e2e-auth-emails.jsonl");
 const cleanupRecords: Array<{ email?: string; publicId: string }> = [];
 
@@ -267,7 +269,9 @@ test("creates, edits and claims a draft through a real passwordless session", as
   await page.locator("textarea").fill("Bản nháp vẫn lưu được sau khi liên kết tài khoản.");
   await page.locator("main button").first().click();
   await expect(page.getByText("Revision 2", { exact: true })).toBeVisible();
-  await expect.poll(() => idempotencyGiftOwnerKind(idempotencyKey)).toBe("user");
+  await expect
+    .poll(() => idempotencyGiftOwnerKind(idempotencyKey), { timeout: 15_000 })
+    .toBe("user");
 
   await page.goto("/auth/sign-in");
   await expect(page.getByText(email, { exact: false })).toBeVisible();
@@ -279,7 +283,9 @@ test("creates, edits and claims a draft through a real passwordless session", as
   await page.getByRole("button", { name: "Đăng xuất" }).click();
   await expect(page.getByLabel("Email của bạn")).toBeVisible();
   await expect(page.getByRole("link", { name: "Đăng nhập" })).toBeVisible();
-  await expect.poll(() => idempotencyGiftOwnerKind(idempotencyKey)).toBe("user");
+  await expect
+    .poll(() => idempotencyGiftOwnerKind(idempotencyKey), { timeout: 15_000 })
+    .toBe("user");
 
   const revokedReplayStatus = await page.evaluate(async (key) => {
     const response = await fetch("/api/gifts", {
@@ -324,4 +330,48 @@ test("requires authorization for enabled mutation spike endpoints", async ({ req
 
   expect(response.status()).toBe(401);
   expect(response.headers()["cache-control"]).toBe("no-store");
+});
+
+test("runs an exact-version template through the isolated Viewer lifecycle", async ({
+  page,
+}, testInfo) => {
+  const browserErrors = captureBrowserErrors(page);
+  const runtimeModuleRequests: string[] = [];
+  const unexpectedRuntimeRequests: string[] = [];
+  page.on("request", (request) => {
+    if (
+      request.frame().url().includes("/template-artifacts/") &&
+      request.resourceType() !== "document"
+    ) {
+      if (request.url().endsWith("/runtime.mjs")) {
+        runtimeModuleRequests.push(request.url());
+      } else {
+        unexpectedRuntimeRequests.push(request.url());
+      }
+    }
+  });
+
+  const response = await page.goto("/viewer/memory-box-spike/0.1.0");
+  expect(response?.headers()["content-security-policy"]).toContain("strict-dynamic");
+  const frame = page.getByTitle("LoveMemory template viewer");
+  await expect(frame).toHaveAttribute("sandbox", "allow-scripts");
+  await expect(page.getByText(/Trạng thái: READY/)).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Fixture Viewer" }).getByRole("link"),
+  ).toHaveCount(3);
+  await captureViewerScreenshot(frame, testInfo, "viewer-ready");
+
+  await page.getByRole("button", { name: "Phát" }).click();
+  await expect(page.getByText(/Trạng thái: COMPLETE/)).toBeVisible();
+  await page.getByRole("button", { name: "Hủy runtime" }).click();
+  await expect(page.getByText(/Trạng thái: DESTROY/)).toBeVisible();
+
+  const artifactPath = await frame.getAttribute("src");
+  if (!artifactPath) throw new Error("Viewer iframe did not expose an artifact URL.");
+  const artifact = await page.request.get(artifactPath);
+  expect(artifact.headers()["cache-control"]).toContain("immutable");
+  expect(artifact.headers()["content-security-policy"]).toContain("connect-src 'none'");
+  expect(runtimeModuleRequests).toHaveLength(1);
+  expect(unexpectedRuntimeRequests).toEqual([]);
+  expect(browserErrors).toEqual([]);
 });

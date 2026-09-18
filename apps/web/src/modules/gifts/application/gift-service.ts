@@ -24,6 +24,11 @@ export type GiftCreateIdempotency = Readonly<{
 export type GiftCreatePersistenceResult =
   Readonly<{ gift: Gift; status: "created" | "replayed" }> | Readonly<{ status: "conflict" }>;
 
+export type GiftMediaReferenceGroup = Readonly<{
+  assetIds: readonly string[];
+  fieldId: string;
+}>;
+
 export interface GiftRepository {
   claimDraft(
     publicId: string,
@@ -34,6 +39,10 @@ export interface GiftRepository {
   ): Promise<Gift | null>;
   createDraft(gift: Gift, idempotency: GiftCreateIdempotency): Promise<GiftCreatePersistenceResult>;
   findAuthorized(publicId: string, accessors: readonly GiftAccessor[]): Promise<Gift | null>;
+  validateMediaReferences(
+    giftId: string,
+    references: readonly GiftMediaReferenceGroup[],
+  ): Promise<boolean>;
   updateDraft(
     gift: Gift,
     expectedRevision: number,
@@ -242,6 +251,25 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
           return failure({ code: "INVALID_CONTENT", fieldErrors: toFieldErrors(error) });
         }
         throw error;
+      }
+
+      const mediaReferences = manifest.fields.flatMap((field): GiftMediaReferenceGroup[] => {
+        if (field.type !== "imageList") return [];
+        const value = content[field.id];
+        return Array.isArray(value) && value.length > 0
+          ? [{ assetIds: value as string[], fieldId: field.id }]
+          : [];
+      });
+      if (!(await dependencies.gifts.validateMediaReferences(gift.id, mediaReferences))) {
+        return failure({
+          code: "INVALID_CONTENT",
+          fieldErrors: Object.fromEntries(
+            mediaReferences.map(({ fieldId }) => [
+              fieldId,
+              "Image assets must exist and belong to this gift field.",
+            ]),
+          ),
+        });
       }
       const updated = updateGiftDraft(gift, {
         content: { ...gift.content, data: content },

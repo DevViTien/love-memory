@@ -11,7 +11,13 @@ function createFieldValueSchema(field: TemplateField): z.ZodType {
     case "date":
       return z.iso.date();
     case "imageList":
-      return z.array(z.string().min(1).max(160)).min(field.minItems).max(field.maxItems);
+      return z
+        .array(z.uuid())
+        .min(field.minItems)
+        .max(field.maxItems)
+        .refine((assetIds) => new Set(assetIds).size === assetIds.length, {
+          message: "Image asset references must be unique.",
+        });
     case "theme":
       return z.string().refine((value) => field.options.includes(value), {
         message: "Theme is not declared by this template version.",

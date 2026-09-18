@@ -20,6 +20,7 @@
     "@love-memory/template-memory-box-spike": "workspace:*",
     "@love-memory/template-sdk": "workspace:*",
     "@love-memory/ui": "workspace:*",
+    "@trigger.dev/sdk": "catalog:",
     "better-auth": "catalog:",
     "mongodb": "catalog:",
     "next": "catalog:",

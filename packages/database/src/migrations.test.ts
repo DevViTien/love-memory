@@ -97,7 +97,7 @@ describe("database schema migration", () => {
       CORE_COLLECTION_DEFINITIONS.map((definition) => [definition.name, definition]),
     );
 
-    expect(DATABASE_SCHEMA_VERSION).toBe(3);
+    expect(DATABASE_SCHEMA_VERSION).toBe(6);
     expect(definitions.has(COLLECTIONS.users)).toBe(true);
     expect(definitions.has(COLLECTIONS.apiRateLimits)).toBe(true);
     expect(definitions.has(COLLECTIONS.templates)).toBe(true);
@@ -119,6 +119,9 @@ describe("database schema migration", () => {
     );
     expect(names.every(Boolean)).toBe(true);
     expect(new Set(names).size).toBe(names.length);
+    expect(names).toEqual(
+      expect.arrayContaining(["assets_active_gift_slot_unique", "assets_active_field_slot_unique"]),
+    );
   });
 
   it("defines the optimistic concurrency and template identity indexes", () => {
@@ -148,6 +151,23 @@ describe("database schema migration", () => {
     expect(fake.command).toHaveBeenCalledWith(
       expect.objectContaining({ collMod: COLLECTIONS.gifts }),
     );
+  });
+
+  it("removes the legacy asset storage-key index during the Sprint 2 migration", async () => {
+    const fake = new FakeDatabase();
+    const assets = fake.collection(COLLECTIONS.assets);
+    assets.indexDefinitions.push({
+      key: { storageKey: 1 },
+      name: "assets_storage_key_unique",
+      unique: true,
+    });
+
+    await runDatabaseMigrations(fake as unknown as Db);
+
+    expect(assets.indexDefinitions.map((index) => index["name"])).not.toContain(
+      "assets_storage_key_unique",
+    );
+    await expect(verifyDatabaseSchema(fake as unknown as Db)).resolves.toBeUndefined();
   });
 
   it("reports a missing collection during verification", async () => {
@@ -183,5 +203,13 @@ describe("database schema migration", () => {
     await runDatabaseMigrations(database);
     fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 1;
     await expect(verifyDatabaseSchema(database)).rejects.toThrow("schema version mismatch");
+
+    await runDatabaseMigrations(database);
+    fake.collection(COLLECTIONS.assets).indexDefinitions.push({
+      key: { storageKey: 1 },
+      name: "assets_storage_key_unique",
+      unique: true,
+    });
+    await expect(verifyDatabaseSchema(database)).rejects.toThrow("Legacy MongoDB index remains");
   });
 });
