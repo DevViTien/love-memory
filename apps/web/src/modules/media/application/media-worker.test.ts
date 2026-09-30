@@ -154,6 +154,60 @@ describe("media worker", () => {
     expect(reportProcessingFailure).toHaveBeenCalledWith(decodeError, asset.id);
   });
 
+  it("releases the source once the last transient attempt fails", async () => {
+    const repo = repository();
+    vi.mocked(repo.claimNext).mockResolvedValueOnce({
+      asset: { ...asset, attempts: 3 },
+      jobId: "job-1",
+    });
+    const objects = storage();
+    const worker = createMediaWorker({
+      processImage: vi.fn<typeof processUploadedImageSet>(() => Promise.reject(new Error("boom"))),
+      repository: repo,
+      storage: objects,
+    });
+
+    await expect(worker.runNext()).resolves.toMatchObject({ status: "failed" });
+    expect(repo.fail).toHaveBeenCalledWith(
+      asset.id,
+      "job-1",
+      "PROCESSING_FAILED",
+      null,
+      expect.any(Date),
+    );
+    expect(objects.deleteObject).toHaveBeenCalledWith(asset.sourceKey);
+  });
+
+  it("keeps the source while a transient failure can still be retried", async () => {
+    const objects = storage();
+    const worker = createMediaWorker({
+      processImage: vi.fn<typeof processUploadedImageSet>(() => Promise.reject(new Error("boom"))),
+      repository: repository(),
+      storage: objects,
+    });
+
+    await expect(worker.runNext()).resolves.toMatchObject({ status: "failed" });
+    expect(objects.deleteObject).not.toHaveBeenCalled();
+  });
+
+  it("releases the source of an asset failed terminally while claiming", async () => {
+    const repo = repository();
+    const failedAsset = {
+      ...asset,
+      failureCode: "PROCESSING_FAILED" as const,
+      status: "failed" as const,
+    };
+    vi.mocked(repo.claimNext).mockResolvedValueOnce({ exhaustedAsset: failedAsset });
+    const objects = storage();
+    const processImage = vi.fn<typeof processUploadedImageSet>();
+    const worker = createMediaWorker({ processImage, repository: repo, storage: objects });
+
+    await expect(worker.runNext()).resolves.toEqual({ assetId: asset.id, status: "failed" });
+    expect(objects.deleteObject).toHaveBeenCalledWith(asset.sourceKey);
+    expect(processImage).not.toHaveBeenCalled();
+    expect(repo.fail).not.toHaveBeenCalled();
+  });
+
   it("does not retry invalid decoded bytes", async () => {
     const repo = repository();
     const objects = storage();

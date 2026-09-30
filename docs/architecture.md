@@ -77,9 +77,12 @@ application services are wired to concrete infrastructure adapters.
 
 ## Rendering and CSP
 
-Public catalog routes remain statically rendered and use a static-compatible CSP. Studio routes are
-dynamically rendered and receive a per-request nonce. A route must never use nonce CSP unless its
-layout explicitly opts into dynamic rendering. Production Playwright tests verify both modes.
+Public catalog routes use a static-compatible CSP. They currently render per request
+(`force-dynamic`) because they read the persisted template registry, but they must never depend on a
+nonce, so they can return to static or cached rendering later. Studio and Viewer routes receive a
+per-request nonce, and each of those route trees calls `connection()` in its layout. A route must
+never use nonce CSP unless its layout explicitly opts into dynamic rendering. Production Playwright
+tests verify both modes.
 
 ## Configuration
 

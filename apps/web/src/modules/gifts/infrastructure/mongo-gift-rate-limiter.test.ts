@@ -23,7 +23,7 @@ describe("Mongo gift mutation rate limiter", () => {
     });
   });
 
-  it("uses account, anonymous identity, then Vercel's trusted IP as stable subjects", () => {
+  it("uses account, anonymous identity, Vercel's trusted IP, then the shared unidentified subject", () => {
     const request = new Request("https://love.example/api/gifts", {
       headers: {
         "x-forwarded-for": "198.51.100.8",
@@ -43,7 +43,7 @@ describe("Mongo gift mutation rate limiter", () => {
         }),
         {},
       ),
-    ).toBeNull();
+    ).toBe("unidentified");
   });
 
   it("atomically consumes a bucket and returns its retry window", async () => {
@@ -60,6 +60,18 @@ describe("Mongo gift mutation rate limiter", () => {
       expect.objectContaining({ _id: `gift-create:${expectedHash}:0`, count: { $lt: 10 } }),
       expect.objectContaining({ $inc: { count: 1 } }),
       { returnDocument: "after", upsert: true },
+    );
+  });
+
+  it("gives the shared unidentified bucket five times the scope limit", async () => {
+    databaseMocks.findOneAndUpdate.mockResolvedValue({ count: 1 });
+
+    await consumeGiftMutationRateLimit("gift-create", "unidentified", "s".repeat(32), new Date(0));
+
+    expect(databaseMocks.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ count: { $lt: 50 } }),
+      expect.anything(),
+      expect.anything(),
     );
   });
 

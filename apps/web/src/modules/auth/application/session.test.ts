@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { canManageOwner, createSessionService, type CurrentUser } from "./session";
+import { createSessionService, type CurrentUser } from "./session";
 
 const creator: CurrentUser = {
   email: "creator@example.com",
@@ -9,13 +9,7 @@ const creator: CurrentUser = {
   role: "creator",
 };
 
-describe("authorization helpers", () => {
-  it("allows owners and admins but rejects another creator", () => {
-    expect(canManageOwner(creator, "creator-1")).toBe(true);
-    expect(canManageOwner(creator, "creator-2")).toBe(false);
-    expect(canManageOwner({ ...creator, role: "admin" }, "creator-2")).toBe(true);
-  });
-
+describe("session service", () => {
   it("maps a valid provider session and rejects an absent session", async () => {
     const authenticated = createSessionService({
       getSession: () => Promise.resolve({ session: { id: "session-1" }, user: creator }),

@@ -15,6 +15,11 @@ const RATE_LIMITS: Readonly<
   "media-upload": { max: 30, windowSeconds: 10 * 60 },
 };
 
+// Requests with no trustworthy client key (no session, no anonymous cookie and no Vercel forwarding
+// header, i.e. off-Vercel hosts) share one bucket, so they are bounded rather than unlimited.
+export const UNIDENTIFIED_RATE_LIMIT_SUBJECT = "unidentified";
+const UNIDENTIFIED_LIMIT_MULTIPLIER = 5;
+
 type ApiRateLimitDocument = Readonly<{
   _id: string;
   count: number;
@@ -46,7 +51,11 @@ export async function consumeGiftMutationRateLimit(
   now = new Date(),
 ): Promise<GiftRateLimitResult> {
   const database = await getDatabase();
-  const limit = RATE_LIMITS[scope];
+  const scopeLimit = RATE_LIMITS[scope];
+  const limit =
+    subject === UNIDENTIFIED_RATE_LIMIT_SUBJECT
+      ? { ...scopeLimit, max: scopeLimit.max * UNIDENTIFIED_LIMIT_MULTIPLIER }
+      : scopeLimit;
   const windowMilliseconds = limit.windowSeconds * 1000;
   const bucketStart = Math.floor(now.getTime() / windowMilliseconds) * windowMilliseconds;
   const expiresAt = new Date(bucketStart + windowMilliseconds);
@@ -91,7 +100,7 @@ export async function consumeGiftMutationRateLimit(
 export function giftRateLimitSubject(
   request: Request,
   identity: Readonly<{ anonymousDraftId?: string; userId?: string }>,
-): string | null {
+): string {
   if (identity.userId) {
     return `user:${identity.userId}`;
   }
@@ -102,5 +111,5 @@ export function giftRateLimitSubject(
   const forwardedFor = request.headers.get("x-vercel-forwarded-for")?.split(",", 1)[0]?.trim();
   return forwardedFor && forwardedFor.length <= 64 && isIP(forwardedFor)
     ? `ip:${forwardedFor}`
-    : null;
+    : UNIDENTIFIED_RATE_LIMIT_SUBJECT;
 }

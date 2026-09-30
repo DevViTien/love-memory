@@ -130,7 +130,6 @@ describe("Mongo gift repository", () => {
     await expect(
       mongoGiftRepository.findAuthorized(draft.publicId, [
         {
-          isAdmin: false,
           kind: "user",
           userId: "other-user",
         },
@@ -200,7 +199,7 @@ describe("Mongo gift repository", () => {
     await expect(
       mongoGiftRepository.createDraft(draft, {
         ...idempotency,
-        accessor: { isAdmin: false, kind: "user", userId: "other" },
+        accessor: { kind: "user", userId: "other" },
         actorKey: "user:other",
       }),
     ).resolves.toEqual({ status: "conflict" });

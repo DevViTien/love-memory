@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 
 import { getCurrentUser } from "@/composition/session";
 import { MagicLinkForm } from "@/modules/auth/presentation/magic-link-form";
+import { signInErrorMessage } from "@/modules/auth/presentation/sign-in-error";
 import { SignOutButton } from "@/modules/auth/presentation/sign-out-button";
 
 export const dynamic = "force-dynamic";
@@ -26,11 +27,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
   const query = await searchParams;
   const user = await getCurrentUser(await headers());
   const callbackUrl = safeCallbackUrl(query.next);
-  const rawError = Array.isArray(query.error) ? query.error[0] : query.error;
-  const errorMessage =
-    rawError === "invalid-link"
-      ? "Liên kết đăng nhập không hợp lệ, đã hết hạn hoặc đã được sử dụng. Vui lòng yêu cầu liên kết mới."
-      : null;
+  const errorMessage = signInErrorMessage(query.error);
 
   return (
     <main>

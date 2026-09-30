@@ -42,7 +42,7 @@ describe("gift route helpers", () => {
       role: "admin",
     });
     const authenticated = await getGiftRequestContext(new Request("https://example.com/api/gifts"));
-    expect(authenticated.accessors).toEqual([{ isAdmin: true, kind: "user", userId: "admin-1" }]);
+    expect(authenticated.accessors).toEqual([{ kind: "user", userId: "admin-1" }]);
   });
 
   it("keeps both account and anonymous credentials after sign-in", async () => {

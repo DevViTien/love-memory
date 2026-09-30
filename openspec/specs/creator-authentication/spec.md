@@ -51,21 +51,6 @@ Magic-link tokens SHALL expire 600 seconds (10 minutes) after they are issued. T
 - **THEN** no session is created
 - **AND** the browser is redirected to `/auth/sign-in` with an `error` query parameter
 
-### Requirement: Invalid-link explanation on the sign-in page
-
-When a signed-out visitor opens `/auth/sign-in` with the query parameter `error` equal to `invalid-link`, the sign-in page SHALL show an alert saying the sign-in link is invalid, expired, or already used and that a new link should be requested, and SHALL keep the sign-in form available. The page SHALL NOT show this alert to a signed-in visitor or for any other `error` value.
-
-#### Scenario: Invalid-link error shown to a signed-out visitor
-
-- **WHEN** a signed-out visitor opens `/auth/sign-in?error=invalid-link`
-- **THEN** an alert explains that the link is invalid, expired, or already used
-- **AND** the email form is shown so a new link can be requested
-
-#### Scenario: Unknown error value shows no alert
-
-- **WHEN** a signed-out visitor opens `/auth/sign-in` with an `error` value other than `invalid-link`
-- **THEN** no invalid-link alert is shown
-
 ### Requirement: Magic-link email delivery
 
 The system SHALL send each magic link by email through the configured transactional email provider, from the configured `AUTH_EMAIL_FROM` sender. The email SHALL contain the link as an HTML button (with the URL HTML-escaped) and as plain text, and SHALL say that the link can be used only once and expires after 10 minutes. If the provider reports a delivery error, the sign-in request SHALL fail rather than report success. Only when the auth base URL is a loopback host (`localhost` or `127.0.0.1`) and `AUTH_EMAIL_CAPTURE_PATH` is set SHALL messages be written to that local file instead of being sent.
@@ -144,3 +129,30 @@ The system SHALL refuse to initialize authentication unless `BETTER_AUTH_SECRET`
 
 - **WHEN** `BETTER_AUTH_SECRET` is shorter than 32 characters
 - **THEN** authentication configuration fails to load
+
+### Requirement: Sign-in error explanation
+
+A failed magic-link verification SHALL redirect to `/auth/sign-in` with an `error` query parameter.
+When a signed-out visitor opens `/auth/sign-in` with a non-empty `error` value, the sign-in page
+SHALL show an alert and SHALL keep the sign-in form available. For `invalid-link` and
+`INVALID_TOKEN` the alert SHALL say that the sign-in link is invalid, expired, or already used and
+that a new link should be requested. For any other `error` value the alert SHALL say that sign-in
+could not be completed and ask the visitor to try again. The page MUST NOT display the raw `error`
+or `error_description` values, and SHALL NOT show either alert to a signed-in visitor.
+
+#### Scenario: Invalid-link error shown to a signed-out visitor
+
+- **WHEN** a signed-out visitor opens `/auth/sign-in?error=invalid-link`
+- **THEN** an alert explains that the link is invalid, expired, or already used
+- **AND** the email form is shown so a new link can be requested
+
+#### Scenario: Reused link from the provider is explained
+
+- **WHEN** a visitor opens a magic link whose token was already consumed
+- **THEN** the browser lands on `/auth/sign-in` with `error` set to `INVALID_TOKEN`
+- **AND** the invalid, expired, or already-used alert is shown with the email form
+
+#### Scenario: Unknown error value shows a generic alert
+
+- **WHEN** a signed-out visitor opens `/auth/sign-in` with an `error` value such as `failed_to_create_session`
+- **THEN** a generic sign-in failure alert is shown without echoing the error value

@@ -303,6 +303,19 @@ test("explains an invalid or expired magic link", async ({ page }) => {
   await expect(page.getByText("Liên kết đăng nhập không hợp lệ", { exact: false })).toBeVisible();
 });
 
+test("explains a magic link rejected by real verification", async ({ page }) => {
+  const verifyUrl = new URL("/api/auth/magic-link/verify", "http://placeholder");
+  verifyUrl.searchParams.set("token", "not-a-real-magic-link-token");
+  verifyUrl.searchParams.set("callbackURL", "/studio/new");
+  verifyUrl.searchParams.set("errorCallbackURL", "/auth/sign-in");
+
+  await page.goto(`${verifyUrl.pathname}${verifyUrl.search}`);
+
+  await expect(page).toHaveURL(/\/auth\/sign-in\?error=INVALID_TOKEN/);
+  await expect(page.getByText("Liên kết đăng nhập không hợp lệ", { exact: false })).toBeVisible();
+  await expect(page.getByLabel("Email của bạn")).toBeVisible();
+});
+
 test("isolates, controls, destroys and reloads the template spike", async ({ page, request }) => {
   const browserErrors = captureBrowserErrors(page);
   const response = await page.goto("/studio/spikes");

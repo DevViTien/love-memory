@@ -13,14 +13,18 @@ custom authentication protocol.
 
 Use Better Auth with its MongoDB adapter and email-based passwordless flow. Keep session access
 behind a small DAL (`verifySession`, `getCurrentUser`) and authorization inside application use
-cases. Anonymous drafts use a separate random claim token and are attached to an authenticated
-owner only after verification.
+cases. Anonymous drafts carry a separate claim token, stored only as a hash. The token is derived
+with HMAC-SHA-256 from the create request's browser-generated idempotency key and the server secret,
+so a lost create response can be replayed safely for the 24-hour idempotency window. A draft is
+attached to an authenticated owner only after verification, and a claimed draft cannot be recovered
+with its old anonymous key.
 
 ## Consequences
 
 - Auth routes, cookie policy, trusted origins and email delivery require integration tests.
 - Magic-link/OTP values are hashed at rest and never logged.
-- Admin identity requires a distinct role and MFA before admin features become active.
+- Admin identity requires a distinct role and MFA before admin features become active. Until then
+  the `admin` role grants no access to other creators' drafts.
 - Auth types must not leak into the gift domain package.
 - Better Auth 1.7.5 currently requires an explicit `@better-auth/utils` 0.4.2 peer pin alongside
   `better-call`'s private 0.5.x dependency; keep both resolved versions until the upstream peer

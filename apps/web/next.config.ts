@@ -17,6 +17,11 @@ const nextConfig: NextConfig = {
         headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
         source: "/template-spikes/:path*",
       },
+      {
+        // Artifacts are framed by the Viewer; this matches their `frame-ancestors 'self'` CSP.
+        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+        source: "/template-artifacts/:path*",
+      },
     ];
   },
   poweredByHeader: false,

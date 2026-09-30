@@ -19,7 +19,8 @@ export function MagicLinkForm({ callbackUrl = "/studio/new" }: Readonly<{ callba
       const result = await authClient.signIn.magicLink({
         callbackURL: callbackUrl,
         email,
-        errorCallbackURL: "/auth/sign-in?error=invalid-link",
+        // Better Auth appends its own `error` code to this URL.
+        errorCallbackURL: "/auth/sign-in",
         newUserCallbackURL: callbackUrl,
       });
       setState(result.error ? "error" : "sent");

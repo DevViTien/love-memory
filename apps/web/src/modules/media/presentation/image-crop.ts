@@ -42,9 +42,23 @@ export function calculateCropRectangle(
   return { height, width: sourceWidth, x: 0, y: (sourceHeight - height) * normalizedY };
 }
 
-function croppedFileName(name: string): string {
+// Browsers without WebP canvas encoding silently return PNG (or JPEG); the upload must declare what
+// was actually encoded, or processing rejects the MIME mismatch as UPLOAD_INVALID.
+const ENCODED_EXTENSIONS = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+} as const;
+
+type EncodedContentType = keyof typeof ENCODED_EXTENSIONS;
+
+export function encodedContentType(blobType: string): EncodedContentType {
+  return blobType === "image/png" || blobType === "image/jpeg" ? blobType : "image/webp";
+}
+
+function croppedFileName(name: string, contentType: EncodedContentType): string {
   const base = name.replace(/\.[^.]+$/, "") || "memory";
-  return `${base}-cropped.webp`;
+  return `${base}-cropped.${ENCODED_EXTENSIONS[contentType]}`;
 }
 
 export async function cropImageToAspectRatio(
@@ -91,9 +105,10 @@ export async function cropImageToAspectRatio(
         0.9,
       );
     });
-    return new File([blob], croppedFileName(file.name), {
+    const contentType = encodedContentType(blob.type);
+    return new File([blob], croppedFileName(file.name, contentType), {
       lastModified: file.lastModified,
-      type: "image/webp",
+      type: contentType,
     });
   } finally {
     bitmap.close();

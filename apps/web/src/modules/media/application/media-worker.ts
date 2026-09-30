@@ -16,9 +16,12 @@ import {
 } from "@love-memory/storage";
 
 export type ClaimedMediaJob = Readonly<{ asset: MediaAsset; jobId: string }>;
+// Claiming can turn an asset into a terminal failure without processing it (exhausted stale lease
+// or an unclaimable asset). The worker then releases the source object, which no retry can use.
+export type ExhaustedMediaJob = Readonly<{ exhaustedAsset: MediaAsset }>;
 
 export interface MediaWorkerRepository {
-  claimNext: (now: Date) => Promise<ClaimedMediaJob | null>;
+  claimNext: (now: Date) => Promise<ClaimedMediaJob | ExhaustedMediaJob | null>;
   claimExpiredUpload: (now: Date) => Promise<MediaAsset | null>;
   complete: (
     assetId: string,
@@ -105,6 +108,10 @@ export function createMediaWorker({
   > {
     const claimed = await repository.claimNext(clock());
     if (!claimed) return runExpiredCleanup();
+    if ("exhaustedAsset" in claimed) {
+      await deleteSourceBestEffort(claimed.exhaustedAsset);
+      return { assetId: claimed.exhaustedAsset.id, status: "failed" };
+    }
 
     const { asset, jobId } = claimed;
     const writtenDerivativeKeys: string[] = [];
@@ -160,12 +167,13 @@ export function createMediaWorker({
         if (result.status === "rejected") reportCleanupFailure(result.reason, asset.id);
       }
       const terminalFailureCode = nonRetryableFailureCode(error);
-      if (terminalFailureCode) await deleteSourceBestEffort(asset);
       const failureCode = terminalFailureCode ?? "PROCESSING_FAILED";
       const retryAt =
         !terminalFailureCode && asset.attempts < MEDIA_ASSET_LIMITS.maximumAttempts
           ? new Date(clock().getTime() + 2 ** asset.attempts * 30_000)
           : null;
+      // Keep the source only while a retry can still read it.
+      if (retryAt === null) await deleteSourceBestEffort(asset);
       await repository.fail(asset.id, jobId, failureCode, retryAt, clock());
       reportProcessingFailure(error, asset.id);
       return { assetId: asset.id, status: "failed" };

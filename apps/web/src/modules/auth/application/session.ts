@@ -40,7 +40,3 @@ export function createSessionService(provider: SessionProvider) {
 
   return { getCurrentUser, verifySession } as const;
 }
-
-export function canManageOwner(user: CurrentUser, ownerId: string): boolean {
-  return user.role === "admin" || user.id === ownerId;
-}

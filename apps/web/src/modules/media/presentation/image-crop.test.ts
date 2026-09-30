@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { calculateCropRectangle, cropImageToAspectRatio, parseAspectRatio } from "./image-crop";
+import {
+  calculateCropRectangle,
+  cropImageToAspectRatio,
+  encodedContentType,
+  parseAspectRatio,
+} from "./image-crop";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -62,5 +67,36 @@ describe("image crop geometry", () => {
     expect(result.type).toBe("image/webp");
     expect(result.lastModified).toBe(123);
     expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("labels the crop with the format the browser actually encoded", () => {
+    expect(encodedContentType("image/png")).toBe("image/png");
+    expect(encodedContentType("image/jpeg")).toBe("image/jpeg");
+    expect(encodedContentType("image/webp")).toBe("image/webp");
+    expect(encodedContentType("")).toBe("image/webp");
+  });
+
+  it("names a PNG fallback crop with a matching extension", async () => {
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi.fn(() => Promise.resolve({ close: vi.fn(), height: 100, width: 100 })),
+    );
+    const canvas = {
+      getContext: vi.fn(() => ({ drawImage: vi.fn() })),
+      height: 0,
+      toBlob: vi.fn((callback: BlobCallback) => callback(new Blob(["png"], { type: "image/png" }))),
+      width: 0,
+    } as unknown as HTMLCanvasElement;
+    vi.spyOn(document, "createElement").mockReturnValue(canvas);
+
+    const result = await cropImageToAspectRatio(
+      new File(["source"], "memory.jpg", { type: "image/jpeg" }),
+      "1:1",
+      0.5,
+      0.5,
+    );
+
+    expect(result.name).toBe("memory-cropped.png");
+    expect(result.type).toBe("image/png");
   });
 });

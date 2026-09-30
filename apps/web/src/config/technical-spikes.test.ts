@@ -17,6 +17,20 @@ describe("technical spike environment", () => {
     ).toMatchObject({ enabled: true });
   });
 
+  it("stays disabled in the Vercel Production environment", () => {
+    const enabled = {
+      TECHNICAL_SPIKES_ENABLED: "true",
+      TECHNICAL_SPIKE_TOKEN: "a-development-token-with-32-characters",
+    };
+
+    expect(parseTechnicalSpikeEnvironment({ ...enabled, VERCEL_ENV: "production" })).toMatchObject({
+      enabled: false,
+    });
+    expect(parseTechnicalSpikeEnvironment({ ...enabled, VERCEL_ENV: "preview" })).toMatchObject({
+      enabled: true,
+    });
+  });
+
   it.each([
     ["/studio/spikes", true],
     ["/studio/spikes/history", true],

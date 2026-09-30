@@ -3,7 +3,7 @@ import { parseTemplateDraftPayload, type TemplateManifest } from "@love-memory/t
 import { z } from "zod";
 
 export type GiftAccessor =
-  | Readonly<{ isAdmin: boolean; kind: "user"; userId: string }>
+  | Readonly<{ kind: "user"; userId: string }>
   | Readonly<{ anonymousDraftId: string; claimTokenHash: string; kind: "anonymous" }>;
 
 export type AnonymousDraftIdentity = Readonly<{
@@ -174,7 +174,7 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
         ? null
         : (input.anonymousIdentity ?? dependencies.createAnonymousIdentity(input.idempotencyKey));
       const accessor: GiftAccessor = input.ownerId
-        ? { isAdmin: false, kind: "user", userId: input.ownerId }
+        ? { kind: "user", userId: input.ownerId }
         : {
             anonymousDraftId: anonymousIdentity!.anonymousDraftId,
             claimTokenHash: anonymousIdentity!.claimTokenHash,

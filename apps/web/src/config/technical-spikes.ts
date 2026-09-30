@@ -12,6 +12,7 @@ const TechnicalSpikeEnvironmentSchema = z
       (value) => (value === "" ? undefined : value),
       z.string().min(24).max(256).optional(),
     ),
+    VERCEL_ENV: z.string().optional(),
   })
   .superRefine((environment, context) => {
     if (environment.TECHNICAL_SPIKES_ENABLED && !environment.TECHNICAL_SPIKE_TOKEN) {
@@ -23,7 +24,10 @@ const TechnicalSpikeEnvironmentSchema = z
     }
   })
   .transform((environment) => ({
-    enabled: environment.TECHNICAL_SPIKES_ENABLED,
+    // Forced off rather than rejected: the proxy reads this on every request, so throwing would
+    // take the whole Production site down. NODE_ENV cannot be used because local and CI E2E runs
+    // also execute production builds.
+    enabled: environment.TECHNICAL_SPIKES_ENABLED && environment.VERCEL_ENV !== "production",
     token: environment.TECHNICAL_SPIKE_TOKEN,
   }));
 

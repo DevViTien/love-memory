@@ -29,7 +29,7 @@ export async function GET() {
     return NextResponse.json(
       {
         error: {
-          code: API_ERROR_CODES.internal,
+          code: API_ERROR_CODES.unavailable,
           message: "Service dependencies are not ready.",
           requestId,
         },

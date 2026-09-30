@@ -6,7 +6,11 @@ import { MongoServerError } from "mongodb";
 import { randomUUID } from "node:crypto";
 
 import { type MediaAssetRepository } from "../application/media-service";
-import { type ClaimedMediaJob, type MediaWorkerRepository } from "../application/media-worker";
+import {
+  type ClaimedMediaJob,
+  type ExhaustedMediaJob,
+  type MediaWorkerRepository,
+} from "../application/media-worker";
 
 type MediaAssetDocument = Omit<MediaAsset, "id"> & Readonly<{ _id: string }>;
 
@@ -292,10 +296,10 @@ export const mongoMediaWorkerRepository: MediaWorkerRepository = {
     return document ? toDomain(document) : null;
   },
 
-  async claimNext(now): Promise<ClaimedMediaJob | null> {
+  async claimNext(now): Promise<ClaimedMediaJob | ExhaustedMediaJob | null> {
     const database = await getDatabase();
     const client = await getMongoClient();
-    let claimed: ClaimedMediaJob | null = null;
+    let claimed: ClaimedMediaJob | ExhaustedMediaJob | null = null;
 
     await client.withSession(async (session) => {
       await session.withTransaction(async () => {
@@ -330,17 +334,20 @@ export const mongoMediaWorkerRepository: MediaWorkerRepository = {
               { returnDocument: "after", session, sort: { updatedAt: 1 } },
             );
           if (exhausted) {
-            await database.collection<MediaAssetDocument>(COLLECTIONS.assets).updateOne(
-              { _id: exhausted.payload.assetId, status: "processing" },
-              {
-                $set: {
-                  failureCode: "PROCESSING_FAILED",
-                  status: "failed",
-                  updatedAt: now,
+            const failed = await database
+              .collection<MediaAssetDocument>(COLLECTIONS.assets)
+              .findOneAndUpdate(
+                { _id: exhausted.payload.assetId, status: "processing" },
+                {
+                  $set: {
+                    failureCode: "PROCESSING_FAILED",
+                    status: "failed",
+                    updatedAt: now,
+                  },
                 },
-              },
-              { session },
-            );
+                { returnDocument: "after", session },
+              );
+            if (failed) claimed = { exhaustedAsset: toDomain(failed) };
           }
           return;
         }
@@ -360,17 +367,20 @@ export const mongoMediaWorkerRepository: MediaWorkerRepository = {
             { returnDocument: "after", session },
           );
         if (!document) {
-          await database.collection<MediaAssetDocument>(COLLECTIONS.assets).updateOne(
-            { _id: job.payload.assetId, status: "processing" },
-            {
-              $set: {
-                failureCode: "PROCESSING_FAILED",
-                status: "failed",
-                updatedAt: now,
+          const failed = await database
+            .collection<MediaAssetDocument>(COLLECTIONS.assets)
+            .findOneAndUpdate(
+              { _id: job.payload.assetId, status: "processing" },
+              {
+                $set: {
+                  failureCode: "PROCESSING_FAILED",
+                  status: "failed",
+                  updatedAt: now,
+                },
               },
-            },
-            { session },
-          );
+              { returnDocument: "after", session },
+            );
+          if (failed) claimed = { exhaustedAsset: toDomain(failed) };
           await database
             .collection<MediaJobDocument>(COLLECTIONS.jobOutbox)
             .updateOne(

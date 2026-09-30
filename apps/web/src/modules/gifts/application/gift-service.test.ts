@@ -41,7 +41,7 @@ const manifest = parseTemplateManifest({
 
 function canAccess(gift: Gift, accessor: GiftAccessor): boolean {
   if (accessor.kind === "user") {
-    return accessor.isAdmin || gift.ownership.ownerId === accessor.userId;
+    return gift.ownership.ownerId === accessor.userId;
   }
   return (
     gift.ownership.ownerId === null &&
@@ -177,7 +177,7 @@ describe("gift application service", () => {
       publicId: "q1w2e3r4t5y6u7i8",
     });
     const otherUser = await service.getDraft({
-      accessors: [{ isAdmin: false, kind: "user", userId: "other-user" }],
+      accessors: [{ kind: "user", userId: "other-user" }],
       publicId: "q1w2e3r4t5y6u7i8",
     });
 

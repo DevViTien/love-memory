@@ -51,7 +51,7 @@ function toDomain(document: GiftDocument): Gift {
 
 function singleAccessFilter(accessor: GiftAccessor): Filter<GiftDocument> {
   if (accessor.kind === "user") {
-    return accessor.isAdmin ? {} : { "ownership.ownerId": accessor.userId };
+    return { "ownership.ownerId": accessor.userId };
   }
 
   return {
@@ -62,10 +62,6 @@ function singleAccessFilter(accessor: GiftAccessor): Filter<GiftDocument> {
 }
 
 function accessFilter(accessors: readonly GiftAccessor[]): Filter<GiftDocument> {
-  if (accessors.some((accessor) => accessor.kind === "user" && accessor.isAdmin)) {
-    return {};
-  }
-
   const filters = accessors.map(singleAccessFilter);
   if (filters.length === 0) {
     return { _id: { $exists: false } };

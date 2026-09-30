@@ -30,7 +30,8 @@ export async function getGiftRequestContext(request: Request): Promise<
 
   const accessors: GiftAccessor[] = [];
   if (user) {
-    accessors.push({ isAdmin: user.role === "admin", kind: "user", userId: user.id });
+    // Roles grant no draft access; admin access arrives with MFA and audit in the admin work.
+    accessors.push({ kind: "user", userId: user.id });
   }
   if (anonymousIdentity) {
     accessors.push({
@@ -64,10 +65,6 @@ export async function enforceGiftMutationRateLimit(
       : {}),
     ...(context.userId ? { userId: context.userId } : {}),
   });
-  if (!subject) {
-    return null;
-  }
-
   const result = await consumeGiftMutationRateLimit(scope, subject, getAuthEnvironment().secret);
   if (result.allowed) {
     return null;

@@ -54,7 +54,8 @@ If task dispatch fails after upload completion, the API records an operational e
 
 - `initiated` past `expiresAt`: source is abandoned and is deleted by the worker cleanup path.
 - `failed / UPLOAD_INVALID`: declared Blob metadata or decoded MIME did not match; do not retry the same bytes.
-- `failed / PROCESSING_FAILED`: transient decode/storage failure; retry from Studio while attempts are below three.
+- `failed / DECODE_FAILED` or `OBJECT_MISSING`: the bytes are not a supported image, or the source was never uploaded; terminal, the source is deleted.
+- `failed / PROCESSING_FAILED`: transient storage or processing failure (not a decode error); retry from Studio while attempts are below three. After the third attempt the source is deleted and the creator can only remove the asset.
 - `processing` older than ten minutes: lease is considered stale and can be reclaimed.
 - `deleting` past `expiresAt`: a synchronous delete did not finish; the scheduled sweep retries source and derivative cleanup.
 - `ready` with source object still present: derivative commit succeeded but source cleanup failed; safe to delete the source key manually after confirming derivatives.

@@ -17,7 +17,8 @@ state, checksums and Blob pathnames, not binary bodies.
 - The browser uploads through a short-lived signed `PUT` URL scoped to one random pathname, one MIME
   allowlist and a maximum byte size.
 - The server performs a bounded consistent read, decodes the real image, removes metadata and writes
-  a WebP derivative. The original is deleted after success or validation failure.
+  a WebP derivative. The original is deleted after success, after a terminal validation failure,
+  and once a transient failure has used its last retry; it is kept only while a retry can use it.
 - Private media is delivered only after application authorization, either through a server stream or
   a short-lived signed `GET` URL. Raw private Blob URLs are never treated as authorization.
 - Vercel OIDC credentials are preferred in deployments. `BLOB_READ_WRITE_TOKEN` is allowed only for

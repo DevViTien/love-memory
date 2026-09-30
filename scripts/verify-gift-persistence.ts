@@ -53,7 +53,6 @@ try {
 
   const denied = await mongoGiftRepository.findAuthorized(publicId, [
     {
-      isAdmin: false,
       kind: "user",
       userId: "different-owner",
     },

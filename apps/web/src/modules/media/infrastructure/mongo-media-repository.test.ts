@@ -208,12 +208,19 @@ describe("Mongo media repositories", () => {
       updatedAt: now,
     };
     jobs.findOneAndUpdate.mockResolvedValueOnce(null).mockResolvedValueOnce(exhaustedJob);
+    assets.findOneAndUpdate.mockResolvedValueOnce({
+      ...document("failed"),
+      attempts: 3,
+      failureCode: "PROCESSING_FAILED",
+    });
 
-    await expect(mongoMediaWorkerRepository.claimNext(now)).resolves.toBeNull();
-    expect(assets.updateOne).toHaveBeenCalledWith(
+    await expect(mongoMediaWorkerRepository.claimNext(now)).resolves.toMatchObject({
+      exhaustedAsset: { failureCode: "PROCESSING_FAILED", id: baseAsset.id, status: "failed" },
+    });
+    expect(assets.findOneAndUpdate).toHaveBeenLastCalledWith(
       { _id: baseAsset.id, status: "processing" },
       { $set: { failureCode: "PROCESSING_FAILED", status: "failed", updatedAt: now } },
-      { session },
+      { returnDocument: "after", session },
     );
   });
 });
