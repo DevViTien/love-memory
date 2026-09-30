@@ -1,0 +1,5 @@
+{
+  "_doc": "Time-boxed waivers for scripts/check-openspec.ts. Every entry needs owner, reason and expires (YYYY-MM-DD). Expired or no-longer-matching entries fail the gate. pendingArchive: {change, blockedBy?, owner, expires, reason}. modifiedBodyDrop: {change, capability, requirement, owner, expires, reason}.",
+  "modifiedBodyDrop": [],
+  "pendingArchive": []
+}

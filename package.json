@@ -24,6 +24,8 @@
     "media:work": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local --conditions=react-server --import tsx scripts/media-worker.ts",
     "jobs:dev": "pnpm dlx trigger.dev@4.6.3 dev --config apps/web/trigger.config.ts",
     "jobs:deploy": "pnpm dlx trigger.dev@4.6.3 deploy --config apps/web/trigger.config.ts",
+    "openspec": "pnpm dlx @fission-ai/openspec@1.13.2",
+    "spec:check": "pnpm openspec validate --all --strict --no-interactive && pnpm openspec validate --archived --no-interactive && node --import tsx scripts/check-openspec.ts",
     "start": "pnpm --filter @love-memory/web start",
     "test": "pnpm build:templates && vitest run",
     "test:coverage": "pnpm build:templates && vitest run --coverage",
@@ -33,7 +35,7 @@
     "test:spikes": "node scripts/verify-live-spikes.mjs",
     "test:watch": "vitest",
     "type-check": "tsc --noEmit -p tsconfig.json && turbo run type-check",
-    "verify:local": "pnpm test:secrets && pnpm format:check && pnpm lint && pnpm type-check && pnpm test:coverage && pnpm audit && pnpm build && pnpm test:e2e:chrome"
+    "verify:local": "pnpm test:secrets && pnpm spec:check && pnpm format:check && pnpm lint && pnpm type-check && pnpm test:coverage && pnpm audit && pnpm build && pnpm test:e2e:chrome"
   },
   "pnpm": {
     "ignoredBuiltDependencies": [

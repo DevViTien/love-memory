@@ -8,6 +8,15 @@
 4. Create feature branches from **dev** and keep development local until the change is ready.
 5. Before pushing to a deployment branch, run **pnpm verify:local**.
 
+## Spec-driven changes (OpenSpec)
+
+**openspec/specs/** describes what the system does today; **openspec/changes/** holds work in
+progress. Any change to observable behavior starts as an OpenSpec change (proposal, delta specs,
+design, tasks), is implemented against its tasks and is archived into **openspec/specs/** in the
+same pull request. Fixes, refactors and tooling that keep behavior identical need no change.
+**pnpm spec:check** validates specs and enforces the archive rules in CI. The full workflow, used
+by both people and AI agents, is in [AGENTS.md](./AGENTS.md).
+
 ## Branch and deployment workflow
 
 - **dev** is the integration branch and deploys to the stable development Preview URL.

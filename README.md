@@ -27,6 +27,7 @@ Product direction and delivery details live in:
 - [tech-stack.md](./tech-stack.md)
 - [plan.md](./plan.md)
 - [Architecture](./docs/architecture.md)
+- [Current behavior specs](./openspec/specs/) and the [spec-driven workflow](./AGENTS.md)
 
 ## Requirements
 
@@ -66,6 +67,7 @@ Vercel Blob and the `TECHNICAL_SPIKE_*` values described in
 | pnpm test:e2e        | Build and test production UI                            |
 | pnpm test:e2e:chrome | Run production UI tests in installed Chrome             |
 | pnpm test:secrets    | Reject tracked environment files and secret signatures  |
+| pnpm spec:check      | Validate OpenSpec specs/changes and archive rules       |
 | pnpm build           | Build production artifacts                              |
 | pnpm verify:local    | Run the complete Windows/Chrome pre-deployment gate     |
 | pnpm db:migrate      | Apply idempotent MongoDB validators and named indexes   |
@@ -87,6 +89,7 @@ packages/template-sdk    Versioned template manifest/runtime contract
 packages/ui              Reusable React UI primitives
 templates                Independently built template workspaces
 docs/                    Architecture and ADRs
+openspec/                Behavior specs and in-progress changes
 test/                    Shared test setup
 ```
 

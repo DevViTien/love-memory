@@ -1,0 +1,96 @@
+schema: spec-driven
+
+context: |
+  LoveMemory — a browser-first platform where a creator turns photos, messages, a date and licensed
+  music into a private, interactive "memory gift"; the recipient opens it by link or QR on a phone
+  with no account and no app. Product thesis: story-first templates (not effect-first), private by
+  default, published gifts reproducible for years, digital gift bridged to physical gifts (QR/NFC).
+  MVP = three excellent templates (Hộp ký ức, Dòng thời gian hai đứa, Bầu trời lời nhắn), a
+  schema-driven Studio, preview identical to the Viewer, publish + access policy + QR, payment.
+  Primary market: Vietnam. User-facing copy is Vietnamese; code, specs and engineering docs are
+  English.
+
+  Tech stack: TypeScript (strict) pnpm/Turborepo monorepo · Next.js 16 App Router + React 19 +
+  Tailwind 4 (apps/web, modular monolith/BFF) · MongoDB Atlas via the official driver (no ODM) with
+  Zod-validated boundaries · Better Auth passwordless magic link + Resend · private Vercel Blob for
+  media · Sharp image processing · Trigger.dev jobs fed by a MongoDB outbox · Vitest + Playwright ·
+  Vercel deploys from branches dev → stg → main.
+
+  Architecture: presentation → application → domain; infrastructure implements application ports
+  and is wired only in apps/web/src/composition. Shared packages: contracts (runtime-validated API
+  schemas), domain (framework-free business rules and state machines), database, storage, media,
+  template-sdk (manifest + host↔template protocol), ui, shared. Templates are independently built,
+  immutable, content-addressed artifacts that run inside a sandboxed iframe Viewer.
+
+  Invariants (never violate; a change that needs to break one must say so in its proposal and
+  update the matching ADR):
+  - Validate untrusted input at every entry; authorize next to data access (inside the repository
+    filter), and answer non-owners with an opaque 404, never a 403 that confirms existence.
+  - Return DTOs, never raw database documents. Gift documents reference media by asset ID only;
+    storage keys and raw Blob URLs never reach the browser. Blob storage is private; downloads use
+    short-lived signed URLs issued after authorization.
+  - Never store image/audio bytes or base64 in MongoDB.
+  - Long-running or retryable work (image processing, email, scheduled reveal, cleanup, payment
+    reconciliation) runs as idempotent background jobs through the outbox, never inside a request.
+  - A template release is immutable once a gift references it; a published gift pins an exact
+    template version and content snapshot. Template code runs in `sandbox="allow-scripts"` with no
+    network access, and the host accepts only schema-valid messages from that exact iframe.
+  - Protected gift payloads never enter public caches. Public routes use static-compatible CSP;
+    routes with private content use per-request nonce CSP and must be dynamically rendered.
+  - Publish and payment flows are idempotent; only a verified webhook or server reconciliation can
+    mark an order paid — the browser return URL is UX only.
+  - Never log gift text, access passwords, magic-link tokens or signed URLs.
+  - Recipients never need an account; audio never autoplays — it starts from a user gesture, and
+    every experience has a reduced-motion and no-audio path.
+
+  Delivery plan: plan.md defines 8 two-week sprints with gates M0–M6. Sprints 0–2 are shipped
+  (foundation, auth + gift drafts, media pipeline + Viewer runtime). Sprint 3 is the vertical slice
+  (schema-driven Studio, preview, template "Hộp ký ức", temporary publish) and is Gate M2: do not
+  start templates 2–3 before it passes. HOW-level design lives in docs/ (architecture, ADRs,
+  runbooks); openspec/specs/ captures WHAT the system does.
+
+rules:
+  proposal:
+    - Write in English. Keep capability names kebab-case, one concern per capability.
+    - Name the plan.md sprint/gate the change belongs to, or say it is outside the sprint plan.
+    - Include a "Non-goals" section so deferred scope is explicit rather than silently dropped.
+    - List every invariant from the project context that the change touches and how it is kept.
+  specs:
+    - Write in English; every requirement's first paragraph contains SHALL or MUST.
+    - Describe observable behavior and contracts (routes, status codes, error codes, states,
+      limits), not implementation. Put machine identifiers in backticks, copied verbatim.
+    - A MODIFIED requirement copies the ENTIRE current requirement from openspec/specs/ and then
+      edits it; anything left out is deleted on archive.
+    - Every requirement has at least one scenario covering the failure or denial path when one
+      exists, not only the happy path.
+  design:
+    - Write in English; keep identifiers verbatim. Reference the ADR that governs each decision;
+      if a decision contradicts an accepted ADR, say so and plan the ADR update as a task.
+    - Cover data shape (Zod/Mongo validator/index changes and migration), authorization, failure
+      and retry behavior, and the CSP/caching consequence of any new route.
+  tasks:
+    - Write in English; each task is independently checkable and small enough for one sitting.
+    - Put tests next to the task that changes the behavior; new gift states need transition tests,
+      new template fields need schema tests, security fixes need a regression test.
+    - End with a verification group that runs `pnpm verify:local` (or states which part cannot run
+      locally and why) and a final task to archive the change in the same PR.
+    - Work intentionally deferred goes under a "## Out of scope" bullet list, never as an
+      unchecked task.
+
+operations:
+  apply:
+    guidance:
+      - Next.js 16 differs from older versions; read the relevant guide in
+        node_modules/next/dist/docs/ before writing Next.js code.
+      - Wire new infrastructure adapters only in apps/web/src/composition; application code
+        depends on ports.
+      - Run the narrowest relevant tests after each task, and `pnpm verify:local` before declaring
+        the change done.
+      - If implementation reveals that a spec or design is wrong, stop and update the artifact
+        before continuing; never let the code and the change drift apart silently.
+  archive:
+    guidance:
+      - Archive in the same PR that completes the change, in proposal creation order.
+      - Before archiving, diff each MODIFIED requirement body against openspec/specs/ and confirm
+        no identifier or scenario was dropped unintentionally; `pnpm spec:check` enforces the
+        identifier part.
