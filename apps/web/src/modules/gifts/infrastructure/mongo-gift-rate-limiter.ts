@@ -18,7 +18,14 @@ const RATE_LIMITS: Readonly<
 // Requests with no trustworthy client key (no session, no anonymous cookie and no Vercel forwarding
 // header, i.e. off-Vercel hosts) share one bucket, so they are bounded rather than unlimited.
 export const UNIDENTIFIED_RATE_LIMIT_SUBJECT = "unidentified";
-const UNIDENTIFIED_LIMIT_MULTIPLIER = 5;
+// The anonymous cookie is only checked for shape, so anonymous requests are also charged to a
+// network bucket; otherwise a fresh made-up cookie per request would reset every limit.
+const NETWORK_SUBJECT_PREFIX = "network:";
+const SHARED_BUCKET_LIMIT_MULTIPLIER = 5;
+
+function isSharedBucket(subject: string): boolean {
+  return subject === UNIDENTIFIED_RATE_LIMIT_SUBJECT || subject.startsWith(NETWORK_SUBJECT_PREFIX);
+}
 
 type ApiRateLimitDocument = Readonly<{
   _id: string;
@@ -52,10 +59,9 @@ export async function consumeGiftMutationRateLimit(
 ): Promise<GiftRateLimitResult> {
   const database = await getDatabase();
   const scopeLimit = RATE_LIMITS[scope];
-  const limit =
-    subject === UNIDENTIFIED_RATE_LIMIT_SUBJECT
-      ? { ...scopeLimit, max: scopeLimit.max * UNIDENTIFIED_LIMIT_MULTIPLIER }
-      : scopeLimit;
+  const limit = isSharedBucket(subject)
+    ? { ...scopeLimit, max: scopeLimit.max * SHARED_BUCKET_LIMIT_MULTIPLIER }
+    : scopeLimit;
   const windowMilliseconds = limit.windowSeconds * 1000;
   const bucketStart = Math.floor(now.getTime() / windowMilliseconds) * windowMilliseconds;
   const expiresAt = new Date(bucketStart + windowMilliseconds);
@@ -97,19 +103,26 @@ export async function consumeGiftMutationRateLimit(
   }
 }
 
-export function giftRateLimitSubject(
-  request: Request,
-  identity: Readonly<{ anonymousDraftId?: string; userId?: string }>,
-): string {
-  if (identity.userId) {
-    return `user:${identity.userId}`;
-  }
-  if (identity.anonymousDraftId) {
-    return `anonymous:${identity.anonymousDraftId}`;
-  }
-
+function networkSubject(request: Request): string {
   const forwardedFor = request.headers.get("x-vercel-forwarded-for")?.split(",", 1)[0]?.trim();
   return forwardedFor && forwardedFor.length <= 64 && isIP(forwardedFor)
     ? `ip:${forwardedFor}`
     : UNIDENTIFIED_RATE_LIMIT_SUBJECT;
+}
+
+/** Subjects to charge, primary first. A request is rejected when any of them is exhausted. */
+export function giftRateLimitSubjects(
+  request: Request,
+  identity: Readonly<{ anonymousDraftId?: string; userId?: string }>,
+): readonly string[] {
+  if (identity.userId) {
+    return [`user:${identity.userId}`];
+  }
+  if (identity.anonymousDraftId) {
+    return [
+      `anonymous:${identity.anonymousDraftId}`,
+      `${NETWORK_SUBJECT_PREFIX}${networkSubject(request)}`,
+    ];
+  }
+  return [networkSubject(request)];
 }

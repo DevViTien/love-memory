@@ -12,7 +12,7 @@ import {
 } from "@/modules/gifts/infrastructure/anonymous-draft-identity";
 import {
   consumeGiftMutationRateLimit,
-  giftRateLimitSubject,
+  giftRateLimitSubjects,
   type GiftMutationScope,
 } from "@/modules/gifts/infrastructure/mongo-gift-rate-limiter";
 
@@ -59,14 +59,18 @@ export async function enforceGiftMutationRateLimit(
   scope: GiftMutationScope,
   id: string,
 ): Promise<Response | null> {
-  const subject = giftRateLimitSubject(request, {
+  const subjects = giftRateLimitSubjects(request, {
     ...(context.anonymousIdentity
       ? { anonymousDraftId: context.anonymousIdentity.anonymousDraftId }
       : {}),
     ...(context.userId ? { userId: context.userId } : {}),
   });
-  const result = await consumeGiftMutationRateLimit(scope, subject, getAuthEnvironment().secret);
-  if (result.allowed) {
+  let result: Awaited<ReturnType<typeof consumeGiftMutationRateLimit>> | null = null;
+  for (const subject of subjects) {
+    result = await consumeGiftMutationRateLimit(scope, subject, getAuthEnvironment().secret);
+    if (!result.allowed) break;
+  }
+  if (!result || result.allowed) {
     return null;
   }
 

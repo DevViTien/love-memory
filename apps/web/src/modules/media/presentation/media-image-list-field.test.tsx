@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -95,6 +95,7 @@ describe("MediaImageListField", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -133,6 +134,55 @@ describe("MediaImageListField", () => {
     expect(UploadRequest.instances).toHaveLength(1);
     expect(UploadRequest.instances[0]?.abort).not.toHaveBeenCalled();
     expect(onChange).toHaveBeenCalledWith("photos", [assetId]);
+  });
+
+  it("reports an empty order when none of the saved assets exists any more", async () => {
+    const onChange = vi.fn();
+    render(
+      <MediaImageListField
+        aspectRatio="4:3"
+        fieldId="photos"
+        giftPublicId="abcdefghijklmnop"
+        initialAssetIds={[assetId]}
+        label="Ảnh kỷ niệm"
+        maxItems={3}
+        minItems={1}
+        onChange={onChange}
+      />,
+    );
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith("photos", []));
+  });
+
+  it("ignores a second selection until the current one has finished", async () => {
+    const user = userEvent.setup();
+    render(
+      <MediaImageListField
+        aspectRatio="4:3"
+        fieldId="photos"
+        giftPublicId="abcdefghijklmnop"
+        initialAssetIds={[]}
+        label="Ảnh kỷ niệm"
+        maxItems={3}
+        minItems={1}
+        onChange={vi.fn()}
+      />,
+    );
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(expect.stringContaining("assets?"), expect.anything()),
+    );
+    const picker = screen.getByLabelText<HTMLInputElement>("Chọn ảnh");
+    const first = new File([Uint8Array.from([1])], "first.jpg", { type: "image/jpeg" });
+    const second = new File([Uint8Array.from([2])], "second.jpg", { type: "image/jpeg" });
+
+    fireEvent.change(picker, { target: { files: [first] } });
+    fireEvent.change(picker, { target: { files: [second] } });
+
+    expect(await screen.findAllByRole("dialog")).toHaveLength(1);
+    expect(picker.disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Dùng vùng ảnh này" }));
+    await waitFor(() => expect(picker.disabled).toBe(false));
+    expect(UploadRequest.instances).toHaveLength(1);
   });
 
   it("lets a restored initiated asset retry the idempotent completion request", async () => {

@@ -22,15 +22,20 @@ export function assertMediaRuntimeReady(
   return mode;
 }
 
-export async function scheduleMediaProcessing(source: MediaJobSource): Promise<void> {
+export async function scheduleMediaProcessing(
+  source: MediaJobSource,
+  assetId: string,
+): Promise<void> {
   if (assertMediaRuntimeReady(process.env) === "inline") {
     const { getMediaWorker } = await import("@/composition/media");
     await getMediaWorker().runAvailable();
     return;
   }
+  // Keyed per asset: a global key let one creator's dispatch swallow another's within the window,
+  // leaving the second upload waiting for the five-minute sweep.
   const dispatchWindow = Math.floor(Date.now() / 10_000);
   const idempotencyKey = await idempotencyKeys.create(
-    `media-worker-drain:${source}:${dispatchWindow}`,
+    `media-worker-drain:${source}:${assetId}:${dispatchWindow}`,
     { scope: "global" },
   );
   await tasks.trigger(

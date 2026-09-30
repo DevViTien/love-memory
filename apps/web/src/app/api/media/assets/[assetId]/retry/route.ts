@@ -7,6 +7,6 @@ type Context = Readonly<{ params: Promise<{ assetId: string }> }>;
 export async function POST(request: Request, context: Context): Promise<Response> {
   return handleRetryMediaAsset(request, (await context.params).assetId, {
     getService: getMediaService,
-    scheduleProcessing: () => scheduleMediaProcessing("retry"),
+    scheduleProcessing: (assetId) => scheduleMediaProcessing("retry", assetId),
   });
 }

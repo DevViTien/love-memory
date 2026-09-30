@@ -29,7 +29,7 @@ export interface MediaWorkerRepository {
     output: Readonly<{
       checksumSha256: string;
       derivatives: readonly MediaAssetDerivative[];
-      placeholderDataUrl: string;
+      placeholderDataUrl: string | null;
     }>,
     now: Date,
   ) => Promise<void>;
@@ -149,7 +149,11 @@ export function createMediaWorker({
         {
           checksumSha256: output.checksumSha256,
           derivatives,
-          placeholderDataUrl: output.placeholderDataUrl,
+          // An oversized placeholder would make every later read of the asset fail validation.
+          placeholderDataUrl:
+            output.placeholderDataUrl.length <= MEDIA_ASSET_LIMITS.maximumPlaceholderLength
+              ? output.placeholderDataUrl
+              : null,
         },
         clock(),
       );

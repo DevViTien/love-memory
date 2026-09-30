@@ -17,6 +17,7 @@
     "db:seed": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local --conditions=react-server --import tsx scripts/database.ts seed",
     "db:verify": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local --conditions=react-server --import tsx scripts/database.ts verify",
     "db:verify-gifts": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local --conditions=react-server --import tsx scripts/verify-gift-persistence.ts",
+    "db:verify-media": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local --conditions=react-server --import tsx scripts/verify-media-persistence.ts",
     "dev": "turbo run dev --filter=@love-memory/web",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

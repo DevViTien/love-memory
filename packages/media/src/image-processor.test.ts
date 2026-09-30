@@ -37,6 +37,21 @@ describe("image processor", () => {
     expect(outputMetadata.orientation).toBeUndefined();
   });
 
+  it("bounds the placeholder on both sides for very tall images", async () => {
+    const source = await sharp({
+      create: { background: { b: 20, g: 20, r: 20 }, channels: 3, height: 2400, width: 40 },
+    })
+      .png()
+      .toBuffer();
+
+    const output = await processUploadedImageSet(source, { outputWidths: [320] });
+    const placeholder = Buffer.from(output.placeholderDataUrl.split(",")[1] ?? "", "base64");
+    const metadata = await sharp(placeholder).metadata();
+
+    expect(metadata.height).toBeLessThanOrEqual(24);
+    expect(metadata.width).toBeLessThanOrEqual(24);
+  });
+
   it("rejects empty and oversized payloads before processing", async () => {
     await expect(processUploadedImage(new Uint8Array())).rejects.toBeInstanceOf(InvalidImageError);
     await expect(

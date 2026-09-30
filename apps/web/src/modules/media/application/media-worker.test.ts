@@ -154,6 +154,30 @@ describe("media worker", () => {
     expect(reportProcessingFailure).toHaveBeenCalledWith(decodeError, asset.id);
   });
 
+  it("drops a placeholder that exceeds the stored limit", async () => {
+    const repo = repository();
+    const worker = createMediaWorker({
+      processImage: vi.fn<typeof processUploadedImageSet>(() =>
+        Promise.resolve({
+          checksumSha256: "a".repeat(64),
+          derivatives: [],
+          placeholderDataUrl: `data:image/webp;base64,${"A".repeat(2_000)}`,
+          sourceContentType: "image/jpeg" as const,
+        }),
+      ),
+      repository: repo,
+      storage: storage(),
+    });
+
+    await expect(worker.runNext()).resolves.toMatchObject({ status: "completed" });
+    expect(repo.complete).toHaveBeenCalledWith(
+      asset.id,
+      "job-1",
+      expect.objectContaining({ placeholderDataUrl: null }),
+      expect.any(Date),
+    );
+  });
+
   it("releases the source once the last transient attempt fails", async () => {
     const repo = repository();
     vi.mocked(repo.claimNext).mockResolvedValueOnce({

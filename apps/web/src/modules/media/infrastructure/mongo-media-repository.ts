@@ -59,6 +59,10 @@ const activeStatuses: readonly MediaAsset["status"][] = [
   "deleting",
 ];
 
+function isSlot(slot: number | null | undefined): slot is number {
+  return typeof slot === "number";
+}
+
 function firstAvailableSlot(used: readonly number[], maximum: number): number | null {
   const occupied = new Set(used);
   for (let slot = 0; slot < maximum; slot += 1) {
@@ -81,50 +85,31 @@ export const mongoMediaAssetRepository: MediaAssetRepository = {
       try {
         await client.withSession(async (session) => {
           await session.withTransaction(async () => {
+            // withTransaction re-runs this callback after a transient error; a rolled-back
+            // attempt must not leave `created` set.
+            created = false;
             const collection = database.collection<MediaAssetDocument>(COLLECTIONS.assets);
-            const [giftSlots, fieldSlots, giftAssetCount, fieldAssetCount] = await Promise.all([
-              collection.distinct(
-                "giftSlot",
-                {
-                  giftId: asset.giftId,
-                  status: { $in: activeStatuses },
-                },
-                { session },
-              ),
-              collection.distinct(
-                "fieldSlot",
-                {
-                  fieldId: asset.fieldId,
-                  giftId: asset.giftId,
-                  status: { $in: activeStatuses },
-                },
-                { session },
-              ),
-              collection.countDocuments(
+            // One projected find instead of `distinct` (not in Stable API V1, which the client
+            // enforces) and instead of parallel reads, which one transaction does not support.
+            const occupied = await collection
+              .find(
                 { giftId: asset.giftId, status: { $in: activeStatuses } },
-                { session },
-              ),
-              collection.countDocuments(
-                {
-                  fieldId: asset.fieldId,
-                  giftId: asset.giftId,
-                  status: { $in: activeStatuses },
-                },
-                { session },
-              ),
-            ]);
+                { projection: { _id: 0, fieldId: 1, fieldSlot: 1, giftSlot: 1 }, session },
+              )
+              .toArray();
+            const fieldOccupied = occupied.filter((document) => document.fieldId === asset.fieldId);
             if (
-              giftAssetCount >= maximumAssetsForGift ||
-              fieldAssetCount >= maximumAssetsForField
+              occupied.length >= maximumAssetsForGift ||
+              fieldOccupied.length >= maximumAssetsForField
             ) {
               return;
             }
             const giftSlot = firstAvailableSlot(
-              giftSlots.filter((slot): slot is number => typeof slot === "number"),
+              occupied.map((document) => document.giftSlot).filter(isSlot),
               maximumAssetsForGift,
             );
             const fieldSlot = firstAvailableSlot(
-              fieldSlots.filter((slot): slot is number => typeof slot === "number"),
+              fieldOccupied.map((document) => document.fieldSlot).filter(isSlot),
               maximumAssetsForField,
             );
             if (giftSlot === null || fieldSlot === null) return;
@@ -303,6 +288,8 @@ export const mongoMediaWorkerRepository: MediaWorkerRepository = {
 
     await client.withSession(async (session) => {
       await session.withTransaction(async () => {
+        // A retried callback must not return a claim from a rolled-back attempt.
+        claimed = null;
         const job = await database
           .collection<MediaJobDocument>(COLLECTIONS.jobOutbox)
           .findOneAndUpdate(

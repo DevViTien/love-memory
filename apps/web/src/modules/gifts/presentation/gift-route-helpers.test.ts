@@ -1,14 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const sessionMocks = vi.hoisted(() => ({ getCurrentUser: vi.fn() }));
+const rateLimitMocks = vi.hoisted(() => ({ consume: vi.fn() }));
 
 vi.mock("@/composition/session", () => ({ getCurrentUser: sessionMocks.getCurrentUser }));
+vi.mock("@/modules/auth/infrastructure/auth-environment", () => ({
+  getAuthEnvironment: () => ({ secret: "s".repeat(32) }),
+}));
+vi.mock("@/modules/gifts/infrastructure/mongo-gift-rate-limiter", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  consumeGiftMutationRateLimit: rateLimitMocks.consume,
+}));
 
 import {
   createAnonymousDraftIdentity,
   serializeAnonymousDraftCookie,
 } from "../infrastructure/anonymous-draft-identity";
 import {
+  enforceGiftMutationRateLimit,
   getGiftRequestContext,
   giftDraftResponse,
   giftServiceErrorResponse,
@@ -18,6 +27,7 @@ import {
 describe("gift route helpers", () => {
   beforeEach(() => {
     sessionMocks.getCurrentUser.mockReset();
+    rateLimitMocks.consume.mockReset();
     sessionMocks.getCurrentUser.mockResolvedValue(null);
   });
 
@@ -92,5 +102,48 @@ describe("gift route helpers", () => {
 
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toEqual({ data: { gift: { publicId: "gift-1" } } });
+  });
+
+  it("charges anonymous requests to the network guard and rejects when it is exhausted", async () => {
+    const identity = createAnonymousDraftIdentity();
+    const cookie = serializeAnonymousDraftCookie(identity).split(";")[0] ?? "";
+    const request = new Request("https://example.com/api/gifts", {
+      headers: { cookie, "x-vercel-forwarded-for": "203.0.113.10" },
+    });
+    const context = await getGiftRequestContext(request);
+    rateLimitMocks.consume
+      .mockResolvedValueOnce({ allowed: true, retryAfterSeconds: 600 })
+      .mockResolvedValueOnce({ allowed: false, retryAfterSeconds: 42 });
+
+    const response = await enforceGiftMutationRateLimit(request, context, "gift-create", "req-1");
+
+    expect(rateLimitMocks.consume.mock.calls.map((call: unknown[]) => call[1])).toEqual([
+      `anonymous:${identity.anonymousDraftId}`,
+      "network:ip:203.0.113.10",
+    ]);
+    expect(response?.status).toBe(429);
+    expect(response?.headers.get("Retry-After")).toBe("42");
+  });
+
+  it("charges only the account bucket for signed-in creators", async () => {
+    sessionMocks.getCurrentUser.mockResolvedValue({
+      email: "creator@example.com",
+      id: "creator-1",
+      name: "",
+      role: "creator",
+    });
+    const request = new Request("https://example.com/api/gifts");
+    const context = await getGiftRequestContext(request);
+    rateLimitMocks.consume.mockResolvedValueOnce({ allowed: true, retryAfterSeconds: 60 });
+
+    await expect(
+      enforceGiftMutationRateLimit(request, context, "gift-update", "req-2"),
+    ).resolves.toBeNull();
+    expect(rateLimitMocks.consume).toHaveBeenCalledTimes(1);
+    expect(rateLimitMocks.consume).toHaveBeenCalledWith(
+      "gift-update",
+      "user:creator-1",
+      "s".repeat(32),
+    );
   });
 });

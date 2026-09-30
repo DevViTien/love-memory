@@ -28,7 +28,7 @@ import { reportOperationalFailure } from "@/observability/operational-errors";
 export type MediaRouteDependencies = Readonly<{
   getService: () => MediaService;
   reportFailure?: typeof reportOperationalFailure;
-  scheduleProcessing?: () => Promise<void> | void;
+  scheduleProcessing?: (assetId: string) => Promise<void> | void;
 }>;
 
 function errorResponse(error: MediaServiceError, id: string): Response {
@@ -136,7 +136,7 @@ export async function handleCompleteMediaUpload(
     });
     if (!result.ok) return errorResponse(result.error, id);
     try {
-      await scheduleProcessing?.();
+      await scheduleProcessing?.(body.data.assetId);
     } catch (error) {
       reportFailure("media_worker_dispatch_failed", error, id);
     }
@@ -242,7 +242,7 @@ async function handleAssetMutation(
     if (!result.ok) return errorResponse(result.error, id);
     if (operation === "retry") {
       try {
-        await dependencies.scheduleProcessing?.();
+        await dependencies.scheduleProcessing?.(assetId.data);
       } catch (error) {
         (dependencies.reportFailure ?? reportOperationalFailure)(
           "media_worker_dispatch_failed",

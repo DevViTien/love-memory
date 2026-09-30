@@ -12,7 +12,7 @@ vi.mock("@love-memory/database", async (importOriginal) => ({
   getDatabase: databaseMocks.getDatabase,
 }));
 
-import { consumeGiftMutationRateLimit, giftRateLimitSubject } from "./mongo-gift-rate-limiter";
+import { consumeGiftMutationRateLimit, giftRateLimitSubjects } from "./mongo-gift-rate-limiter";
 
 describe("Mongo gift mutation rate limiter", () => {
   beforeEach(() => {
@@ -31,19 +31,25 @@ describe("Mongo gift mutation rate limiter", () => {
       },
     });
 
-    expect(giftRateLimitSubject(request, { userId: "user-1" })).toBe("user:user-1");
-    expect(giftRateLimitSubject(request, { anonymousDraftId: "draft-1" })).toBe(
+    expect(giftRateLimitSubjects(request, { userId: "user-1" })).toEqual(["user:user-1"]);
+    expect(giftRateLimitSubjects(request, { anonymousDraftId: "draft-1" })).toEqual([
       "anonymous:draft-1",
-    );
-    expect(giftRateLimitSubject(request, {})).toBe("ip:203.0.113.10");
+      "network:ip:203.0.113.10",
+    ]);
+    expect(giftRateLimitSubjects(request, {})).toEqual(["ip:203.0.113.10"]);
     expect(
-      giftRateLimitSubject(
+      giftRateLimitSubjects(
         new Request("https://love.example/api/gifts", {
           headers: { "x-forwarded-for": "198.51.100.8" },
         }),
         {},
       ),
-    ).toBe("unidentified");
+    ).toEqual(["unidentified"]);
+    expect(
+      giftRateLimitSubjects(new Request("https://love.example/api/gifts"), {
+        anonymousDraftId: "draft-1",
+      }),
+    ).toEqual(["anonymous:draft-1", "network:unidentified"]);
   });
 
   it("atomically consumes a bucket and returns its retry window", async () => {
@@ -63,17 +69,20 @@ describe("Mongo gift mutation rate limiter", () => {
     );
   });
 
-  it("gives the shared unidentified bucket five times the scope limit", async () => {
-    databaseMocks.findOneAndUpdate.mockResolvedValue({ count: 1 });
+  it.each(["unidentified", "network:ip:203.0.113.10", "network:unidentified"])(
+    "gives the shared %s bucket five times the scope limit",
+    async (subject) => {
+      databaseMocks.findOneAndUpdate.mockResolvedValue({ count: 1 });
 
-    await consumeGiftMutationRateLimit("gift-create", "unidentified", "s".repeat(32), new Date(0));
+      await consumeGiftMutationRateLimit("gift-create", subject, "s".repeat(32), new Date(0));
 
-    expect(databaseMocks.findOneAndUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ count: { $lt: 50 } }),
-      expect.anything(),
-      expect.anything(),
-    );
-  });
+      expect(databaseMocks.findOneAndUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ count: { $lt: 50 } }),
+        expect.anything(),
+        expect.anything(),
+      );
+    },
+  );
 
   it("treats a duplicate bucket upsert as a reached limit", async () => {
     databaseMocks.findOneAndUpdate.mockRejectedValue({ code: 11000 });

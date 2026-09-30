@@ -5,6 +5,6 @@ import { handleCompleteMediaUpload } from "@/modules/media/presentation/media-ro
 export function POST(request: Request): Promise<Response> {
   return handleCompleteMediaUpload(request, {
     getService: getMediaService,
-    scheduleProcessing: () => scheduleMediaProcessing("upload-complete"),
+    scheduleProcessing: (assetId) => scheduleMediaProcessing("upload-complete", assetId),
   });
 }

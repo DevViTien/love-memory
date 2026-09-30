@@ -29,6 +29,11 @@ pnpm media:work
 
 The command processes at most 100 records per invocation and exits when the queue is empty.
 
+To prove the media repositories work against a real deployment (Stable API strict mode,
+transactions, slot indexes, outbox claim and cleanup) without touching object storage, run
+`pnpm db:verify-media`. It uses a clock in the year 2000 so it never claims real jobs, and it removes
+everything it created. CI runs it after `pnpm db:verify-gifts`.
+
 ## Trigger.dev environments
 
 Production-like deployments must set:

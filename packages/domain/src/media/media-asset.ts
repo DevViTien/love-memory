@@ -4,6 +4,7 @@ export const MEDIA_ASSET_LIMITS = {
   maximumAttempts: 3,
   maximumAssetsPerGift: 30,
   maximumInputBytes: 10 * 1024 * 1024,
+  maximumPlaceholderLength: 2_000,
 } as const;
 
 export const MediaAssetStatusSchema = z.enum([
@@ -47,7 +48,7 @@ export const MediaAssetSchema = z
     giftSlot: z.number().int().nonnegative().nullable().default(null),
     id: z.uuid(),
     ownerId: z.string().min(1).nullable(),
-    placeholderDataUrl: z.string().max(2_000).nullable(),
+    placeholderDataUrl: z.string().max(MEDIA_ASSET_LIMITS.maximumPlaceholderLength).nullable(),
     sourceKey: z.string().min(1).max(300),
     status: MediaAssetStatusSchema,
     updatedAt: z.coerce.date(),

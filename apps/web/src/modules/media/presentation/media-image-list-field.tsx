@@ -224,12 +224,14 @@ export function MediaImageListField({
   const [items, setItems] = useState<readonly UploadItem[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [cropCandidate, setCropCandidate] = useState<CropCandidate | null>(null);
+  const [isSelecting, setIsSelecting] = useState(false);
   const [completingAssetIds, setCompletingAssetIds] = useState<ReadonlySet<string>>(new Set());
   const requests = useRef(new Map<string, () => void>());
   const itemsRef = useRef<readonly UploadItem[]>([]);
   const orderRef = useRef<readonly string[]>(initialAssetIds);
   const cropResolverRef = useRef<((file: File | null) => void) | null>(null);
   const cropObjectUrlRef = useRef<string | null>(null);
+  const selectingRef = useRef(false);
 
   const publishOrder = useCallback(
     (next: readonly UploadItem[]) =>
@@ -269,7 +271,9 @@ export function MediaImageListField({
       fileName: itemsRef.current.find((item) => item.assetId === asset.assetId)?.fileName,
       progress: asset.status === "ready" ? 100 : undefined,
     }));
-    const previousOrder = itemsRef.current.map((item) => item.assetId).join(":");
+    // Compare with the saved order, not the in-memory list (empty on mount), so a field whose saved
+    // assets are all gone reports an empty order and the draft becomes savable again.
+    const previousOrder = orderRef.current.join(":");
     const nextOrder = next.map((item) => item.assetId).join(":");
     commitItems(next, previousOrder !== nextOrder);
   }, [commitItems, fieldId, giftPublicId]);
@@ -345,6 +349,7 @@ export function MediaImageListField({
   function requestCrop(file: File): Promise<File | null> {
     return new Promise((resolve) => {
       cropResolverRef.current = resolve;
+      if (cropObjectUrlRef.current) URL.revokeObjectURL(cropObjectUrlRef.current);
       const objectUrl = URL.createObjectURL(file);
       cropObjectUrlRef.current = objectUrl;
       setCropCandidate({ file, objectUrl });
@@ -432,9 +437,22 @@ export function MediaImageListField({
   }
 
   async function selectFiles(files: FileList | null) {
-    if (!files) return;
+    // One select-crop-upload loop at a time: a second loop would overwrite the crop resolver and
+    // compute capacity independently of the first.
+    if (!files || selectingRef.current) return;
+    selectingRef.current = true;
+    setIsSelecting(true);
+    try {
+      await processSelection([...files]);
+    } finally {
+      selectingRef.current = false;
+      setIsSelecting(false);
+    }
+  }
+
+  async function processSelection(files: readonly File[]) {
     const available = Math.max(0, maxItems - itemsRef.current.length);
-    const selected = [...files].slice(0, available);
+    const selected = files.slice(0, available);
     if (files.length > available) setMessage(`Template cho phép tối đa ${maxItems} ảnh.`);
     for (const file of selected) {
       try {
@@ -508,7 +526,7 @@ export function MediaImageListField({
         <input
           accept={acceptedTypes.join(",")}
           className="sr-only"
-          disabled={cropCandidate !== null || items.length >= maxItems}
+          disabled={isSelecting || cropCandidate !== null || items.length >= maxItems}
           multiple
           onChange={(event) => {
             void selectFiles(event.target.files);

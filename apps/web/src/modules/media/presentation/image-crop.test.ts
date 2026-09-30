@@ -60,13 +60,13 @@ describe("image crop geometry", () => {
     });
     const result = await cropImageToAspectRatio(source, "1:1", 0.75, 0.5);
 
-    expect(canvas.width).toBe(2_048);
-    expect(canvas.height).toBe(2_048);
     expect(drawImage).toHaveBeenCalledWith(bitmap, 2_250, 0, 3_000, 3_000, 0, 0, 2_048, 2_048);
     expect(result.name).toBe("memory-cropped.webp");
     expect(result.type).toBe("image/webp");
     expect(result.lastModified).toBe(123);
     expect(close).toHaveBeenCalledOnce();
+    expect(canvas.width).toBe(0);
+    expect(canvas.height).toBe(0);
   });
 
   it("labels the crop with the format the browser actually encoded", () => {
@@ -76,27 +76,37 @@ describe("image crop geometry", () => {
     expect(encodedContentType("")).toBe("image/webp");
   });
 
-  it("names a PNG fallback crop with a matching extension", async () => {
-    vi.stubGlobal(
-      "createImageBitmap",
-      vi.fn(() => Promise.resolve({ close: vi.fn(), height: 100, width: 100 })),
-    );
-    const canvas = {
-      getContext: vi.fn(() => ({ drawImage: vi.fn() })),
-      height: 0,
-      toBlob: vi.fn((callback: BlobCallback) => callback(new Blob(["png"], { type: "image/png" }))),
-      width: 0,
-    } as unknown as HTMLCanvasElement;
-    vi.spyOn(document, "createElement").mockReturnValue(canvas);
+  it.each([
+    ["image/jpeg", "memory-cropped.jpg"],
+    ["image/png", "memory-cropped.png"],
+  ])(
+    "re-encodes a crop without WebP support as JPEG (browser returned %s)",
+    async (fallbackType, expectedName) => {
+      vi.stubGlobal(
+        "createImageBitmap",
+        vi.fn(() => Promise.resolve({ close: vi.fn(), height: 100, width: 100 })),
+      );
+      const toBlob = vi.fn((callback: BlobCallback, type?: string) =>
+        callback(new Blob(["bytes"], { type: type === "image/jpeg" ? fallbackType : "image/png" })),
+      );
+      const canvas = {
+        getContext: vi.fn(() => ({ drawImage: vi.fn() })),
+        height: 0,
+        toBlob,
+        width: 0,
+      } as unknown as HTMLCanvasElement;
+      vi.spyOn(document, "createElement").mockReturnValue(canvas);
 
-    const result = await cropImageToAspectRatio(
-      new File(["source"], "memory.jpg", { type: "image/jpeg" }),
-      "1:1",
-      0.5,
-      0.5,
-    );
+      const result = await cropImageToAspectRatio(
+        new File(["source"], "memory.jpg", { type: "image/jpeg" }),
+        "1:1",
+        0.5,
+        0.5,
+      );
 
-    expect(result.name).toBe("memory-cropped.png");
-    expect(result.type).toBe("image/png");
-  });
+      expect(toBlob.mock.calls.map((call) => call[1])).toEqual(["image/webp", "image/jpeg"]);
+      expect(result.name).toBe(expectedName);
+      expect(result.type).toBe(fallbackType);
+    },
+  );
 });

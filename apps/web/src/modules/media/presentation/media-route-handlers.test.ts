@@ -112,7 +112,7 @@ describe("media route handlers", () => {
       dependencies(),
     );
     expect(response.status).toBe(202);
-    expect(scheduleProcessing).toHaveBeenCalledOnce();
+    expect(scheduleProcessing).toHaveBeenCalledExactlyOnceWith(assetId);
 
     completeUploadMock.mockResolvedValue({
       error: { code: "UPLOAD_INVALID" },
@@ -170,7 +170,7 @@ describe("media route handlers", () => {
       dependencies(),
     );
     expect(retried.status).toBe(200);
-    expect(scheduleProcessing).toHaveBeenCalledOnce();
+    expect(scheduleProcessing).toHaveBeenCalledExactlyOnceWith(assetId);
   });
 
   it("maps quota and unexpected failures to stable safe errors", async () => {

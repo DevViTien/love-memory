@@ -28,7 +28,7 @@ describe("media job scheduler", () => {
   it("runs inline for local development", async () => {
     vi.stubEnv("MEDIA_WORKER_MODE", "inline");
     mocks.runAvailable.mockResolvedValue([]);
-    await scheduleMediaProcessing("upload-complete");
+    await scheduleMediaProcessing("upload-complete", "asset-1");
     expect(mocks.runAvailable).toHaveBeenCalledOnce();
     expect(mocks.trigger).not.toHaveBeenCalled();
   });
@@ -38,9 +38,16 @@ describe("media job scheduler", () => {
     vi.stubEnv("TRIGGER_SECRET_KEY", "tr_dev_example");
     mocks.createIdempotencyKey.mockResolvedValue("hashed-key");
     mocks.trigger.mockResolvedValue({ id: "run-1" });
-    await scheduleMediaProcessing("retry");
-    expect(mocks.createIdempotencyKey).toHaveBeenCalledWith(
-      expect.stringMatching(/^media-worker-drain:retry:\d+$/),
+    await scheduleMediaProcessing("retry", "asset-1");
+    await scheduleMediaProcessing("retry", "asset-2");
+    expect(mocks.createIdempotencyKey).toHaveBeenNthCalledWith(
+      1,
+      expect.stringMatching(/^media-worker-drain:retry:asset-1:\d+$/),
+      { scope: "global" },
+    );
+    expect(mocks.createIdempotencyKey).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(/^media-worker-drain:retry:asset-2:\d+$/),
       { scope: "global" },
     );
     expect(mocks.trigger).toHaveBeenCalledWith(
@@ -54,7 +61,7 @@ describe("media job scheduler", () => {
   it("fails closed when durable production dispatch is not configured", async () => {
     vi.stubEnv("MEDIA_WORKER_MODE", "trigger");
     vi.stubEnv("TRIGGER_SECRET_KEY", "");
-    await expect(scheduleMediaProcessing("retry")).rejects.toThrow("TRIGGER_SECRET_KEY");
+    await expect(scheduleMediaProcessing("retry", "asset-1")).rejects.toThrow("TRIGGER_SECRET_KEY");
     expect(() =>
       assertMediaRuntimeReady({ MEDIA_WORKER_MODE: "trigger", TRIGGER_SECRET_KEY: "" }),
     ).toThrow("TRIGGER_SECRET_KEY");

@@ -89,4 +89,5 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm db:seed
       - run: pnpm db:verify-gifts
+      - run: pnpm db:verify-media
       - run: pnpm test:e2e

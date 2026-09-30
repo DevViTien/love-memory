@@ -163,7 +163,13 @@ export async function processUploadedImageSet(
       limitInputPixels: maximumInputPixels,
     })
       .rotate()
-      .resize({ fit: "inside", width: placeholderWidth, withoutEnlargement: true })
+      // Bound both sides: a width-only bound turns a very tall image into a tall placeholder.
+      .resize({
+        fit: "inside",
+        height: placeholderWidth,
+        width: placeholderWidth,
+        withoutEnlargement: true,
+      })
       .webp({ quality: 35 })
       .toBuffer();
   } catch {

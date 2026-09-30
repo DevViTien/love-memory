@@ -42,8 +42,9 @@ export function calculateCropRectangle(
   return { height, width: sourceWidth, x: 0, y: (sourceHeight - height) * normalizedY };
 }
 
-// Browsers without WebP canvas encoding silently return PNG (or JPEG); the upload must declare what
-// was actually encoded, or processing rejects the MIME mismatch as UPLOAD_INVALID.
+// Browsers without WebP canvas encoding (Safari, so every iOS browser) silently return PNG. The crop
+// is then encoded again as JPEG, because a lossless 2048px PNG is several megabytes. The upload must
+// declare what was actually encoded, or processing rejects the MIME mismatch as UPLOAD_INVALID.
 const ENCODED_EXTENSIONS = {
   "image/jpeg": "jpg",
   "image/png": "png",
@@ -54,6 +55,17 @@ type EncodedContentType = keyof typeof ENCODED_EXTENSIONS;
 
 export function encodedContentType(blobType: string): EncodedContentType {
   return blobType === "image/png" || blobType === "image/jpeg" ? blobType : "image/webp";
+}
+
+function encodeCanvas(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob> {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (result) =>
+        result ? resolve(result) : reject(new Error("The cropped image could not be encoded.")),
+      type,
+      quality,
+    );
+  });
 }
 
 function croppedFileName(name: string, contentType: EncodedContentType): string {
@@ -68,6 +80,7 @@ export async function cropImageToAspectRatio(
   focalY: number,
 ): Promise<File> {
   const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+  const canvas = document.createElement("canvas");
   try {
     const crop = calculateCropRectangle(
       bitmap.width,
@@ -81,7 +94,6 @@ export async function cropImageToAspectRatio(
       MAXIMUM_CROPPED_DIMENSION / crop.width,
       MAXIMUM_CROPPED_DIMENSION / crop.height,
     );
-    const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(crop.width * scale));
     canvas.height = Math.max(1, Math.round(crop.height * scale));
     const context = canvas.getContext("2d", { alpha: false });
@@ -97,14 +109,10 @@ export async function cropImageToAspectRatio(
       canvas.width,
       canvas.height,
     );
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        (result) =>
-          result ? resolve(result) : reject(new Error("The cropped image could not be encoded.")),
-        "image/webp",
-        0.9,
-      );
-    });
+    let blob = await encodeCanvas(canvas, "image/webp", 0.9);
+    if (encodedContentType(blob.type) !== "image/webp") {
+      blob = await encodeCanvas(canvas, "image/jpeg", 0.9);
+    }
     const contentType = encodedContentType(blob.type);
     return new File([blob], croppedFileName(file.name, contentType), {
       lastModified: file.lastModified,
@@ -112,5 +120,8 @@ export async function cropImageToAspectRatio(
     });
   } finally {
     bitmap.close();
+    // Release the backing store now; iOS caps total canvas memory per page.
+    canvas.width = 0;
+    canvas.height = 0;
   }
 }
