@@ -1,5 +1,5 @@
 import { GiftDraftResponseSchema } from "@love-memory/contracts";
-import { type FrameLocator, type Locator, type Page } from "@playwright/test";
+import { type FrameLocator, type Locator, type Page, type Request } from "@playwright/test";
 import { randomBytes, randomUUID } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { MongoClient } from "mongodb";
@@ -84,6 +84,40 @@ async function waitForGiftViewer(page: Page): Promise<void> {
 
 async function naturalWidth(image: Locator): Promise<number> {
   return image.evaluate((element: HTMLImageElement) => element.naturalWidth);
+}
+
+/** Holds the template artifact request until `release`, so a restart's pending state is seen. */
+async function holdArtifact(page: Page): Promise<Readonly<{ release: () => Promise<void> }>> {
+  let open: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  const pattern = "**/template-artifacts/**";
+  await page.route(pattern, async (route) => {
+    await held;
+    await route.continue();
+  });
+  return {
+    release: async () => {
+      open();
+      await page.unrouteAll({ behavior: "wait" });
+    },
+  };
+}
+
+/** The frame overlay; the polite status announces the same text while it shows. */
+function loadingOverlay(page: Page): Locator {
+  return page.locator("[data-preview-loading]").filter({ hasText: "Đang tải lại bản xem trước…" });
+}
+
+/** The restart ended: both controls are idle again and the frame overlay is gone. */
+async function expectControlsIdle(page: Page): Promise<void> {
+  const restart = page.getByRole("button", { exact: true, name: "Phát lại" });
+  await expect(restart).toBeVisible({ timeout: 20_000 });
+  await expect(restart).not.toHaveAttribute("aria-busy", "true");
+  await expect(restart).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Giảm chuyển động" })).toBeEnabled();
+  await expect(loadingOverlay(page)).toHaveCount(0);
 }
 
 /** Opens the gift and presses the in-frame `Tiếp` until the first memory card shows. */
@@ -173,13 +207,89 @@ test("previews a Memory Box draft with a photo, issues, fallback and Sửa links
   const viewerBox = page.locator("[data-viewport]");
   await captureViewerScreenshot(viewerBox, testInfo, "preview-memory-1-phone");
 
-  // 7. Desktop viewport, then restart back to the envelope.
+  // 7. Desktop viewport, then restarts back to the envelope.
   await page.getByRole("button", { name: "Máy tính" }).click();
   await expect(viewerBox).toHaveAttribute("data-viewport", "desktop");
   await expect(scene(frame, "memory-1")).toBeVisible();
   await captureViewerScreenshot(viewerBox, testInfo, "preview-memory-1-desktop");
-  await page.getByRole("button", { name: "Phát lại" }).click();
+
+  // 7a. A fast restart (the held URLs stay valid): no server round trip, busy feedback until the
+  //     new template is ready, then the animated runtime, never the static rendering.
+  const previewRequests: string[] = [];
+  const onPreviewRequest = (sent: Request) => {
+    if (new URL(sent.url()).pathname.startsWith("/preview/")) previewRequests.push(sent.method());
+  };
+  page.on("request", onPreviewRequest);
+  let artifact = await holdArtifact(page);
+  await page.getByRole("button", { exact: true, name: "Phát lại" }).click();
+  const busyRestart = page.getByRole("button", { name: "Đang phát lại…" });
+  await expect(busyRestart).toHaveAttribute("aria-busy", "true");
+  await expect(busyRestart).toHaveAttribute("aria-disabled", "true");
+  await expect(busyRestart).toBeFocused();
+  await expect(page.getByRole("button", { name: "Giảm chuyển động" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Điện thoại" })).toBeEnabled();
+  await expect(loadingOverlay(page)).toBeVisible();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Đang tải lại bản xem trước…" }),
+  ).toHaveAttribute("aria-live", "polite");
+  await artifact.release();
+  await expectControlsIdle(page);
   await expect(page.getByRole("heading", { name: "Bạn có một món quà" })).toBeVisible();
+  page.off("request", onPreviewRequest);
+  expect(previewRequests).toEqual([]);
+  frame = await openToFirstMemory(page);
+  await expect
+    .poll(() => naturalWidth(scene(frame, "memory-1").locator("img")), { timeout: 15_000 })
+    .toBeGreaterThan(0);
+  await expect(page.getByRole("region", { name: "Nội dung món quà" })).toHaveCount(0);
+
+  // 7b. The reduced-motion toggle restarts the same way, with `prefersReducedMotion`.
+  artifact = await holdArtifact(page);
+  await page.getByRole("button", { name: "Giảm chuyển động" }).click();
+  const busyMotion = page.getByRole("button", { name: "Đang áp dụng…" });
+  await expect(busyMotion).toHaveAttribute("aria-busy", "true");
+  await expect(busyMotion).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { exact: true, name: "Phát lại" })).toBeDisabled();
+  await artifact.release();
+  await expectControlsIdle(page);
+  await expect(viewerFrame(page).locator("body")).toHaveAttribute("data-motion", "reduced");
+  frame = await openToFirstMemory(page);
+  await expect(page.getByRole("region", { name: "Nội dung món quà" })).toHaveCount(0);
+
+  // 7c. Close to the URLs' expiry, a restart re-reads the draft first; the busy state holds while
+  //     the server answers.
+  //     Only this document's clock moves; the reload in step 8 restores it.
+  await page.evaluate(() => {
+    const realNow = Date.now.bind(Date);
+    Date.now = () => realNow() + 250_000;
+  });
+  let releaseRefresh: () => void = () => {};
+  const refreshHeld = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+  let refreshes = 0;
+  await page.route(
+    (url) => url.pathname.startsWith("/preview/"),
+    async (route) => {
+      if (route.request().headers()["rsc"] === "1") {
+        refreshes += 1;
+        await refreshHeld;
+      }
+      await route.continue();
+    },
+  );
+  await page.getByRole("button", { exact: true, name: "Phát lại" }).click();
+  await expect(page.getByRole("button", { name: "Đang phát lại…" })).toHaveAttribute(
+    "aria-busy",
+    "true",
+  );
+  await expect(loadingOverlay(page)).toBeVisible();
+  await expect.poll(() => refreshes).toBe(1);
+  releaseRefresh();
+  await expectControlsIdle(page);
+  await expect(page.getByRole("heading", { name: "Bạn có một món quà" })).toBeVisible();
+  expect(refreshes).toBe(1);
+  await page.unrouteAll({ behavior: "wait" });
 
   // 8. Reload: the artifact comes from the browser cache and still plays.
   await page.reload();

@@ -815,6 +815,66 @@ describe("gift viewer controller", () => {
     });
   });
 
+  describe("runtime outcome", () => {
+    it("notifies ready once behind the envelope, however often READY arrives", () => {
+      const onRuntimeSettled = vi.fn();
+      const harness = createHarness({ onRuntimeSettled });
+      harness.load();
+
+      harness.ready();
+      harness.ready();
+      harness.ready();
+
+      expect(onRuntimeSettled.mock.calls).toEqual([["ready"]]);
+      expect(harness.state().phase).toBe("envelope");
+      expect(harness.events).toEqual([]);
+    });
+
+    it("notifies fallback once after the handshake times out, and no ready after it", () => {
+      const onRuntimeSettled = vi.fn();
+      const harness = createHarness({ onRuntimeSettled });
+      harness.load();
+
+      vi.advanceTimersByTime(20 * 250);
+      harness.ready();
+
+      expect(onRuntimeSettled.mock.calls).toEqual([["fallback"]]);
+    });
+
+    it("notifies the fallback of a payload without artifact after the mount", async () => {
+      const onRuntimeSettled = vi.fn();
+      const harness = createHarness({
+        onRuntimeSettled,
+        source: { kind: "ready", viewer: viewerPayload({ artifactUrl: null }) },
+      });
+
+      harness.controller.mounted();
+      expect(onRuntimeSettled).not.toHaveBeenCalled();
+      await flush();
+
+      expect(onRuntimeSettled.mock.calls).toEqual([["fallback"]]);
+    });
+
+    it("notifies nothing for a controller unmounted before it settled", async () => {
+      const onRuntimeSettled = vi.fn();
+      const harness = createHarness({ onRuntimeSettled });
+      harness.load();
+      harness.controller.dispose();
+      harness.ready();
+      vi.advanceTimersByTime(60_000);
+
+      const noArtifact = createHarness({
+        onRuntimeSettled,
+        source: { kind: "ready", viewer: viewerPayload({ artifactUrl: null }) },
+      });
+      noArtifact.controller.mounted();
+      noArtifact.controller.dispose();
+      await flush();
+
+      expect(onRuntimeSettled).not.toHaveBeenCalled();
+    });
+  });
+
   it("destroys the runtime, stops listening and releases audio on unmount", () => {
     const harness = createHarness();
     harness.load();

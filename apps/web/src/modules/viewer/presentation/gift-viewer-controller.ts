@@ -36,6 +36,9 @@ export type GiftViewerPhase =
 
 export type GiftViewerRuntime = "fallback" | "idle" | "loading" | "ready";
 
+/** How a mount's runtime settled: the template answered `READY`, or the static view took over. */
+export type GiftViewerRuntimeOutcome = "fallback" | "ready";
+
 export type GiftViewerState = Readonly<{
   assetsRefreshed: boolean;
   /** Shown as `Không phát được nhạc.` when playback was blocked or failed. */
@@ -97,6 +100,8 @@ export type GiftViewerControllerOptions = Readonly<{
   onIssuesChange?: (issues: readonly ViewerIssue[]) => void;
   onLifecycleEvent?: (event: ViewerLifecycleEvent) => void;
   onMutedChange?: (muted: boolean) => void;
+  /** Called at most once per controller, independently of the opening gesture. */
+  onRuntimeSettled?: (outcome: GiftViewerRuntimeOutcome) => void;
   source: ViewerSource;
   systemPrefersReducedMotion: () => boolean;
 }>;
@@ -196,6 +201,7 @@ export function createGiftViewerController(options: GiftViewerControllerOptions)
   /** Images whose failure triggered the asset refresh: they show their caption if it fails. */
   const refreshTriggers = new Set<string>();
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  let settled = false;
 
   function update(patch: Partial<GiftViewerState>) {
     state = { ...state, ...patch };
@@ -280,10 +286,18 @@ export function createGiftViewerController(options: GiftViewerControllerOptions)
     update({ phase: "playing" });
   }
 
+  function settle(outcome: GiftViewerRuntimeOutcome) {
+    if (settled || disposed) return;
+    settled = true;
+    options.onRuntimeSettled?.(outcome);
+  }
+
   function emitDeferred(event: ViewerLifecycleEvent) {
     // A controller that React discards right after mounting (Strict Mode) never reports it.
     queueMicrotask(() => {
-      if (!disposed) emit(event);
+      if (disposed) return;
+      emit(event);
+      if (event.type === "fallback") settle("fallback");
     });
   }
 
@@ -299,8 +313,12 @@ export function createGiftViewerController(options: GiftViewerControllerOptions)
     const opening = state.phase === "opening";
     update({ fallbackReason: reason, frameSrc: null, frameVisible: false, runtime: "fallback" });
     if (opening) beginPlayback();
-    if (deferEmit) emitDeferred({ reason, type: "fallback" });
-    else emit({ reason, type: "fallback" });
+    if (deferEmit) {
+      emitDeferred({ reason, type: "fallback" });
+    } else {
+      emit({ reason, type: "fallback" });
+      settle("fallback");
+    }
     if (state.phase !== "envelope") staticShown();
   }
 
@@ -323,6 +341,7 @@ export function createGiftViewerController(options: GiftViewerControllerOptions)
       case "READY":
         stopHandshake();
         update({ runtime: "ready" });
+        settle("ready");
         if (state.openRequested && state.phase === "opening") beginPlayback();
         return;
       case "SCENE":

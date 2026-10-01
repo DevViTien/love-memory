@@ -67,6 +67,32 @@ describe("GiftViewer", () => {
     expect(artifact).toHaveBeenCalledWith(expect.objectContaining({ type: "INIT" }), "*");
   });
 
+  it("tells the host page once that the runtime is ready, behind the envelope", () => {
+    const onRuntimeSettled = vi.fn();
+    render(
+      <GiftViewer
+        onRuntimeSettled={onRuntimeSettled}
+        source={{ kind: "ready", viewer: viewerPayload() }}
+      />,
+    );
+    const frame = document.querySelector("iframe")!;
+    const template = frame.contentWindow!;
+    fireEvent.load(frame);
+    act(() => {
+      for (let index = 0; index < 2; index += 1) {
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            data: { protocolVersion: 1, type: "READY" },
+            source: template,
+          }),
+        );
+      }
+    });
+
+    expect(onRuntimeSettled.mock.calls).toEqual([["ready"]]);
+    expect(screen.getByRole("button", { name: "Mở quà" })).toBeTruthy();
+  });
+
   it("moves focus to the static content when the template fails during the gift", async () => {
     const user = userEvent.setup();
     render(<GiftViewer source={{ kind: "ready", viewer: viewerPayload() }} />);

@@ -124,6 +124,35 @@ request paths:
 - Links cannot be revoked or re-issued until Sprint 4 (plan.md §13.1–13.2). In Sprint 3 only `dev`
   and `stg` can publish, so only test gifts are exposed.
 
+## Deployment Protection and template artifacts
+
+Vercel Deployment Protection (Vercel Authentication, the default "Standard Protection" for Preview
+deployments) breaks every animated gift on a protected tier. The template iframe runs with
+`sandbox="allow-scripts"` and therefore has an opaque origin, so the browser sends its
+`runtime.mjs` module request without the Vercel SSO cookie. Vercel answers `302` to
+`vercel.com/sso-api`, the runtime never starts, and the gift viewer shows its static fallback after
+the `INIT` handshake times out (the preview then shows `Đang hiển thị bản tĩnh vì mẫu quà không chạy
+được…`). The application cannot work around this: the request is refused before it reaches Next.js,
+and published template releases are immutable.
+
+Check a tier without signing in (the hash is in `templates/memory-box/releases/1.1.0/artifact.json`):
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" \
+  "<stable URL>/template-artifacts/memory-box/1.1.0/<contentHash>/runtime.mjs"
+```
+
+`200` means templates can run; `302`/`401` means the tier is protected. Options, decided with the
+PO (risk register "Staging publishing is open to any signed-in account", decision P4):
+
+- disable Vercel Authentication for `dev`/`stg` and restrict access in the application (email
+  allowlist) instead; or
+- keep the protection only where no animated gift has to be demonstrated, accepting the static
+  fallback there.
+
+Do not put the Protection Bypass for Automation secret into artifact URLs: it would reach every
+viewer of a preview or published gift.
+
 ## Smoke test
 
 For each deployed tier:
@@ -132,7 +161,9 @@ For each deployed tier:
 2. Confirm `GET /` and `GET /api/health/ready` return `200`.
 3. Confirm the template catalog loads from the database assigned to that tier.
 4. Test magic-link authentication using that tier's stable URL; callback URLs must not cross tiers.
-5. Review Vercel error logs without exposing URIs, tokens, gift content or signed Blob URLs.
+5. Confirm the template artifact check of "Deployment Protection and template artifacts" returns
+   `200`, then open a preview and confirm the Memory Box animation plays (not the static view).
+6. Review Vercel error logs without exposing URIs, tokens, gift content or signed Blob URLs.
 
 ## Rollback
 

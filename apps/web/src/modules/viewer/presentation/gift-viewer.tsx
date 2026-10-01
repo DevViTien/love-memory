@@ -15,6 +15,7 @@ import {
   createWindowTemplateBridge,
   type GiftViewerPhase,
   type GiftViewerRuntime,
+  type GiftViewerRuntimeOutcome,
   initialGiftViewerState,
 } from "./gift-viewer-controller";
 import { toStaticGiftBlocks } from "./static-gift-content";
@@ -28,6 +29,8 @@ export type GiftViewerProps = Readonly<{
   onIssuesChange?: (issues: readonly ViewerIssue[]) => void;
   onLifecycleEvent?: (event: ViewerLifecycleEvent) => void;
   onMutedChange?: (muted: boolean) => void;
+  /** Once per mount: the template answered `READY`, or the static rendering took over. */
+  onRuntimeSettled?: (outcome: GiftViewerRuntimeOutcome) => void;
   source: ViewerSource;
 }>;
 
@@ -71,6 +74,7 @@ export function GiftViewer(props: GiftViewerProps) {
       onIssuesChange: (issues) => propsRef.current.onIssuesChange?.(issues),
       onLifecycleEvent: (event) => propsRef.current.onLifecycleEvent?.(event),
       onMutedChange: (muted) => propsRef.current.onMutedChange?.(muted),
+      onRuntimeSettled: (outcome) => propsRef.current.onRuntimeSettled?.(outcome),
       source: initial.source,
       systemPrefersReducedMotion: () =>
         window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false,
