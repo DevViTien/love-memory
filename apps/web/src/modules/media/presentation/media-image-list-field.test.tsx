@@ -631,7 +631,13 @@ describe("MediaImageListField failures and labels", () => {
       (_url, init) =>
         init?.method === "DELETE"
           ? jsonResponse(
-              { error: { code: "CONFLICT", message: "Ảnh đang được dùng.", requestId: "r-1" } },
+              {
+                error: {
+                  code: "CONFLICT",
+                  message: "The asset is not in a state that allows this operation.",
+                  requestId: "r-1",
+                },
+              },
               409,
             )
           : undefined,
@@ -642,7 +648,10 @@ describe("MediaImageListField failures and labels", () => {
 
     await user.click(await screen.findByRole("button", { name: "Xóa" }));
 
-    expect(await screen.findByText("Ảnh đang được dùng.")).toBeTruthy();
+    expect(
+      await screen.findByText("Ảnh đang được cập nhật — hãy thử xóa lại sau giây lát."),
+    ).toBeTruthy();
+    expect(document.body.textContent).not.toContain("not in a state");
     expect(screen.getByText("1/3 ảnh")).toBeTruthy();
   });
 
@@ -692,5 +701,364 @@ describe("MediaImageListField failures and labels", () => {
     fireEvent.change(screen.getByLabelText("Chọn ảnh"), { target: { files: [gif, jpeg] } });
 
     expect(await screen.findByText("anim.gif: chỉ hỗ trợ JPEG, PNG hoặc WebP.")).toBeTruthy();
+  });
+
+  function apiError(code: string, status: number, headers: Record<string, string> = {}) {
+    return new Response(
+      JSON.stringify({ error: { code, message: "English server text.", requestId: "r-1" } }),
+      { headers: { "Content-Type": "application/json", ...headers }, status },
+    );
+  }
+
+  function single(status: string, overrides: Record<string, unknown> = {}) {
+    return jsonResponse({ data: asset(status, overrides) });
+  }
+
+  it("shows the cropped image and a progress bar while uploading (Local thumbnail while uploading)", async () => {
+    stubFetch((url) => (url === "/api/media/uploads/init" ? grant() : undefined));
+    UploadRequest.onSend = (request) => {
+      queueMicrotask(() =>
+        request.upload.dispatchEvent(
+          new ProgressEvent("progress", { lengthComputable: true, loaded: 40, total: 100 }),
+        ),
+      );
+    };
+    const user = userEvent.setup();
+    renderField();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+
+    await pickAndConfirm(user);
+
+    const progress = await screen.findByRole("progressbar", {
+      name: "Tiến độ tải lên memory.jpg",
+    });
+    await waitFor(() => expect(progress.getAttribute("aria-valuenow")).toBe("40"));
+    expect(progress.getAttribute("aria-valuemin")).toBe("0");
+    expect(progress.getAttribute("aria-valuemax")).toBe("100");
+    expect(screen.getByText("Đang tải lên 40%")).toBeTruthy();
+    const thumbnail = screen.getByRole<HTMLImageElement>("img", { name: "Ảnh kỷ niệm vừa chọn" });
+    expect(thumbnail.getAttribute("src")).toBe("blob:crop-preview");
+  });
+
+  it("keeps the local image under a processing overlay and swaps to the derivative (Processing finishes)", async () => {
+    let listed = "none";
+    stubFetch((url) => {
+      if (url === "/api/media/uploads/init") return grant();
+      if (url === "/api/media/uploads/complete") {
+        return jsonResponse({ data: asset("uploaded") }, 202);
+      }
+      if (url.startsWith("/api/media/assets?")) {
+        return jsonResponse({ data: { assets: listed === "none" ? [] : [asset(listed)] } });
+      }
+      if (url.startsWith(`/api/media/assets/${assetId}?`)) {
+        return single("ready", {
+          derivatives: [{ height: 240, url: "https://cdn.example/w320.webp", width: 320 }],
+        });
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+    renderField();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    listed = "processing";
+
+    await pickAndConfirm(user);
+
+    expect(await screen.findByText("Đang xử lý ảnh…")).toBeTruthy();
+    expect(
+      screen
+        .getByRole<HTMLImageElement>("img", { name: "Ảnh kỷ niệm vừa chọn" })
+        .getAttribute("src"),
+    ).toBe("blob:crop-preview");
+    expect(screen.getByText("Đang xử lý").closest("[aria-live='polite']")).toBeTruthy();
+
+    listed = "ready";
+    const ready = await screen.findByRole<HTMLImageElement>(
+      "img",
+      { name: "Ảnh kỷ niệm đã tải" },
+      { timeout: 4_000 },
+    );
+    expect(ready.getAttribute("src")).toBe("https://cdn.example/w320.webp");
+    expect(screen.queryByText("Đang xử lý ảnh…")).toBeNull();
+    expect(vi.spyOn(URL, "revokeObjectURL")).toHaveBeenCalledWith("blob:crop-preview");
+  });
+
+  it("reassures the creator after 45 seconds of processing (Slow processing)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    stubFetch(() => undefined, [asset("processing")]);
+    renderField({ initialAssetIds: [assetId] });
+    expect(await screen.findByText("Đang xử lý ảnh…")).toBeTruthy();
+    const hint =
+      "Ảnh đang được xử lý lâu hơn bình thường. Bạn có thể tiếp tục viết, ảnh sẽ tự cập nhật.";
+
+    await vi.advanceTimersByTimeAsync(43_500);
+    expect(screen.queryByText(hint)).toBeNull();
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    const shown = await screen.findByText(hint);
+    expect(shown.closest("[aria-live='polite']")).toBeTruthy();
+    const listCalls = vi
+      .mocked(fetch)
+      .mock.calls.filter(
+        ([url]) => typeof url === "string" && url.includes("includeDownloadUrls=false"),
+      );
+    expect(listCalls.length).toBeGreaterThanOrEqual(30);
+  });
+
+  it("refreshes instead of failing when a late completion answers 409 (Late duplicate completion)", async () => {
+    stubFetch((url) => {
+      if (url === "/api/media/uploads/init") return grant();
+      if (url === "/api/media/uploads/complete") return apiError("CONFLICT", 409);
+      if (url.startsWith(`/api/media/assets/${assetId}?`)) return single("uploaded");
+      return undefined;
+    });
+    const user = userEvent.setup();
+    renderField();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+
+    await pickAndConfirm(user);
+
+    expect(await screen.findByText("Đang xử lý ảnh…")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Hoàn tất tải lên" })).toBeNull();
+    expect(document.body.textContent).not.toContain("English server text.");
+  });
+
+  it("explains a completion conflict when the asset really failed", async () => {
+    stubFetch((url) => {
+      if (url === "/api/media/uploads/init") return grant();
+      if (url === "/api/media/uploads/complete") return apiError("CONFLICT", 409);
+      if (url.startsWith(`/api/media/assets/${assetId}?`)) {
+        return single("failed", { failureCode: "UPLOAD_INVALID" });
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+    renderField();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+
+    await pickAndConfirm(user);
+
+    expect(
+      await screen.findByText("Ảnh này không thể hoàn tất tải lên nữa. Hãy xóa và chọn lại ảnh."),
+    ).toBeTruthy();
+    expect(screen.getByText("Không đọc được ảnh này. Hãy xóa và chọn ảnh khác.")).toBeTruthy();
+  });
+
+  it("drops the item when a conflicting completion's asset no longer exists", async () => {
+    stubFetch((url) => {
+      if (url === "/api/media/uploads/init") return grant();
+      if (url === "/api/media/uploads/complete") return apiError("CONFLICT", 409);
+      if (url.startsWith(`/api/media/assets/${assetId}?`)) return apiError("NOT_FOUND", 404);
+      return undefined;
+    });
+    const user = userEvent.setup();
+    const { onChange } = renderField();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+
+    await pickAndConfirm(user);
+
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith("photos", []));
+    expect(screen.getByText("0/3 ảnh")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("removes an item whose delete answers 404 without an error (Asset already gone)", async () => {
+    stubFetch(
+      (_url, init) => (init?.method === "DELETE" ? apiError("NOT_FOUND", 404) : undefined),
+      [asset("ready")],
+    );
+    const user = userEvent.setup();
+    const { onChange } = renderField({ initialAssetIds: [assetId] });
+
+    await user.click(await screen.findByRole("button", { name: "Xóa" }));
+
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith("photos", []));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("sends one DELETE for a double click (Double click on delete)", async () => {
+    let answerDelete: (response: Response) => void = () => undefined;
+    const fetchMock = stubFetch(
+      (_url, init) =>
+        init?.method === "DELETE"
+          ? new Promise<Response>((resolve) => (answerDelete = resolve))
+          : undefined,
+      [asset("processing")],
+    );
+    renderField({ initialAssetIds: [assetId] });
+    const button = await screen.findByRole<HTMLButtonElement>("button", { name: "Xóa" });
+
+    fireEvent.click(button);
+    fireEvent.click(button);
+    const busy = await screen.findByRole<HTMLButtonElement>("button", { name: "Đang xóa…" });
+    expect(busy.disabled).toBe(true);
+    answerDelete(jsonResponse({ data: { assetId, deleted: true } }));
+
+    await waitFor(() => expect(screen.getByText("0/3 ảnh")).toBeTruthy());
+    const deletes = fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE");
+    expect(deletes).toHaveLength(1);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("clears an old message when a new selection starts (Old message cleared)", async () => {
+    stubFetch(
+      (_url, init) => (init?.method === "DELETE" ? apiError("CONFLICT", 409) : undefined),
+      [asset("ready")],
+    );
+    const user = userEvent.setup();
+    renderField({ initialAssetIds: [assetId] });
+    await user.click(await screen.findByRole("button", { name: "Xóa" }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+
+    const file = new File([Uint8Array.from([1])], "next.jpg", { type: "image/jpeg" });
+    fireEvent.change(screen.getByLabelText("Chọn ảnh"), { target: { files: [file] } });
+
+    await screen.findByRole("dialog");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("maps a refused grant to Vietnamese copy (Raw server message never shown)", async () => {
+    stubFetch((url) =>
+      url === "/api/media/uploads/init" ? apiError("VALIDATION_ERROR", 400) : undefined,
+    );
+    const user = userEvent.setup();
+    renderField();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+
+    await pickAndConfirm(user);
+
+    expect(
+      await screen.findByText(
+        "Ảnh này không được hỗ trợ. Hãy chọn ảnh JPEG, PNG hoặc WebP dưới 10 MB.",
+      ),
+    ).toBeTruthy();
+    expect(document.body.textContent).not.toContain("English server text.");
+    expect(screen.getByText("0/3 ảnh")).toBeTruthy();
+  });
+
+  it("explains a rate-limited grant and the gift quota differently (Grant refused)", async () => {
+    let limited = true;
+    stubFetch((url) =>
+      url === "/api/media/uploads/init"
+        ? apiError("RATE_LIMITED", 429, limited ? { "Retry-After": "60" } : {})
+        : undefined,
+    );
+    const user = userEvent.setup();
+    renderField();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+
+    await pickAndConfirm(user);
+    expect(
+      await screen.findByText("Bạn đang tải ảnh hơi nhanh. Hãy thử lại sau ít phút."),
+    ).toBeTruthy();
+
+    limited = false;
+    await waitFor(() =>
+      expect(screen.getByLabelText<HTMLInputElement>("Chọn ảnh").disabled).toBe(false),
+    );
+    await pickAndConfirm(user);
+    expect(await screen.findByText("Món quà đã đạt giới hạn số ảnh.")).toBeTruthy();
+  });
+
+  it("keeps the complete action after repeated server failures (Server failure during completion)", async () => {
+    stubFetch((url) => {
+      if (url === "/api/media/uploads/init") return grant();
+      if (url === "/api/media/uploads/complete") return apiError("INTERNAL_ERROR", 500);
+      return undefined;
+    });
+    const user = userEvent.setup();
+    renderField();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+
+    await pickAndConfirm(user);
+
+    expect(
+      await screen.findByText("Hệ thống đang bận. Hãy thử lại sau ít phút.", undefined, {
+        timeout: 4_000,
+      }),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Hoàn tất tải lên" })).toBeTruthy();
+  });
+
+  it("explains a completion that keeps failing at the network level", async () => {
+    stubFetch((url) => {
+      if (url === "/api/media/uploads/init") return grant();
+      if (url === "/api/media/uploads/complete") throw new TypeError("Failed to fetch");
+      return undefined;
+    });
+    const user = userEvent.setup();
+    renderField();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+
+    await pickAndConfirm(user);
+
+    expect(
+      await screen.findByText(
+        "Chưa hoàn tất tải ảnh lên — hãy bấm “Hoàn tất tải lên” để thử lại.",
+        undefined,
+        { timeout: 4_000 },
+      ),
+    ).toBeTruthy();
+    expect(document.body.textContent).not.toContain("Failed to fetch");
+  });
+
+  it("maps a refused retry and disables it while running (Retry refused)", async () => {
+    let answerRetry: (response: Response) => void = () => undefined;
+    stubFetch(
+      (url) =>
+        url.endsWith("/retry")
+          ? new Promise<Response>((resolve) => (answerRetry = resolve))
+          : undefined,
+      [asset("failed", { failureCode: "PROCESSING_FAILED" })],
+    );
+    const user = userEvent.setup();
+    renderField({ initialAssetIds: [assetId] });
+    expect(await screen.findByText("Bấm “Thử lại” để xử lý lại ảnh.")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Thử lại" }));
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Đang thử lại…" }).disabled).toBe(
+      true,
+    );
+    answerRetry(apiError("CONFLICT", 409));
+
+    expect(
+      await screen.findByText("Ảnh này không thể xử lý lại nữa. Hãy xóa và chọn lại ảnh."),
+    ).toBeTruthy();
+  });
+
+  it("revokes the local preview when the field unmounts", async () => {
+    stubFetch((url) => (url === "/api/media/uploads/init" ? grant() : undefined));
+    UploadRequest.onSend = () => {
+      // The transfer stays in flight until the field unmounts.
+    };
+    const user = userEvent.setup();
+    const { unmount } = renderField();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    await pickAndConfirm(user);
+    await screen.findByRole("img", { name: "Ảnh kỷ niệm vừa chọn" });
+    const revoke = vi.spyOn(URL, "revokeObjectURL");
+    revoke.mockClear();
+
+    unmount();
+
+    expect(revoke).toHaveBeenCalledWith("blob:crop-preview");
+  });
+
+  it("shows a Vietnamese message when cropping fails", async () => {
+    stubFetch(() => undefined);
+    cropMocks.cropImageToAspectRatio.mockRejectedValueOnce(
+      new Error("The cropped image could not be encoded."),
+    );
+    const user = userEvent.setup();
+    renderField();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+
+    await pickAndConfirm(user);
+
+    expect(
+      await screen.findByText("Không cắt được ảnh này — hãy thử lại hoặc chọn ảnh khác."),
+    ).toBeTruthy();
+    expect(document.body.textContent).not.toContain("could not be encoded");
   });
 });

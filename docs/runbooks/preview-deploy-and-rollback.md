@@ -62,6 +62,14 @@ Configure shared Preview secrets once and override environment identity per bran
 | `INTERNAL_PUBLISH_ENABLED`  | `true`                                                    | `true`                                                | Absent (forced off anyway)                       |
 | `ANALYTICS_ENABLED`         | `true`                                                    | `true`                                                | Absent (off) until the Product Owner turns it on |
 | `ANALYTICS_GIFT_REF_SECRET` | 48 random bytes, base64url; development only              | 48 random bytes, base64url; staging only              | Its own 48 random bytes, provisioned now         |
+| `MEDIA_WORKER_MODE`         | `trigger`, or `inline` until Trigger.dev is configured    | `trigger`                                             | `trigger`                                        |
+| `TRIGGER_SECRET_KEY`        | Secret of its Trigger.dev environment (never `tr_dev_…`)  | Secret of its Trigger.dev environment                 | Trigger.dev Production secret                    |
+| `TRIGGER_PROJECT_REF`       | LoveMemory Trigger.dev project ref                        | LoveMemory Trigger.dev project ref                    | LoveMemory Trigger.dev project ref               |
+
+The media worker variables and the Trigger.dev task deployment are described in the
+[media pipeline runbook](./media-pipeline.md#worker-mode-per-deployment). If the smoke test finds
+`/api/health/ready` at `503` with `MediaOutboxStalledError` in the logs, uploads are not being
+processed on that deployment.
 
 `AUTH_EMAIL_FROM` and the Vercel Blob connection may be shared across Preview branches during the
 current stage. Technical-spike endpoints stay disabled unless a time-boxed verification explicitly

@@ -10,6 +10,76 @@
 
 The `media-worker-sweep` task runs every five minutes. It picks up due retries, reclaims `processing` jobs that have been stale for ten minutes, and cleans abandoned uploads. Processing attempts are bounded at three. Studio only offers a manual retry for transient `PROCESSING_FAILED` assets; invalid or missing source bytes are terminal.
 
+A job whose asset can no longer be processed (typically an image the creator deleted while it was
+still waiting) is closed as `failed` when it is claimed and the step is reported as `discarded`. A
+discarded step never ends a drain, so the jobs queued behind a stale one are processed in the same
+run (inline, `media-worker-drain`, `media-worker-sweep` and `pnpm media:work` alike).
+
+## Detecting a stalled worker
+
+`GET /api/health/ready` answers `503` (generic body, `SERVICE_UNAVAILABLE`) when a `pending`
+`media.process.v1` job with fewer than three attempts became available more than **10 minutes**
+ago. A healthy `trigger` deployment never reaches that state: completions dispatch a drain and the
+sweep runs every five minutes. Scheduled automatic retries (`availableAt` in the future) do not
+count. The server log names the cause without identifiers:
+
+```text
+Readiness check failed { errorName: "MediaOutboxStalledError", requestId: "<uuid>" }
+```
+
+The Studio symptom is the same everywhere: images stay on `Đang xử lý ảnh…` (after 45 seconds with
+the "lâu hơn bình thường" hint) and the preview shows no photos, because only `ready` assets are
+signed.
+
+When readiness reports `MediaOutboxStalledError`:
+
+1. Check the deployment's worker mode. With `MEDIA_WORKER_MODE` unset, a Vercel deployment
+   (`NODE_ENV=production`) uses `trigger`.
+2. In `trigger` mode, open the Trigger.dev environment that owns the deployment's
+   `TRIGGER_SECRET_KEY`: the `media-worker-drain` and `media-worker-sweep` tasks must be deployed
+   there, the sweep schedule must be active, and recent runs must succeed. A `tr_dev_…` key only
+   works while `pnpm jobs:dev` is running on a developer machine, so never use it on Vercel.
+3. In `inline` mode there is no sweep: work left by a failed inline run, automatic retries and
+   abandoned-upload cleanup wait for the next completion or retry. Run `pnpm media:work` with that
+   environment's `MONGODB_URI`/`MONGODB_DATABASE` and Blob credentials, or switch to `trigger`.
+4. Readiness returns to `200` as soon as the overdue jobs are claimed; no manual database edit is
+   needed.
+
+## Worker mode per deployment
+
+| Deployment    | Recommended mode                                  | Notes                                                                                                                                       |
+| ------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local / E2E   | `inline`                                          | Default outside `NODE_ENV=production`; required with `STORAGE_DRIVER=local`.                                                                |
+| `dev` Preview | `trigger`, or `inline` until Trigger.dev is ready | `inline` processes each upload inside its completion request; there is no sweep, so automatic retries and cleanup wait for the next upload. |
+| `stg`         | `trigger`                                         | Staging must exercise the production path.                                                                                                  |
+| Production    | `trigger`                                         | Never `inline`.                                                                                                                             |
+
+To run `dev` with the inline worker, set `MEDIA_WORKER_MODE=inline` on the `dev` Preview branch in
+Vercel and redeploy. `TRIGGER_SECRET_KEY` is not needed in `inline` mode. Uploads then become
+`ready` within the completion request; jobs left pending from before are drained by the next upload
+or by `pnpm media:work`.
+
+### Trigger.dev checklist (`dev` when enabled, `stg`, production)
+
+1. Use one Trigger.dev project for LoveMemory and note its project ref (`proj_…`).
+2. Pick the Trigger.dev environment per deployment, for example Staging (or a preview branch) for
+   `dev`/`stg` and Production for production, and never share a secret key between them.
+3. In that Trigger.dev environment set `MONGODB_URI`, `MONGODB_DATABASE` (the same database as the
+   Vercel deployment, for example `love_memory_development` for `dev`), `BLOB_READ_WRITE_TOKEN` and
+   optionally `BLOB_STORE_ID`.
+4. Deploy the tasks from the release commit:
+   `TRIGGER_PROJECT_REF=proj_… pnpm jobs:deploy --env <staging|prod>` (CI or an operator machine
+   with a Trigger.dev access token). Confirm that `media-worker-drain` and `media-worker-sweep`
+   appear with the new version and that the sweep schedule is attached.
+5. In Vercel, on the matching environment or branch, set `MEDIA_WORKER_MODE=trigger`,
+   `TRIGGER_SECRET_KEY=<that environment's secret key>` and `TRIGGER_PROJECT_REF=proj_…`, then
+   redeploy.
+6. Smoke test: `GET /api/health/ready` returns `200`, upload one image in Studio and see it become
+   `ready` within a few seconds; the Trigger.dev dashboard shows one `media-worker-drain` run with
+   `source: upload-complete`.
+7. Redeploy the tasks whenever `apps/web/src/trigger/**`, the media worker or its dependencies
+   change, before promoting the web deployment that relies on them.
+
 ## Local operation
 
 Run the schema migration once after pulling Sprint 2:
@@ -106,6 +176,10 @@ If task dispatch fails after upload completion, the API records an operational e
 - `failed / DECODE_FAILED` or `OBJECT_MISSING`: the bytes are not a supported image, or the source was never uploaded; terminal, the source is deleted.
 - `failed / PROCESSING_FAILED`: transient storage or processing failure (not a decode error); retry from Studio while attempts are below three. After the third attempt the source is deleted and the creator can only remove the asset.
 - `processing` older than ten minutes: lease is considered stale and can be reclaimed.
+- `pending` and due for more than ten minutes: no worker is draining the outbox; readiness reports
+  `MediaOutboxStalledError` (see "Detecting a stalled worker").
+- `failed` job of a `deleted` asset: expected; the asset was deleted before processing and the job
+  was discarded.
 - `deleting` past `expiresAt`: a synchronous delete did not finish; the scheduled sweep retries source and derivative cleanup.
 - `ready` with source object still present: derivative commit succeeded but source cleanup failed; safe to delete the source key manually after confirming derivatives.
 

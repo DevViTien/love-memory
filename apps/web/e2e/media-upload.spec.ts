@@ -1,6 +1,7 @@
 import { GiftDraftResponseSchema } from "@love-memory/contracts";
 import { randomUUID } from "node:crypto";
 import { dirname, resolve } from "node:path";
+import { type Page } from "@playwright/test";
 import { MongoClient } from "mongodb";
 
 import { expect, test } from "./test";
@@ -142,4 +143,121 @@ test("uploads a real image through the Studio field into local object storage", 
   }, publicId);
   expect(deleted).toEqual({ listStatus: 200, status: 200 });
   expect((await page.request.get(derivative.toString())).status()).toBe(404);
+});
+
+/** Creates an anonymous memory-box draft, opens its image field and confirms one crop. */
+async function uploadOnePhoto(page: Page): Promise<void> {
+  await page.goto("/");
+  const created = await page.evaluate(async (key) => {
+    const response = await fetch("/api/gifts", {
+      body: JSON.stringify({ templateId: "memory-box", templateVersion: "1.1.0" }),
+      headers: { "Content-Type": "application/json", "Idempotency-Key": key },
+      method: "POST",
+    });
+    const body: unknown = await response.json();
+    return { body, status: response.status };
+  }, randomUUID());
+  expect(created.status).toBe(201);
+  const publicId = GiftDraftResponseSchema.parse(responseData(created.body)).gift.publicId;
+  createdGifts.push(publicId);
+
+  await page.goto(`/studio/${publicId}?field=memories`);
+  const picker = page.locator('input#studio-field-memories[type="file"]');
+  await expect(picker).toBeFocused();
+  await picker.setInputFiles(resolve(dirname(test.info().file), "fixtures", "photo.jpg"));
+  await page
+    .getByRole("dialog", { name: "Cắt ảnh theo khung mẫu quà" })
+    .getByRole("button", { name: "Dùng vùng ảnh này" })
+    .click();
+}
+
+/** English API text that must never reach the creator. */
+const RAW_SERVER_TEXT = /not in a state|Media asset was not found|could not be completed/;
+
+test("shows the cropped photo, upload progress and processing state in Vietnamese", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  let releaseUpload: () => void = () => undefined;
+  const uploadHeld = new Promise<void>((resolve) => (releaseUpload = resolve));
+  await page.route(/\/api\/local-object-storage\//, async (route) => {
+    if (route.request().method() === "PUT") await uploadHeld;
+    await route.continue();
+  });
+  // While held, the status polling reports the photo as still processing, as a slow worker would.
+  let holdProcessing = true;
+  await page.route(/\/api\/media\/assets\?.*includeDownloadUrls=false/, async (route) => {
+    const response = await route.fetch();
+    const body = (await response.json()) as { data: { assets: Array<Record<string, unknown>> } };
+    if (holdProcessing) {
+      body.data.assets = body.data.assets.map((asset) =>
+        asset["status"] === "ready" ? { ...asset, status: "processing" } : asset,
+      );
+    }
+    await route.fulfill({ json: body, response });
+  });
+
+  await uploadOnePhoto(page);
+
+  const field = page.locator("fieldset", { has: page.locator("#studio-field-memories") });
+  const localPhoto = field.getByRole("img", { name: "Ảnh kỷ niệm vừa chọn" });
+  await expect(localPhoto).toBeVisible();
+  expect(await localPhoto.getAttribute("src")).toMatch(/^blob:/);
+  const progress = field.getByRole("progressbar", { name: /^Tiến độ tải lên / });
+  await expect(progress).toBeVisible();
+  await expect(progress).toHaveAttribute("aria-valuemin", "0");
+  await expect(progress).toHaveAttribute("aria-valuemax", "100");
+  await expect(field.getByText(/^Đang tải lên \d{1,3}%$/)).toBeVisible();
+
+  releaseUpload();
+  await expect(field.getByText("Đang xử lý ảnh…")).toBeVisible({ timeout: 20_000 });
+  await expect(field.getByText("Đang xử lý", { exact: true })).toBeVisible();
+  await expect(progress).toBeHidden();
+  expect(await localPhoto.getAttribute("src")).toMatch(/^blob:/);
+
+  holdProcessing = false;
+  const readyPhoto = field.getByRole("img", { name: "Ảnh kỷ niệm đã tải" });
+  await expect(readyPhoto).toHaveAttribute("src", /\/api\/local-object-storage\//, {
+    timeout: 20_000,
+  });
+  await expect(field.getByText("Đang xử lý ảnh…")).toBeHidden();
+  await expect(localPhoto).toBeHidden();
+  // Scoped to the field: the Next.js route announcer is an (empty) `alert` region too.
+  await expect(field.getByRole("alert")).toHaveCount(0);
+  await expect(page.locator("body")).not.toContainText(RAW_SERVER_TEXT);
+});
+
+test("treats a late duplicate completion (409) as success instead of an error", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  // The server accepts the completion, but the browser receives the 409 that a second, late
+  // completion request of the same asset would get.
+  await page.route("**/api/media/uploads/complete", async (route) => {
+    const accepted = await route.fetch();
+    expect(accepted.status()).toBe(202);
+    await route.fulfill({
+      json: {
+        error: {
+          code: "CONFLICT",
+          message: "The asset is not in a state that allows this operation.",
+          requestId: "e2e-late-completion",
+        },
+      },
+      status: 409,
+    });
+  });
+
+  await uploadOnePhoto(page);
+
+  const field = page.locator("fieldset", { has: page.locator("#studio-field-memories") });
+  await expect(field.getByRole("img", { name: "Ảnh kỷ niệm đã tải" })).toHaveAttribute(
+    "src",
+    /\/api\/local-object-storage\//,
+    { timeout: 45_000 },
+  );
+  await expect(field.getByRole("button", { name: "Hoàn tất tải lên" })).toHaveCount(0);
+  // Scoped to the field: the Next.js route announcer is an (empty) `alert` region too.
+  await expect(field.getByRole("alert")).toHaveCount(0);
+  await expect(page.locator("body")).not.toContainText(RAW_SERVER_TEXT);
 });

@@ -4,6 +4,7 @@ import { COLLECTIONS, getDatabase, getMongoClient } from "../packages/database/s
 import { type MediaAsset } from "../packages/domain/src/index";
 import {
   mongoMediaAssetRepository,
+  mongoMediaOutboxMonitor,
   mongoMediaWorkerRepository,
 } from "../apps/web/src/modules/media/infrastructure/mongo-media-repository";
 
@@ -164,6 +165,28 @@ try {
       exhausted.exhaustedAsset.failureCode === "PROCESSING_FAILED",
     "A stale lease with an exhausted budget did not fail the asset terminally.",
   );
+
+  // Readiness sees a due job; a job whose asset was deleted after it was enqueued is discarded
+  // (a handled step), never reported as an empty outbox.
+  const discardedId = storedIds[3];
+  assert(discardedId, "Not enough reserved assets to verify a discarded job.");
+  await mongoMediaAssetRepository.markUploadedAndEnqueue(discardedId, at(40));
+  assert(
+    await mongoMediaOutboxMonitor.hasOverdueJob(at(40)),
+    "The outbox monitor did not report a due job.",
+  );
+  assert(
+    !(await mongoMediaOutboxMonitor.hasOverdueJob(at(39))),
+    "The outbox monitor reported a job that was not due yet.",
+  );
+  await assets.updateOne({ _id: discardedId }, { $set: { status: "deleted" } });
+  const discarded = await mongoMediaWorkerRepository.claimNext(at(41));
+  assert(
+    discarded && "discardedJobId" in discarded,
+    "A job of a deleted asset was not discarded as a handled step.",
+  );
+  const discardedJob = await jobs.findOne({ _id: discarded.discardedJobId });
+  assert(discardedJob?.status === "failed", "The discarded job was not marked failed.");
 
   // Abandoned upload cleanup.
   const expired = await mongoMediaWorkerRepository.claimExpiredUpload(at(30));

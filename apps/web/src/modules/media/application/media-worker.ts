@@ -19,9 +19,15 @@ export type ClaimedMediaJob = Readonly<{ asset: MediaAsset; jobId: string }>;
 // Claiming can turn an asset into a terminal failure without processing it (exhausted stale lease
 // or an unclaimable asset). The worker then releases the source object, which no retry can use.
 export type ExhaustedMediaJob = Readonly<{ exhaustedAsset: MediaAsset }>;
+// Claiming closed a job without processing anything (its asset was deleted or already left
+// `processing`). This is a handled step, not an empty outbox: the drain must continue.
+export type DiscardedMediaJob = Readonly<{ discardedJobId: string }>;
+export type ClaimResult = ClaimedMediaJob | ExhaustedMediaJob | DiscardedMediaJob | null;
+
+export type MediaWorkerStepStatus = "cleaned" | "completed" | "discarded" | "failed" | "idle";
 
 export interface MediaWorkerRepository {
-  claimNext: (now: Date) => Promise<ClaimedMediaJob | ExhaustedMediaJob | null>;
+  claimNext: (now: Date) => Promise<ClaimResult>;
   claimExpiredUpload: (now: Date) => Promise<MediaAsset | null>;
   complete: (
     assetId: string,
@@ -103,11 +109,10 @@ export function createMediaWorker({
     }
   }
 
-  async function runNext(): Promise<
-    Readonly<{ assetId?: string; status: "cleaned" | "completed" | "failed" | "idle" }>
-  > {
+  async function runNext(): Promise<Readonly<{ assetId?: string; status: MediaWorkerStepStatus }>> {
     const claimed = await repository.claimNext(clock());
     if (!claimed) return runExpiredCleanup();
+    if ("discardedJobId" in claimed) return { status: "discarded" };
     if ("exhaustedAsset" in claimed) {
       await deleteSourceBestEffort(claimed.exhaustedAsset);
       return { assetId: claimed.exhaustedAsset.id, status: "failed" };

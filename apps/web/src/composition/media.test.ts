@@ -19,8 +19,10 @@ vi.mock("@love-memory/storage", async (importOriginal) => {
 vi.mock("@/modules/gifts/infrastructure/mongo-gift-repository", () => ({
   mongoGiftRepository: {},
 }));
+const outboxMonitor = vi.hoisted(() => ({ hasOverdueJob: vi.fn() }));
 vi.mock("@/modules/media/infrastructure/mongo-media-repository", () => ({
   mongoMediaAssetRepository: {},
+  mongoMediaOutboxMonitor: outboxMonitor,
   mongoMediaWorkerRepository: {},
 }));
 vi.mock("@/composition/gifts", () => ({ getGiftTemplateManifest: vi.fn() }));
@@ -98,5 +100,15 @@ describe("media composition storage", () => {
     const route = composition.getLocalObjectStorageRoute();
     expect(route?.verifyRequest).toBeTypeOf("function");
     expect(storageSpies.createVercelBlobObjectStorage).not.toHaveBeenCalled();
+  });
+
+  it("checks the media outbox through the Mongo monitor", async () => {
+    const { composition } = await loadComposition();
+    outboxMonitor.hasOverdueJob.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+    await expect(composition.checkMediaOutbox()).resolves.toBeUndefined();
+    await expect(composition.checkMediaOutbox()).rejects.toMatchObject({
+      name: "MediaOutboxStalledError",
+    });
   });
 });

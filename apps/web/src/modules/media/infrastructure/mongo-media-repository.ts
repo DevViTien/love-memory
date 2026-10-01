@@ -6,11 +6,8 @@ import { MongoServerError } from "mongodb";
 import { randomUUID } from "node:crypto";
 
 import { type MarkDeletingResult, type MediaAssetRepository } from "../application/media-service";
-import {
-  type ClaimedMediaJob,
-  type ExhaustedMediaJob,
-  type MediaWorkerRepository,
-} from "../application/media-worker";
+import { type MediaOutboxMonitor } from "../application/media-outbox-health";
+import { type ClaimResult, type MediaWorkerRepository } from "../application/media-worker";
 
 type MediaAssetDocument = Omit<MediaAsset, "id"> & Readonly<{ _id: string }>;
 
@@ -313,10 +310,10 @@ export const mongoMediaWorkerRepository: MediaWorkerRepository = {
     return document ? toDomain(document) : null;
   },
 
-  async claimNext(now): Promise<ClaimedMediaJob | ExhaustedMediaJob | null> {
+  async claimNext(now): Promise<ClaimResult> {
     const database = await getDatabase();
     const client = await getMongoClient();
-    let claimed: ClaimedMediaJob | ExhaustedMediaJob | null = null;
+    let claimed: ClaimResult = null;
 
     await client.withSession(async (session) => {
       await session.withTransaction(async () => {
@@ -366,7 +363,11 @@ export const mongoMediaWorkerRepository: MediaWorkerRepository = {
                 },
                 { returnDocument: "after", session },
               );
-            if (failed) claimed = { exhaustedAsset: toDomain(failed) };
+            // The job is closed either way: a step that ends the drain here would leave every job
+            // behind it waiting for the next dispatch or sweep.
+            claimed = failed
+              ? { exhaustedAsset: toDomain(failed) }
+              : { discardedJobId: exhausted._id };
           }
           return;
         }
@@ -399,7 +400,9 @@ export const mongoMediaWorkerRepository: MediaWorkerRepository = {
               },
               { returnDocument: "after", session },
             );
-          if (failed) claimed = { exhaustedAsset: toDomain(failed) };
+          // An unclaimable asset (typically deleted after its job was enqueued) closes the job; the
+          // step is reported as discarded, not idle, so the drain moves on to the next job.
+          claimed = failed ? { exhaustedAsset: toDomain(failed) } : { discardedJobId: job._id };
           await database
             .collection<MediaJobDocument>(COLLECTIONS.jobOutbox)
             .updateOne(
@@ -499,5 +502,22 @@ export const mongoMediaWorkerRepository: MediaWorkerRepository = {
         },
       },
     );
+  },
+};
+
+export const mongoMediaOutboxMonitor: MediaOutboxMonitor = {
+  async hasOverdueJob(cutoff) {
+    const database = await getDatabase();
+    // Served by the `job_outbox_available` (status, availableAt) index; returns no job content.
+    const job = await database.collection<MediaJobDocument>(COLLECTIONS.jobOutbox).findOne(
+      {
+        attempts: { $lt: MEDIA_ASSET_LIMITS.maximumAttempts },
+        availableAt: { $lte: cutoff },
+        status: "pending",
+        type: "media.process.v1",
+      },
+      { projection: { _id: 1 } },
+    );
+    return job !== null;
   },
 };

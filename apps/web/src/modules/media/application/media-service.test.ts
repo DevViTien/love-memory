@@ -286,6 +286,47 @@ describe("media service", () => {
     expect(storage.deleteObject).not.toHaveBeenCalled();
   });
 
+  it("answers 202 data when a concurrent completion of the same asset wins (Concurrent duplicate completion)", async () => {
+    current = asset();
+    vi.mocked(repository.markUploadedAndEnqueue).mockImplementationOnce(() => {
+      // The other request committed `uploaded` and its job between our read and our write.
+      current = current ? { ...current, expiresAt: null, status: "uploaded" } : null;
+      return Promise.resolve(null);
+    });
+
+    await expect(
+      service().completeUpload({ accessors: [], assetId: current.id, giftPublicId: gift.publicId }),
+    ).resolves.toMatchObject({ data: { assetId: current.id, status: "uploaded" }, ok: true });
+    expect(repository.markUploadedAndEnqueue).toHaveBeenCalledOnce();
+  });
+
+  it("still refuses a completion that lost the race to a deletion", async () => {
+    current = asset();
+    vi.mocked(repository.markUploadedAndEnqueue).mockImplementationOnce(() => {
+      current = current ? { ...current, status: "deleting" } : null;
+      return Promise.resolve(null);
+    });
+
+    await expect(
+      service().completeUpload({ accessors: [], assetId: current.id, giftPublicId: gift.publicId }),
+    ).resolves.toEqual({ error: { code: "INVALID_STATE" }, ok: false });
+  });
+
+  it("answers with the DTO when a missing-object check loses to a successful completion", async () => {
+    current = asset();
+    vi.mocked(storage.getObjectMetadata).mockRejectedValueOnce(
+      new ObjectNotFoundError("Object missing"),
+    );
+    vi.mocked(repository.markFailed).mockImplementationOnce(() => {
+      current = current ? { ...current, expiresAt: null, status: "processing" } : null;
+      return Promise.resolve(false);
+    });
+
+    await expect(
+      service().completeUpload({ accessors: [], assetId: current.id, giftPublicId: gift.publicId }),
+    ).resolves.toMatchObject({ data: { status: "processing" }, ok: true });
+  });
+
   it("returns only signed derivatives and supports bounded retries", async () => {
     current = {
       ...asset("ready"),

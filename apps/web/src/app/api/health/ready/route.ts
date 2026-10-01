@@ -3,6 +3,7 @@ import { pingDatabase } from "@love-memory/database";
 import { getStorageConfiguration } from "@love-memory/storage";
 import { NextResponse } from "next/server";
 
+import { checkMediaOutbox } from "@/composition/media";
 import { WEB_APP_VERSION } from "@/config/application";
 import { getHealthStatus } from "@/modules/health/application/get-health-status";
 import { assertMediaRuntimeReady } from "@/modules/media/infrastructure/media-job-scheduler";
@@ -18,6 +19,8 @@ export async function GET() {
     const storage = getStorageConfiguration();
     assertMediaRuntimeReady(process.env, storage.driver);
     await pingDatabase();
+    // A stalled media worker leaves uploads "processing" forever without any other signal.
+    await checkMediaOutbox();
 
     return NextResponse.json(
       { data: getHealthStatus({ version: WEB_APP_VERSION }) },

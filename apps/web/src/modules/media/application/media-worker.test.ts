@@ -232,6 +232,48 @@ describe("media worker", () => {
     expect(repo.fail).not.toHaveBeenCalled();
   });
 
+  it("reports a discarded job as a handled step, not as an idle outbox", async () => {
+    const repo = repository();
+    vi.mocked(repo.claimNext).mockResolvedValueOnce({ discardedJobId: "job-stale" });
+    const processImage = vi.fn<typeof processUploadedImageSet>();
+    const worker = createMediaWorker({ processImage, repository: repo, storage: storage() });
+
+    await expect(worker.runNext()).resolves.toEqual({ status: "discarded" });
+    expect(repo.claimExpiredUpload).not.toHaveBeenCalled();
+    expect(processImage).not.toHaveBeenCalled();
+  });
+
+  it("drains the genuine job behind a stale one in the same run (Stale job ahead of a new upload)", async () => {
+    const repo = repository();
+    vi.mocked(repo.claimNext)
+      .mockResolvedValueOnce({ discardedJobId: "job-stale" })
+      .mockResolvedValueOnce({ asset, jobId: "job-real" })
+      .mockResolvedValue(null);
+    const worker = createMediaWorker({
+      processImage: vi.fn<typeof processUploadedImageSet>(() =>
+        Promise.resolve({
+          checksumSha256: "a".repeat(64),
+          derivatives: [],
+          placeholderDataUrl: "data:image/webp;base64,",
+          sourceContentType: "image/jpeg" as const,
+        }),
+      ),
+      repository: repo,
+      storage: storage(),
+    });
+
+    await expect(worker.runAvailable(10)).resolves.toEqual([
+      { status: "discarded" },
+      { assetId: asset.id, status: "completed" },
+    ]);
+    expect(repo.complete).toHaveBeenCalledWith(
+      asset.id,
+      "job-real",
+      expect.anything(),
+      expect.any(Date),
+    );
+  });
+
   it("does not retry invalid decoded bytes", async () => {
     const repo = repository();
     const objects = storage();

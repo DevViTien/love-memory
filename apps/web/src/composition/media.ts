@@ -12,10 +12,12 @@ import {
   type MediaSpikeService,
 } from "@/modules/media/application/media-spike-service";
 import { createMediaService, type MediaService } from "@/modules/media/application/media-service";
+import { assertMediaOutboxFlowing } from "@/modules/media/application/media-outbox-health";
 import { createMediaWorker, type MediaWorker } from "@/modules/media/application/media-worker";
 import { mongoGiftRepository } from "@/modules/gifts/infrastructure/mongo-gift-repository";
 import {
   mongoMediaAssetRepository,
+  mongoMediaOutboxMonitor,
   mongoMediaWorkerRepository,
 } from "@/modules/media/infrastructure/mongo-media-repository";
 import { getGiftTemplateManifest } from "@/composition/gifts";
@@ -79,4 +81,9 @@ export function getMediaWorker(): MediaWorker {
     });
   }
   return mediaWorker;
+}
+
+/** Readiness: throws `MediaOutboxStalledError` when a due media job has waited over 10 minutes. */
+export function checkMediaOutbox(): Promise<void> {
+  return assertMediaOutboxFlowing({ monitor: mongoMediaOutboxMonitor });
 }

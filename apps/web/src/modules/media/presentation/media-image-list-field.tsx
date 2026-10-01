@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ApiErrorResponseSchema,
   MediaAssetListResponseSchema,
   MediaAssetResponseSchema,
   MediaUploadGrantResponseSchema,
@@ -14,6 +13,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { fetchWithTimeout } from "@/http/fetch-with-timeout";
 
 import { cropImageToAspectRatio } from "./image-crop";
+import { MEDIA_ERROR_MESSAGES, MediaRequestError, readMediaFailure } from "./media-error-messages";
 
 const acceptedTypes = ["image/jpeg", "image/png", "image/webp"] as const;
 const maximumBytes = 10 * 1024 * 1024;
@@ -26,6 +26,19 @@ export const UPLOAD_STALL_TIMEOUT_MILLISECONDS = 30_000;
 export const INTERRUPTED_UPLOAD_MESSAGE = "Kết nối tải ảnh bị gián đoạn. Hãy chọn lại ảnh này.";
 const DELETE_FAILED_MESSAGE = "Chưa xóa được ảnh — thử lại.";
 const RETRY_FAILED_MESSAGE = "Chưa thử xử lý lại được ảnh — thử lại.";
+const GRANT_FAILED_MESSAGE = "Chưa xin được quyền tải ảnh lên — thử lại.";
+const COMPLETE_FAILED_MESSAGE =
+  "Chưa hoàn tất tải ảnh lên — hãy bấm “Hoàn tất tải lên” để thử lại.";
+const RESTORE_FAILED_MESSAGE = "Chưa thể khôi phục danh sách ảnh đã tải.";
+export const PROCESSING_OVERLAY_TEXT = "Đang xử lý ảnh…";
+export const SLOW_PROCESSING_MESSAGE =
+  "Ảnh đang được xử lý lâu hơn bình thường. Bạn có thể tiếp tục viết, ảnh sẽ tự cập nhật.";
+/** Polling cadence of `uploaded`/`processing` items. */
+export const MEDIA_POLL_INTERVAL_MILLISECONDS = 1_500;
+/** After this long in `uploaded`/`processing`, the field reassures the creator. */
+export const MEDIA_SLOW_PROCESSING_MILLISECONDS = 45_000;
+const RETRYABLE_FAILURE_HINT = "Bấm “Thử lại” để xử lý lại ảnh.";
+const TERMINAL_FAILURE_HINT = "Không đọc được ảnh này. Hãy xóa và chọn ảnh khác.";
 
 /** Vietnamese labels of the asset statuses; raw status values are never shown. */
 const STATUS_LABELS: Readonly<Record<MediaAssetDto["status"], string>> = {
@@ -46,8 +59,21 @@ function isPending(item: Pick<MediaAssetDto, "status">): boolean {
   return item.status === "uploaded" || item.status === "processing";
 }
 
+/** Statuses a completion has already reached: a `409` on completion is then not an error. */
+function isCompleted(item: Pick<MediaAssetDto, "status">): boolean {
+  return isPending(item) || item.status === "ready";
+}
+
 type UploadItem = MediaAssetDto &
-  Readonly<{ fileName: string | undefined; progress: number | undefined }>;
+  Readonly<{
+    fileName: string | undefined;
+    /**
+     * Browser-local object URL of the cropped file, shown until the signed derivative exists. It
+     * never leaves the browser and is revoked when the item is removed or gets its derivative.
+     */
+    localPreviewUrl?: string | undefined;
+    progress: number | undefined;
+  }>;
 
 export type ImageFieldValue = readonly string[] | readonly CaptionedImageItem[];
 
@@ -173,11 +199,6 @@ function CropDialog({
   );
 }
 
-function readApiError(payload: unknown): string {
-  const parsed = ApiErrorResponseSchema.safeParse(payload);
-  return parsed.success ? parsed.data.error.message : "Yêu cầu media không thành công.";
-}
-
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
@@ -202,8 +223,9 @@ async function requestUploadCompletion(
         },
         MEDIA_REQUEST_TIMEOUT_MILLISECONDS,
       );
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error("Upload completion failed.");
+    } catch {
+      // A network failure or timeout: the creator can repeat it with `Hoàn tất tải lên`.
+      lastError = new Error(COMPLETE_FAILED_MESSAGE);
       if (attempt < completionAttempts) {
         await wait(completionRetryDelayMilliseconds * attempt);
         continue;
@@ -215,13 +237,13 @@ async function requestUploadCompletion(
     const completed = MediaAssetResponseSchema.safeParse(payload);
     if (response.ok && completed.success) return completed.data.data;
 
-    lastError = new Error(readApiError(payload));
+    lastError = new MediaRequestError("complete", readMediaFailure(response, payload));
     const retryable = response.status === 429 || response.status >= 500 || response.ok;
     if (!retryable || attempt === completionAttempts) throw lastError;
     await wait(completionRetryDelayMilliseconds * attempt);
   }
 
-  throw lastError ?? new Error("Upload completion failed.");
+  throw lastError ?? new Error(COMPLETE_FAILED_MESSAGE);
 }
 
 function uploadFile(
@@ -305,6 +327,9 @@ export function MediaImageListField({
   const [cropCandidate, setCropCandidate] = useState<CropCandidate | null>(null);
   const [isSelecting, setIsSelecting] = useState(false);
   const [completingAssetIds, setCompletingAssetIds] = useState<ReadonlySet<string>>(new Set());
+  const [deletingAssetIds, setDeletingAssetIds] = useState<ReadonlySet<string>>(new Set());
+  const [retryingAssetIds, setRetryingAssetIds] = useState<ReadonlySet<string>>(new Set());
+  const [slowAssetIds, setSlowAssetIds] = useState<ReadonlySet<string>>(new Set());
   const [captions, setCaptions] = useState<Readonly<Record<string, string>>>(
     () => initialCaptions ?? {},
   );
@@ -320,6 +345,10 @@ export function MediaImageListField({
   /** `false` after unmount: no request starts and nothing is reported to the editor any more. */
   const aliveRef = useRef(true);
   const refreshingRef = useRef(false);
+  /** Synchronous guard: a second click before the re-render cannot send a second request. */
+  const busyAssetIdsRef = useRef(new Set<string>());
+  /** When the field first saw each `uploaded`/`processing` item, for the slow-processing hint. */
+  const pendingSinceRef = useRef(new Map<string, number>());
 
   const publishOrder = useCallback(
     (next: readonly UploadItem[]) => {
@@ -340,8 +369,34 @@ export function MediaImageListField({
   );
 
   const commitItems = useCallback(
-    (next: readonly UploadItem[], publish = true) => {
+    (proposed: readonly UploadItem[], publish = true) => {
       if (!aliveRef.current) return;
+      // Local previews end with their item, or once the signed derivative can be shown instead.
+      const kept = new Set(proposed.map((item) => item.assetId));
+      for (const item of itemsRef.current) {
+        if (item.localPreviewUrl && !kept.has(item.assetId)) {
+          URL.revokeObjectURL(item.localPreviewUrl);
+        }
+      }
+      const next = proposed.map((item) => {
+        if (!item.localPreviewUrl || item.derivatives.length === 0) return item;
+        URL.revokeObjectURL(item.localPreviewUrl);
+        return { ...item, localPreviewUrl: undefined };
+      });
+      const pendingSince = pendingSinceRef.current;
+      for (const item of next) {
+        if (!isPending(item)) pendingSince.delete(item.assetId);
+        else if (!pendingSince.has(item.assetId)) pendingSince.set(item.assetId, Date.now());
+      }
+      for (const assetId of pendingSince.keys()) {
+        if (!next.some((item) => item.assetId === assetId)) pendingSince.delete(assetId);
+      }
+      // An item that left processing (and may enter it again after a retry) starts a new count.
+      setSlowAssetIds((current) =>
+        [...current].every((assetId) => pendingSince.has(assetId))
+          ? current
+          : new Set([...current].filter((assetId) => pendingSince.has(assetId))),
+      );
       itemsRef.current = next;
       setItems(next);
       if (publish) {
@@ -352,6 +407,20 @@ export function MediaImageListField({
     [publishOrder],
   );
 
+  /** Keeps what only this page knows about an item (its file name and local preview). */
+  const mergeKnown = useCallback(
+    (asset: MediaAssetDto, progress: number | undefined): UploadItem => {
+      const known = itemsRef.current.find((item) => item.assetId === asset.assetId);
+      return {
+        ...asset,
+        fileName: known?.fileName,
+        localPreviewUrl: known?.localPreviewUrl,
+        progress,
+      };
+    },
+    [],
+  );
+
   const refresh = useCallback(async () => {
     const response = await fetch(
       `/api/media/assets?giftPublicId=${encodeURIComponent(giftPublicId)}`,
@@ -359,22 +428,31 @@ export function MediaImageListField({
     );
     const payload: unknown = await response.json();
     const parsed = MediaAssetListResponseSchema.safeParse(payload);
-    if (!response.ok || !parsed.success) throw new Error("Không thể tải trạng thái ảnh.");
+    if (!response.ok || !parsed.success) throw new Error(RESTORE_FAILED_MESSAGE);
     const fieldAssets = orderedAssets(
       parsed.data.data.assets.filter((asset) => asset.fieldId === fieldId),
       orderRef.current,
     );
-    const next = fieldAssets.map((asset) => ({
-      ...asset,
-      fileName: itemsRef.current.find((item) => item.assetId === asset.assetId)?.fileName,
-      progress: asset.status === "ready" ? 100 : undefined,
-    }));
+    const next = fieldAssets.map((asset) =>
+      mergeKnown(asset, asset.status === "ready" ? 100 : undefined),
+    );
     // Compare with the saved order, not the in-memory list (empty on mount), so a field whose saved
     // assets are all gone reports an empty order and the draft becomes savable again.
     const previousOrder = orderRef.current.join(":");
     const nextOrder = next.map((item) => item.assetId).join(":");
     commitItems(next, previousOrder !== nextOrder);
-  }, [commitItems, fieldId, giftPublicId]);
+  }, [commitItems, fieldId, giftPublicId, mergeKnown]);
+
+  const readAsset = useCallback(
+    async (assetId: string): Promise<Response> =>
+      fetchWithTimeout(
+        fetch,
+        `/api/media/assets/${assetId}?giftPublicId=${encodeURIComponent(giftPublicId)}`,
+        { cache: "no-store" },
+        MEDIA_REQUEST_TIMEOUT_MILLISECONDS,
+      ),
+    [giftPublicId],
+  );
 
   const refreshPendingItems = useCallback(
     async (pending: readonly UploadItem[]) => {
@@ -390,10 +468,7 @@ export function MediaImageListField({
       const updates = await Promise.all(
         statusUpdates.map(async (item) => {
           if (item.status !== "ready") return item;
-          const response = await fetch(
-            `/api/media/assets/${item.assetId}?giftPublicId=${encodeURIComponent(giftPublicId)}`,
-            { cache: "no-store" },
-          );
+          const response = await readAsset(item.assetId);
           const payload: unknown = await response.json();
           const parsed = MediaAssetResponseSchema.safeParse(payload);
           if (!response.ok || !parsed.success) throw new Error("Unable to refresh media status.");
@@ -405,17 +480,13 @@ export function MediaImageListField({
         itemsRef.current.map((item) => {
           const update = updatesById.get(item.assetId);
           return update
-            ? {
-                ...update,
-                fileName: item.fileName,
-                progress: update.status === "ready" ? 100 : item.progress,
-              }
+            ? mergeKnown(update, update.status === "ready" ? 100 : item.progress)
             : item;
         }),
         false,
       );
     },
-    [commitItems, giftPublicId],
+    [commitItems, giftPublicId, mergeKnown, readAsset],
   );
 
   const refreshPending = useCallback(async () => {
@@ -430,10 +501,22 @@ export function MediaImageListField({
     }
   }, [refreshPendingItems]);
 
+  const updateSlowItems = useCallback(() => {
+    const now = Date.now();
+    const slow = [...pendingSinceRef.current]
+      .filter(([, since]) => now - since >= MEDIA_SLOW_PROCESSING_MILLISECONDS)
+      .map(([assetId]) => assetId);
+    setSlowAssetIds((current) =>
+      current.size === slow.length && slow.every((assetId) => current.has(assetId))
+        ? current
+        : new Set(slow),
+    );
+  }, []);
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void refresh().catch(() => {
-        if (aliveRef.current) setMessage("Chưa thể khôi phục danh sách ảnh đã tải.");
+        if (aliveRef.current) setMessage(RESTORE_FAILED_MESSAGE);
       });
     }, 0);
     return () => window.clearTimeout(timer);
@@ -443,9 +526,12 @@ export function MediaImageListField({
   const hasPending = items.some(isPending);
   useEffect(() => {
     if (!hasPending) return;
-    const timer = window.setInterval(() => void refreshPending().catch(() => undefined), 1_500);
+    const timer = window.setInterval(() => {
+      updateSlowItems();
+      void refreshPending().catch(() => undefined);
+    }, MEDIA_POLL_INTERVAL_MILLISECONDS);
     return () => window.clearInterval(timer);
-  }, [hasPending, refreshPending]);
+  }, [hasPending, refreshPending, updateSlowItems]);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -454,6 +540,9 @@ export function MediaImageListField({
       aliveRef.current = false;
       for (const abort of activeRequests.values()) abort();
       activeRequests.clear();
+      for (const item of itemsRef.current) {
+        if (item.localPreviewUrl) URL.revokeObjectURL(item.localPreviewUrl);
+      }
       if (cropObjectUrlRef.current) URL.revokeObjectURL(cropObjectUrlRef.current);
       cropResolverRef.current?.(null);
       cropResolverRef.current = null;
@@ -478,18 +567,48 @@ export function MediaImageListField({
     cropResolverRef.current = null;
   }
 
+  function replaceItem(assetId: string, asset: MediaAssetDto, progress: number | undefined) {
+    commitItems(
+      itemsRef.current.map((candidate) =>
+        candidate.assetId === assetId ? mergeKnown(asset, progress) : candidate,
+      ),
+      false,
+    );
+  }
+
+  /**
+   * A `409` on completion usually means an earlier completion of the same asset already succeeded
+   * (for example a retry after a timeout). Read the asset and continue from its real state.
+   */
+  async function resolveCompletionConflict(item: UploadItem, conflict: MediaRequestError) {
+    let response: Response;
+    try {
+      response = await readAsset(item.assetId);
+    } catch {
+      throw conflict;
+    }
+    if (!aliveRef.current) return;
+    if (response.status === 404) {
+      commitItems(itemsRef.current.filter((candidate) => candidate.assetId !== item.assetId));
+      return;
+    }
+    const parsed = MediaAssetResponseSchema.safeParse(await response.json().catch(() => null));
+    if (!response.ok || !parsed.success) throw conflict;
+    replaceItem(item.assetId, parsed.data.data, 100);
+    if (!isCompleted(parsed.data.data)) throw conflict;
+  }
+
   async function completePendingUpload(item: UploadItem): Promise<void> {
     setCompletingAssetIds((current) => new Set(current).add(item.assetId));
     try {
       const completed = await requestUploadCompletion(item.assetId, giftPublicId);
-      commitItems(
-        itemsRef.current.map((candidate) =>
-          candidate.assetId === item.assetId
-            ? { ...completed, fileName: candidate.fileName, progress: 100 }
-            : candidate,
-        ),
-        false,
-      );
+      replaceItem(item.assetId, completed, 100);
+    } catch (error) {
+      if (error instanceof MediaRequestError && error.failure.status === 409) {
+        await resolveCompletionConflict(item, error);
+        return;
+      }
+      throw error;
     } finally {
       setCompletingAssetIds((current) => {
         const next = new Set(current);
@@ -524,11 +643,13 @@ export function MediaImageListField({
         MEDIA_REQUEST_TIMEOUT_MILLISECONDS,
       );
     } catch {
-      throw new Error("Chưa xin được quyền tải ảnh lên — thử lại.");
+      throw new Error(GRANT_FAILED_MESSAGE);
     }
     const initPayload: unknown = await initResponse.json().catch(() => null);
     const grant = MediaUploadGrantResponseSchema.safeParse(initPayload);
-    if (!initResponse.ok || !grant.success) throw new Error(readApiError(initPayload));
+    if (!initResponse.ok || !grant.success) {
+      throw new MediaRequestError("init", readMediaFailure(initResponse, initPayload));
+    }
     // Unmounted while the grant was requested: no upload starts for it.
     if (!aliveRef.current) return;
 
@@ -538,6 +659,7 @@ export function MediaImageListField({
       failureCode: null,
       fieldId,
       fileName: file.name,
+      localPreviewUrl: URL.createObjectURL(file),
       placeholderDataUrl: null,
       progress: 0,
       status: "initiated",
@@ -597,6 +719,7 @@ export function MediaImageListField({
     if (!files || selectingRef.current) return;
     selectingRef.current = true;
     setIsSelecting(true);
+    setMessage(null);
     try {
       await processSelection([...files]);
     } finally {
@@ -620,39 +743,63 @@ export function MediaImageListField({
         if (cropped) await startUpload(cropped);
       } catch (error) {
         if (aliveRef.current && !(error instanceof DOMException && error.name === "AbortError")) {
-          setMessage(error instanceof Error ? error.message : "Không thể tải ảnh.");
+          setMessage(error instanceof Error ? error.message : MEDIA_ERROR_MESSAGES.generic);
         }
       }
     }
   }
 
+  function markBusy(
+    assetId: string,
+    setBusy: (update: (current: ReadonlySet<string>) => ReadonlySet<string>) => void,
+    busy: boolean,
+  ) {
+    if (busy) busyAssetIdsRef.current.add(assetId);
+    else busyAssetIdsRef.current.delete(assetId);
+    setBusy((current) => {
+      const next = new Set(current);
+      if (busy) next.add(assetId);
+      else next.delete(assetId);
+      return next;
+    });
+  }
+
   async function remove(item: UploadItem) {
+    if (busyAssetIdsRef.current.has(item.assetId)) return;
+    markBusy(item.assetId, setDeletingAssetIds, true);
+    setMessage(null);
     requests.current.get(item.assetId)?.();
-    let response: Response;
     try {
-      response = await fetchWithTimeout(
-        fetch,
-        `/api/media/assets/${item.assetId}`,
-        {
-          body: JSON.stringify({ giftPublicId }),
-          headers: { "Content-Type": "application/json" },
-          method: "DELETE",
-        },
-        MEDIA_REQUEST_TIMEOUT_MILLISECONDS,
-      );
-    } catch {
-      if (aliveRef.current) setMessage(DELETE_FAILED_MESSAGE);
-      return;
+      let response: Response;
+      try {
+        response = await fetchWithTimeout(
+          fetch,
+          `/api/media/assets/${item.assetId}`,
+          {
+            body: JSON.stringify({ giftPublicId }),
+            headers: { "Content-Type": "application/json" },
+            method: "DELETE",
+          },
+          MEDIA_REQUEST_TIMEOUT_MILLISECONDS,
+        );
+      } catch {
+        if (aliveRef.current) setMessage(DELETE_FAILED_MESSAGE);
+        return;
+      }
+      if (!aliveRef.current) return;
+      // `404`: the asset is already gone (deleted elsewhere or by an earlier request).
+      if (!response.ok && response.status !== 404) {
+        const failure = readMediaFailure(response, await response.json().catch(() => null));
+        setMessage(new MediaRequestError("delete", failure).message);
+        return;
+      }
+      const { [item.assetId]: _discarded, ...remainingCaptions } = captionsRef.current;
+      captionsRef.current = remainingCaptions;
+      setCaptions(remainingCaptions);
+      commitItems(itemsRef.current.filter((candidate) => candidate.assetId !== item.assetId));
+    } finally {
+      if (aliveRef.current) markBusy(item.assetId, setDeletingAssetIds, false);
     }
-    if (!aliveRef.current) return;
-    if (!response.ok) {
-      setMessage(readApiError(await response.json().catch(() => null)));
-      return;
-    }
-    const { [item.assetId]: _discarded, ...remainingCaptions } = captionsRef.current;
-    captionsRef.current = remainingCaptions;
-    setCaptions(remainingCaptions);
-    commitItems(itemsRef.current.filter((candidate) => candidate.assetId !== item.assetId));
   }
 
   function updateCaption(assetId: string, text: string) {
@@ -663,6 +810,9 @@ export function MediaImageListField({
   }
 
   async function retry(item: UploadItem) {
+    if (busyAssetIdsRef.current.has(item.assetId)) return;
+    markBusy(item.assetId, setRetryingAssetIds, true);
+    setMessage(null);
     try {
       const response = await fetchWithTimeout(
         fetch,
@@ -675,10 +825,16 @@ export function MediaImageListField({
         MEDIA_REQUEST_TIMEOUT_MILLISECONDS,
       );
       if (!aliveRef.current) return;
-      if (!response.ok) setMessage(readApiError(await response.json().catch(() => null)));
-      else await refresh();
+      if (response.ok) {
+        await refresh();
+        return;
+      }
+      const failure = readMediaFailure(response, await response.json().catch(() => null));
+      setMessage(new MediaRequestError("retry", failure).message);
     } catch {
       if (aliveRef.current) setMessage(RETRY_FAILED_MESSAGE);
+    } finally {
+      if (aliveRef.current) markBusy(item.assetId, setRetryingAssetIds, false);
     }
   }
 
@@ -687,7 +843,9 @@ export function MediaImageListField({
     try {
       await completePendingUpload(item);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to complete the upload.");
+      if (aliveRef.current) {
+        setMessage(error instanceof Error ? error.message : COMPLETE_FAILED_MESSAGE);
+      }
     }
   }
 
@@ -759,35 +917,78 @@ export function MediaImageListField({
       </label>
       <ol className="mt-5 grid gap-4 sm:grid-cols-2">
         {items.map((item, index) => {
-          const preview = item.derivatives.at(0)?.url ?? item.placeholderDataUrl;
+          const derivativeUrl = item.derivatives.at(0)?.url;
+          const preview = derivativeUrl ?? item.localPreviewUrl ?? item.placeholderDataUrl;
+          const name = item.fileName ?? `Ảnh ${index + 1}`;
+          const uploading = item.status === "initiated" && item.progress !== undefined;
+          const processing = isPending(item);
+          const isDeleting = deletingAssetIds.has(item.assetId);
           return (
             <li className="rounded-2xl border border-rose-100 bg-white p-3" key={item.assetId}>
               <div
-                className="overflow-hidden rounded-xl bg-stone-100"
+                className="relative overflow-hidden rounded-xl bg-stone-100"
                 style={{ aspectRatio: ratio }}
               >
                 {preview ? (
-                  // Signed private URLs intentionally bypass the public Next image optimizer.
+                  // Signed private URLs and local object URLs bypass the public image optimizer.
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    alt="Ảnh kỷ niệm đã tải"
+                    alt={derivativeUrl ? "Ảnh kỷ niệm đã tải" : "Ảnh kỷ niệm vừa chọn"}
                     className="h-full w-full object-cover"
                     src={preview}
                   />
-                ) : (
-                  <div className="grid h-full place-items-center text-xs font-semibold text-stone-500">
-                    {item.progress === undefined
-                      ? mediaStatusLabel(item.status)
-                      : `Đang tải ${item.progress}%`}
+                ) : null}
+                {uploading ? (
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-stone-950/75 to-transparent p-3 pt-8">
+                    <p className="text-xs font-bold text-white">Đang tải lên {item.progress}%</p>
+                    <div
+                      aria-label={`Tiến độ tải lên ${name}`}
+                      aria-valuemax={100}
+                      aria-valuemin={0}
+                      aria-valuenow={item.progress}
+                      className="mt-2 h-2 overflow-hidden rounded-full bg-white/40"
+                      role="progressbar"
+                    >
+                      <div
+                        className="h-full rounded-full bg-rose-500 transition-[width] duration-200"
+                        style={{ width: `${item.progress ?? 0}%` }}
+                      />
+                    </div>
                   </div>
-                )}
+                ) : null}
+                {processing ? (
+                  <div className="absolute inset-0 grid place-items-center bg-stone-950/45">
+                    <div className="flex flex-col items-center gap-2 text-white">
+                      <span
+                        aria-hidden="true"
+                        className="size-8 rounded-full border-4 border-white/35 border-t-white motion-safe:animate-spin"
+                      />
+                      <span className="text-xs font-bold">{PROCESSING_OVERLAY_TEXT}</span>
+                    </div>
+                  </div>
+                ) : null}
+                {!preview && !uploading && !processing ? (
+                  <div className="grid h-full place-items-center text-xs font-semibold text-stone-500">
+                    {mediaStatusLabel(item.status)}
+                  </div>
+                ) : null}
               </div>
-              <p className="mt-2 truncate text-xs font-semibold text-stone-600">
-                {item.fileName ?? `Ảnh ${index + 1}`}
-              </p>
-              {item.status === "ready" ? null : (
-                <p className="text-xs text-stone-500">{mediaStatusLabel(item.status)}</p>
-              )}
+              <p className="mt-2 truncate text-xs font-semibold text-stone-600">{name}</p>
+              <div aria-live="polite">
+                {item.status === "ready" ? null : (
+                  <p className="text-xs text-stone-500">{mediaStatusLabel(item.status)}</p>
+                )}
+                {item.status === "failed" ? (
+                  <p className="mt-1 text-xs text-rose-700">
+                    {item.failureCode === "PROCESSING_FAILED"
+                      ? RETRYABLE_FAILURE_HINT
+                      : TERMINAL_FAILURE_HINT}
+                  </p>
+                ) : null}
+                {processing && slowAssetIds.has(item.assetId) ? (
+                  <p className="mt-1 text-xs text-amber-700">{SLOW_PROCESSING_MESSAGE}</p>
+                ) : null}
+              </div>
               {captionMaxLength === undefined ? null : (
                 <div className="mt-3">
                   <label className="block text-xs font-semibold text-stone-700">
@@ -828,17 +1029,17 @@ export function MediaImageListField({
                 </Button>
                 {item.status === "failed" && item.failureCode === "PROCESSING_FAILED" ? (
                   <Button
-                    disabled={disabled}
+                    disabled={disabled || isDeleting || retryingAssetIds.has(item.assetId)}
                     onClick={() => void retry(item)}
                     size="sm"
                     variant="outline"
                   >
-                    Thử lại
+                    {retryingAssetIds.has(item.assetId) ? "Đang thử lại…" : "Thử lại"}
                   </Button>
                 ) : null}
                 {item.status === "initiated" ? (
                   <Button
-                    disabled={disabled || completingAssetIds.has(item.assetId)}
+                    disabled={disabled || isDeleting || completingAssetIds.has(item.assetId)}
                     onClick={() => void retryCompletion(item)}
                     size="sm"
                     variant="outline"
@@ -847,12 +1048,12 @@ export function MediaImageListField({
                   </Button>
                 ) : null}
                 <Button
-                  disabled={disabled}
+                  disabled={disabled || isDeleting}
                   onClick={() => void remove(item)}
                   size="sm"
                   variant="outline"
                 >
-                  Xóa
+                  {isDeleting ? "Đang xóa…" : "Xóa"}
                 </Button>
               </div>
             </li>
@@ -883,8 +1084,8 @@ export function MediaImageListField({
                 focalY,
               );
               resolveCrop(cropped);
-            } catch (error) {
-              setMessage(error instanceof Error ? error.message : "Không thể cắt ảnh đã chọn.");
+            } catch {
+              setMessage(MEDIA_ERROR_MESSAGES.crop);
             }
           }}
         />

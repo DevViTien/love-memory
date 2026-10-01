@@ -3,11 +3,16 @@ import type * as DatabaseModule from "@love-memory/database";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const databaseMocks = vi.hoisted(() => ({ pingDatabase: vi.fn() }));
+const mediaMocks = vi.hoisted(() => ({ checkMediaOutbox: vi.fn() }));
+
+vi.mock("@/composition/media", () => ({ checkMediaOutbox: mediaMocks.checkMediaOutbox }));
 
 vi.mock("@love-memory/database", async (importOriginal) => ({
   ...(await importOriginal<typeof DatabaseModule>()),
   pingDatabase: databaseMocks.pingDatabase,
 }));
+
+import { MediaOutboxStalledError } from "@/modules/media/application/media-outbox-health";
 
 import { GET } from "./route";
 
@@ -22,6 +27,7 @@ describe("readiness dependency checks", () => {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     databaseMocks.pingDatabase.mockResolvedValue(undefined);
+    mediaMocks.checkMediaOutbox.mockResolvedValue(undefined);
     for (const name of [
       "BLOB_READ_WRITE_TOKEN",
       "BLOB_STORE_ID",
@@ -83,5 +89,34 @@ describe("readiness dependency checks", () => {
     databaseMocks.pingDatabase.mockRejectedValue(new Error("unreachable"));
     const response = await GET();
     expect(response.status).toBe(503);
+  });
+
+  it("is unavailable with a generic body when a media job is overdue (Media worker stalled)", async () => {
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "blob-token");
+    mediaMocks.checkMediaOutbox.mockRejectedValue(new MediaOutboxStalledError());
+    const errorLog = vi.mocked(console.error);
+
+    const response = await GET();
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = (await response.json()) as { error: Record<string, string> };
+    expect(body.error).toEqual({
+      code: "SERVICE_UNAVAILABLE",
+      message: "Service dependencies are not ready.",
+      requestId: response.headers.get("x-request-id"),
+    });
+    expect(errorLog).toHaveBeenCalledWith("Readiness check failed", {
+      errorName: "MediaOutboxStalledError",
+      requestId: response.headers.get("x-request-id"),
+    });
+  });
+
+  it("checks the media outbox only after MongoDB answers", async () => {
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "blob-token");
+    databaseMocks.pingDatabase.mockRejectedValue(new Error("unreachable"));
+
+    expect((await GET()).status).toBe(503);
+    expect(mediaMocks.checkMediaOutbox).not.toHaveBeenCalled();
   });
 });

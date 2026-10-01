@@ -13,7 +13,11 @@ vi.mock("@love-memory/database", async (importOriginal) => ({
   getMongoClient: databaseMocks.getMongoClient,
 }));
 
-import { mongoMediaAssetRepository, mongoMediaWorkerRepository } from "./mongo-media-repository";
+import {
+  mongoMediaAssetRepository,
+  mongoMediaOutboxMonitor,
+  mongoMediaWorkerRepository,
+} from "./mongo-media-repository";
 
 const now = new Date("2026-09-17T00:00:00.000Z");
 const baseAsset: MediaAsset = {
@@ -61,6 +65,7 @@ describe("Mongo media repositories", () => {
     updateOne: vi.fn(() => Promise.resolve({ matchedCount: 1, modifiedCount: 1 })),
   };
   const jobs = {
+    findOne: vi.fn(() => Promise.resolve(null as { _id: string } | null)),
     findOneAndUpdate: vi.fn(),
     insertOne: vi.fn(() => Promise.resolve({ acknowledged: true })),
     updateOne: vi.fn(() => Promise.resolve({ matchedCount: 0, modifiedCount: 0 })),
@@ -329,6 +334,64 @@ describe("Mongo media repositories", () => {
       { _id: baseAsset.id, status: "processing" },
       { $set: { failureCode: "PROCESSING_FAILED", status: "failed", updatedAt: now } },
       { returnDocument: "after", session },
+    );
+  });
+
+  it("discards the job of an asset that was deleted after it was enqueued", async () => {
+    const job = {
+      _id: "job-stale",
+      attempts: 1,
+      availableAt: now,
+      createdAt: now,
+      deduplicationKey: `media.process.v1:${baseAsset.id}:0`,
+      payload: { assetId: baseAsset.id },
+      status: "processing",
+      type: "media.process.v1",
+      updatedAt: now,
+    };
+    jobs.findOneAndUpdate.mockResolvedValueOnce(job);
+    // Neither the claim nor the "still processing" fallback matches a deleted asset.
+    assets.findOneAndUpdate.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+
+    await expect(mongoMediaWorkerRepository.claimNext(now)).resolves.toEqual({
+      discardedJobId: "job-stale",
+    });
+    expect(jobs.updateOne).toHaveBeenCalledWith(
+      { _id: "job-stale" },
+      { $set: { status: "failed", updatedAt: now } },
+      { session },
+    );
+  });
+
+  it("discards an exhausted stale lease whose asset already left processing", async () => {
+    jobs.findOneAndUpdate.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      _id: "job-exhausted",
+      attempts: 3,
+      payload: { assetId: baseAsset.id },
+      status: "failed",
+      type: "media.process.v1",
+    });
+    assets.findOneAndUpdate.mockResolvedValueOnce(null);
+
+    await expect(mongoMediaWorkerRepository.claimNext(now)).resolves.toEqual({
+      discardedJobId: "job-exhausted",
+    });
+  });
+
+  it("looks up one overdue claimable job without reading its content", async () => {
+    const cutoff = new Date(now.getTime() - 600_000);
+    jobs.findOne.mockResolvedValueOnce({ _id: "job-overdue" }).mockResolvedValueOnce(null);
+
+    await expect(mongoMediaOutboxMonitor.hasOverdueJob(cutoff)).resolves.toBe(true);
+    await expect(mongoMediaOutboxMonitor.hasOverdueJob(cutoff)).resolves.toBe(false);
+    expect(jobs.findOne).toHaveBeenCalledWith(
+      {
+        attempts: { $lt: 3 },
+        availableAt: { $lte: cutoff },
+        status: "pending",
+        type: "media.process.v1",
+      },
+      { projection: { _id: 1 } },
     );
   });
 

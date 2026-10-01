@@ -80,6 +80,13 @@ function failure(error: MediaServiceError): MediaServiceResult<never> {
   return { error, ok: false };
 }
 
+/** Statuses that a completion has already reached: completing again answers with the DTO. */
+const completedStatuses: ReadonlySet<MediaAsset["status"]> = new Set([
+  "uploaded",
+  "processing",
+  "ready",
+]);
+
 function isAuthorizedAsset(asset: MediaAsset, gift: Gift): boolean {
   // Every media operation ends when the gift leaves `draft`: a published gift's assets stay as
   // they are, and their URLs are signed only by the public Viewer.
@@ -128,6 +135,20 @@ export function createMediaService({
     };
   }
 
+  /**
+   * The asset left `initiated` while this completion was running. When a concurrent completion of
+   * the same asset won, completion is idempotent: answer with the current DTO. Only the winning
+   * transaction enqueued a job, so nothing is enqueued twice.
+   */
+  async function concurrentCompletionOutcome(
+    assetId: string,
+  ): Promise<MediaServiceResult<MediaAssetDto>> {
+    const current = await assets.findById(assetId);
+    return current && completedStatuses.has(current.status)
+      ? success(await toDto(current))
+      : failure({ code: "INVALID_STATE" });
+  }
+
   return {
     async completeUpload(
       input: Readonly<{
@@ -143,9 +164,7 @@ export function createMediaService({
       );
       if (!authorized) return failure({ code: "NOT_FOUND" });
       if (authorized.asset.status !== "initiated") {
-        return authorized.asset.status === "uploaded" ||
-          authorized.asset.status === "processing" ||
-          authorized.asset.status === "ready"
+        return completedStatuses.has(authorized.asset.status)
           ? success(await toDto(authorized.asset))
           : failure({ code: "INVALID_STATE" });
       }
@@ -156,7 +175,9 @@ export function createMediaService({
       } catch (error) {
         if (error instanceof ObjectNotFoundError) {
           const failed = await assets.markFailed(authorized.asset.id, "OBJECT_MISSING", clock());
-          return failure({ code: failed ? "UPLOAD_INVALID" : "INVALID_STATE" });
+          return failed
+            ? failure({ code: "UPLOAD_INVALID" })
+            : concurrentCompletionOutcome(authorized.asset.id);
         }
         throw error;
       }
@@ -166,13 +187,15 @@ export function createMediaService({
         metadata.contentType.toLowerCase() !== authorized.asset.declaredContentType
       ) {
         const failed = await assets.markFailed(authorized.asset.id, "UPLOAD_INVALID", clock());
-        if (!failed) return failure({ code: "INVALID_STATE" });
+        if (!failed) return concurrentCompletionOutcome(authorized.asset.id);
         await storage.deleteObject(authorized.asset.sourceKey).catch(() => undefined);
         return failure({ code: "UPLOAD_INVALID" });
       }
 
       const uploaded = await assets.markUploadedAndEnqueue(authorized.asset.id, clock());
-      return uploaded ? success(await toDto(uploaded)) : failure({ code: "INVALID_STATE" });
+      return uploaded
+        ? success(await toDto(uploaded))
+        : concurrentCompletionOutcome(authorized.asset.id);
     },
 
     async deleteAsset(
