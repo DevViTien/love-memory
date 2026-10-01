@@ -52,6 +52,28 @@ export async function connectMongoClient(
   }
 }
 
+/**
+ * A short-lived client without the strict Stable API, for diagnostics that API excludes, such as
+ * `explain` in `db:verify-gifts`. Request handling never uses it; close it after use.
+ */
+export async function connectDiagnosticMongoClient(
+  environment: MongoEnvironment,
+  factory: MongoClientFactory = defaultMongoClientFactory,
+): Promise<MongoClient> {
+  const client = factory(environment.uri, {
+    appName: `${APP_CONFIG.slug}-diagnostics`,
+    maxPoolSize: 1,
+    serverSelectionTimeoutMS: 5000,
+  });
+
+  try {
+    return await client.connect();
+  } catch (error) {
+    await client.close().catch(() => undefined);
+    throw error;
+  }
+}
+
 export function createMongoGateway({
   cache,
   clientFactory = defaultMongoClientFactory,

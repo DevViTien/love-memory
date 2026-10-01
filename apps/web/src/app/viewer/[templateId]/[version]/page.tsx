@@ -17,8 +17,8 @@ export default async function TemplateViewerPage({ params, searchParams }: Props
   const artifact = getTemplateArtifact(templateId, version);
   if (!artifact) notFound();
   const fixtureName = (await searchParams).fixture ?? "default";
-  const payload = getTemplateFixture(templateId, version, fixtureName);
-  if (!payload) notFound();
+  const fixture = getTemplateFixture(templateId, version, fixtureName);
+  if (!fixture) notFound();
   return (
     <main>
       <Container className="py-10">
@@ -48,7 +48,8 @@ export default async function TemplateViewerPage({ params, searchParams }: Props
         </nav>
         <ViewerShell
           artifactUrl={`/template-artifacts/${templateId}/${version}/${artifact.contentHash}/index.html`}
-          payload={payload}
+          assetUrls={fixture.assets}
+          payload={fixture.payload}
         />
       </Container>
     </main>

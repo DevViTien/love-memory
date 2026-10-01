@@ -1,12 +1,35 @@
-import { type Gift } from "@love-memory/domain";
+import {
+  createGiftDraft,
+  type Gift,
+  GiftSchema,
+  type GiftPublication,
+  type MediaAsset,
+} from "@love-memory/domain";
 import { parseTemplateManifest } from "@love-memory/template-sdk";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  activeTrack,
+  assetIds,
+  completeContent,
+  giftId as fixtureGiftId,
+  mediaAsset,
+  memoryBoxManifest,
+  retiredMemoryBoxManifest,
+} from "@/modules/viewer/test/viewer-fixtures";
+
+import {
+  type AnalyticsContextFactory,
+  changedImageFieldErrors,
   createGiftService,
   type GiftAccessor,
   type GiftCreateIdempotency,
+  type GiftMediaReferenceGroup,
+  type GiftPublishInput,
+  type GiftPublishPersistenceResult,
   type GiftRepository,
+  type GiftServiceDependencies,
+  type PublishAnalytics,
 } from "./gift-service";
 
 const manifest = parseTemplateManifest({
@@ -25,6 +48,16 @@ const manifest = parseTemplateManifest({
       required: false,
       type: "imageList",
     },
+    {
+      aspectRatio: "4:5",
+      captionMaxLength: 40,
+      id: "memories",
+      label: "Memories",
+      maxItems: 8,
+      minItems: 3,
+      type: "captionedImageList",
+    },
+    { id: "audio", label: "Music", source: "licensedLibrary", type: "audio" },
   ],
   id: "memory-box",
   meta: {
@@ -52,12 +85,17 @@ function canAccess(gift: Gift, accessor: GiftAccessor): boolean {
 
 function createMemoryRepository(): GiftRepository & {
   current: Gift | null;
+  /** Content snapshots written by successful updates, like `giftRevisions`. */
+  revisionSnapshots: Gift[];
   idempotency: GiftCreateIdempotency | null;
+  lastMediaReferences: readonly GiftMediaReferenceGroup[];
   mediaReferencesValid: boolean;
 } {
   return {
     current: null,
+    revisionSnapshots: [],
     idempotency: null,
+    lastMediaReferences: [],
     mediaReferencesValid: true,
     claimDraft(publicId, ownerId, anonymousDraftId, claimTokenHash, now) {
       const gift = this.current;
@@ -99,7 +137,21 @@ function createMemoryRepository(): GiftRepository & {
           : null,
       );
     },
-    validateMediaReferences() {
+    findDraftById(giftId) {
+      const gift = this.current;
+      return Promise.resolve(gift?.id === giftId && gift.status === "draft" ? gift : null);
+    },
+    findPublishedByShareId() {
+      return Promise.resolve(null);
+    },
+    findPublishReplay() {
+      return Promise.resolve(null);
+    },
+    publishDraft() {
+      return Promise.reject(new Error("Not used by draft tests."));
+    },
+    validateMediaReferences(_giftId, references) {
+      this.lastMediaReferences = references;
       return Promise.resolve(this.mediaReferencesValid);
     },
     updateDraft(gift, expectedRevision, accessors) {
@@ -110,6 +162,7 @@ function createMemoryRepository(): GiftRepository & {
         return Promise.resolve(null);
       }
       this.current = gift;
+      this.revisionSnapshots.push(gift);
       return Promise.resolve(gift);
     },
   };
@@ -127,6 +180,10 @@ describe("gift application service", () => {
   beforeEach(() => {
     repository = createMemoryRepository();
     service = createGiftService({
+      audioTracks: {
+        findSelectableTrack: () => null,
+        isSelectableTrack: (id) => id === "acoustic-morning",
+      },
       clock: () => new Date("2026-09-16T00:00:00.000Z"),
       createAnonymousIdentity: () => anonymousIdentity,
       createId: () => "7afd9fe9-d30d-41cc-8f9a-0fe907f7df89",
@@ -162,6 +219,49 @@ describe("gift application service", () => {
       expect(result.data.gift).toMatchObject({ ownerKind: "anonymous", revision: 0 });
       expect(result.data.gift).not.toHaveProperty("claimTokenHash");
     }
+  });
+
+  it("refuses a draft on a published version without a registered artifact", async () => {
+    const withArtifacts = (registered: boolean) =>
+      createGiftService({
+        audioTracks: { findSelectableTrack: () => null, isSelectableTrack: () => false },
+        clock: () => new Date("2026-09-16T00:00:00.000Z"),
+        createAnonymousIdentity: () => anonymousIdentity,
+        createId: () => "7afd9fe9-d30d-41cc-8f9a-0fe907f7df89",
+        createPublicId: () => "q1w2e3r4t5y6u7i8",
+        gifts: repository,
+        publishing: {
+          artifacts: { resolve: () => (registered ? { contentHash: "a".repeat(64) } : null) },
+          assets: { listByGiftId: () => Promise.resolve([]) },
+          createShareId: () => "unused",
+          entitlement: { canPublish: () => true },
+        },
+        templates: {
+          findCreatableManifest: () => Promise.resolve(manifest),
+          findEditableManifest: () => Promise.resolve(manifest),
+        },
+      });
+    const input = {
+      idempotencyKey: "4449d41a-6750-43c1-8dc4-b567ebb20cf2",
+      ownerId: null,
+      templateId: manifest.id,
+      templateVersion: manifest.version,
+    };
+
+    await expect(withArtifacts(false).createDraft(input)).resolves.toEqual({
+      error: { code: "NOT_FOUND" },
+      ok: false,
+    });
+    await expect(
+      repository.findAuthorized("q1w2e3r4t5y6u7i8", [
+        {
+          anonymousDraftId: anonymousIdentity.anonymousDraftId,
+          claimTokenHash: anonymousIdentity.claimTokenHash,
+          kind: "anonymous",
+        },
+      ]),
+    ).resolves.toBeNull();
+    await expect(withArtifacts(true).createDraft(input)).resolves.toMatchObject({ ok: true });
   });
 
   it("authorizes the matching anonymous identity and denies another owner", async () => {
@@ -221,6 +321,32 @@ describe("gift application service", () => {
     expect(repository.current?.content.data).toEqual({ headline: "Our story" });
   });
 
+  it("saves again against the actual revision after a conflict", async () => {
+    await createAnonymousDraft();
+    const accessor: GiftAccessor = {
+      anonymousDraftId: anonymousIdentity.anonymousDraftId,
+      claimTokenHash: anonymousIdentity.claimTokenHash,
+      kind: "anonymous",
+    };
+    const update = (headline: string, expectedRevision: number) =>
+      service.updateDraft({
+        accessors: [accessor],
+        content: { headline },
+        expectedRevision,
+        publicId: "q1w2e3r4t5y6u7i8",
+      });
+
+    await update("Tab A", 0);
+    const stale = await update("Tab B", 0);
+    const snapshotsBefore = repository.revisionSnapshots.length;
+    const kept = await update("Tab B", 1);
+
+    expect(stale).toMatchObject({ error: { actualRevision: 1, code: "REVISION_CONFLICT" } });
+    expect(kept.ok && kept.data.revision).toBe(2);
+    expect(repository.current?.content.data).toEqual({ headline: "Tab B" });
+    expect(repository.revisionSnapshots.length).toBe(snapshotsBefore + 1);
+  });
+
   it("rejects media references that are not owned by the current gift field", async () => {
     await createAnonymousDraft();
     repository.mediaReferencesValid = false;
@@ -247,6 +373,159 @@ describe("gift application service", () => {
       fieldErrors: { photos: "Image assets must exist and belong to this gift field." },
     });
     expect(repository.current?.revision).toBe(0);
+  });
+
+  it("refuses edits when the pinned template version is not editable", async () => {
+    await createAnonymousDraft();
+    service = createGiftService({
+      audioTracks: { findSelectableTrack: () => null, isSelectableTrack: () => true },
+      clock: () => new Date("2026-09-16T00:00:00.000Z"),
+      createAnonymousIdentity: () => anonymousIdentity,
+      createId: () => "7afd9fe9-d30d-41cc-8f9a-0fe907f7df89",
+      createPublicId: () => "q1w2e3r4t5y6u7i8",
+      gifts: repository,
+      templates: {
+        findCreatableManifest: () => Promise.resolve(null),
+        findEditableManifest: () => Promise.resolve(null),
+      },
+    });
+
+    const result = await service.updateDraft({
+      accessors: [
+        {
+          anonymousDraftId: anonymousIdentity.anonymousDraftId,
+          claimTokenHash: anonymousIdentity.claimTokenHash,
+          kind: "anonymous",
+        },
+      ],
+      content: { headline: "Draft version" },
+      expectedRevision: 0,
+      publicId: "q1w2e3r4t5y6u7i8",
+    });
+
+    expect(result).toEqual({ error: { code: "INVALID_STATE" }, ok: false });
+    expect(repository.current?.revision).toBe(0);
+  });
+
+  describe("captioned images and licensed audio", () => {
+    const assetId = "550e8400-e29b-41d4-a716-446655440000";
+    const accessor: GiftAccessor = {
+      anonymousDraftId: anonymousIdentity.anonymousDraftId,
+      claimTokenHash: anonymousIdentity.claimTokenHash,
+      kind: "anonymous",
+    };
+
+    function save(content: Record<string, unknown>) {
+      return service.updateDraft({
+        accessors: [accessor],
+        content,
+        expectedRevision: 0,
+        publicId: "q1w2e3r4t5y6u7i8",
+      });
+    }
+
+    it("stores trimmed captions and checks captioned assets like image lists", async () => {
+      await createAnonymousDraft();
+
+      const result = await save({ memories: [{ assetId, caption: "  Lần đầu gặp nhau  " }] });
+
+      expect(result.ok && result.data.content).toEqual({
+        memories: [{ assetId, caption: "Lần đầu gặp nhau" }],
+      });
+      expect(repository.lastMediaReferences).toEqual([
+        { assetIds: [assetId], fieldId: "memories" },
+      ]);
+    });
+
+    it("stores a draft with fewer images than the minimum", async () => {
+      await createAnonymousDraft();
+
+      const result = await save({ memories: [{ assetId }] });
+
+      expect(result.ok && result.data.revision).toBe(1);
+      expect(repository.current?.content.data).toEqual({ memories: [{ assetId }] });
+    });
+
+    it("rejects more images than the maximum with an error keyed by the field", async () => {
+      await createAnonymousDraft();
+      const memories = Array.from({ length: 9 }, (_, index) => ({
+        assetId: `550e8400-e29b-41d4-a716-44665544${String(index).padStart(4, "0")}`,
+      }));
+
+      const result = await save({ memories });
+
+      expect(result.ok).toBe(false);
+      if (result.ok || result.error.code !== "INVALID_CONTENT") {
+        throw new Error("Expected invalid content.");
+      }
+      expect(Object.keys(result.error.fieldErrors).every((key) => key.startsWith("memories"))).toBe(
+        true,
+      );
+      expect(repository.current?.revision).toBe(0);
+    });
+
+    it("names the field in a nested error key", async () => {
+      await createAnonymousDraft();
+
+      const result = await save({
+        memories: [
+          { assetId },
+          { assetId: "550e8400-e29b-41d4-a716-446655440001", caption: "x".repeat(41) },
+        ],
+      });
+
+      expect(result.ok ? null : result.error).toMatchObject({
+        code: "INVALID_CONTENT",
+        fieldErrors: { "memories.1.caption": expect.any(String) as string },
+      });
+    });
+
+    it("rejects captioned assets that do not belong to this gift field", async () => {
+      await createAnonymousDraft();
+      repository.mediaReferencesValid = false;
+
+      const result = await save({ memories: [{ assetId }] });
+
+      expect(result).toEqual({
+        error: {
+          code: "INVALID_CONTENT",
+          fieldErrors: { memories: "Image assets must exist and belong to this gift field." },
+        },
+        ok: false,
+      });
+      expect(repository.current?.revision).toBe(0);
+    });
+
+    it("rejects a captioned item that carries a storage URL", async () => {
+      await createAnonymousDraft();
+
+      const result = await save({
+        memories: [{ assetId, url: "https://store.example/photo.jpg" }],
+      });
+
+      expect(result.ok ? null : result.error.code).toBe("INVALID_CONTENT");
+      expect(repository.current?.revision).toBe(0);
+    });
+
+    it("stores an active track id", async () => {
+      await createAnonymousDraft();
+
+      const result = await save({ audio: "acoustic-morning" });
+
+      expect(result.ok && result.data.content).toEqual({ audio: "acoustic-morning" });
+    });
+
+    it.each(["old-piano", "unknown-track"])("rejects the unavailable track %s", async (audio) => {
+      await createAnonymousDraft();
+
+      const result = await save({ audio });
+
+      expect(result).toEqual({
+        error: { code: "INVALID_CONTENT", fieldErrors: { audio: "Audio track is not available." } },
+        ok: false,
+      });
+      expect(repository.current?.revision).toBe(0);
+    });
   });
 
   it("returns an opaque not-found if ownership changes during an update", async () => {
@@ -293,5 +572,742 @@ describe("gift application service", () => {
 
     expect(denied).toEqual({ error: { code: "NOT_FOUND" }, ok: false });
     expect(claimed.ok && claimed.data.ownerKind).toBe("user");
+  });
+
+  it("answers not-found when saving a gift that is no longer a draft", async () => {
+    await createAnonymousDraft();
+    repository.current = GiftSchema.parse({
+      ...repository.current,
+      publishedAt: new Date("2026-10-01T00:00:00.000Z"),
+      shareId: "Ab0_-cdefghijklmnopqrs",
+      status: "published",
+    });
+
+    await expect(
+      service.updateDraft({
+        accessors: [
+          {
+            anonymousDraftId: anonymousIdentity.anonymousDraftId,
+            claimTokenHash: anonymousIdentity.claimTokenHash,
+            kind: "anonymous",
+          },
+        ],
+        content: { headline: "After publish" },
+        expectedRevision: 0,
+        publicId: "q1w2e3r4t5y6u7i8",
+      }),
+    ).resolves.toEqual({ error: { code: "NOT_FOUND" }, ok: false });
+  });
+});
+
+describe("gift publishing", () => {
+  const ownerId = "owner-1";
+  const publicId = "p1u2b3l4i5s6h7e8";
+  const key = "9c1b2f0e-6a7d-4c90-8d7a-4a559c1b2f0e";
+  const shareId = "Ab0_-cdefghijklmnopqrs";
+  const contentHash = "f".repeat(64);
+  const now = new Date("2026-10-01T08:00:00.000Z");
+
+  type StoredKey = Readonly<{ actorKey: string; fingerprint: string; giftId: string }>;
+
+  let gift: Gift;
+  let assets: MediaAsset[];
+  let publications: GiftPublication[];
+  let keys: Map<string, StoredKey>;
+  let publishEnabled: boolean;
+  let editable: boolean;
+  let publishInputs: GiftPublishInput[];
+  let beforeWrite: (() => GiftPublishPersistenceResult | null) | null;
+  let service: ReturnType<typeof createGiftService>;
+
+  function ownedGift(overrides: Partial<Gift> = {}): Gift {
+    return GiftSchema.parse({
+      ...createGiftDraft({
+        anonymousDraftId: null,
+        claimTokenHash: null,
+        content: {
+          data: completeContent(),
+          schemaVersion: 1,
+          templateId: "memory-box",
+          templateVersion: "1.1.0",
+        },
+        id: fixtureGiftId,
+        now: new Date("2026-09-16T00:00:00.000Z"),
+        ownerId,
+        publicId,
+      }),
+      revision: 7,
+      ...overrides,
+    });
+  }
+
+  function replayOf(stored: StoredKey | undefined, request: StoredKey) {
+    if (!stored) return null;
+    if (
+      stored.actorKey !== request.actorKey ||
+      stored.fingerprint !== request.fingerprint ||
+      stored.giftId !== request.giftId
+    ) {
+      return { status: "idempotency-conflict" as const };
+    }
+    const publication = publications.find((candidate) => candidate.giftId === stored.giftId);
+    return publication
+      ? { publication, status: "replayed" as const }
+      : { status: "idempotency-conflict" as const };
+  }
+
+  const repository: GiftRepository = {
+    claimDraft: () => Promise.resolve(null),
+    createDraft: () => Promise.reject(new Error("unused")),
+    findAuthorized(requestedPublicId, accessors) {
+      return Promise.resolve(
+        gift.publicId === requestedPublicId &&
+          accessors.some((accessor) => canAccess(gift, accessor))
+          ? gift
+          : null,
+      );
+    },
+    findDraftById: () => Promise.resolve(null),
+    findPublishedByShareId: () => Promise.resolve(null),
+    findPublishReplay(idempotency, giftId) {
+      return Promise.resolve(
+        replayOf(keys.get(idempotency.key), {
+          actorKey: idempotency.actorKey,
+          fingerprint: idempotency.requestFingerprint,
+          giftId,
+        }),
+      );
+    },
+    publishDraft(input) {
+      publishInputs.push(input);
+      const replay = replayOf(keys.get(input.idempotency.key), {
+        actorKey: input.idempotency.actorKey,
+        fingerprint: input.idempotency.requestFingerprint,
+        giftId: input.gift.id,
+      });
+      if (replay) return Promise.resolve(replay);
+      const interrupted = beforeWrite?.();
+      if (interrupted) return Promise.resolve(interrupted);
+      if (
+        gift.status !== "draft" ||
+        gift.access.mode !== "unlisted" ||
+        gift.revision !== input.expectedRevision ||
+        gift.ownership.ownerId !== input.ownerId
+      ) {
+        return Promise.resolve({ status: "stale" as const });
+      }
+      gift = input.gift;
+      publications.push(input.publication);
+      keys.set(input.idempotency.key, {
+        actorKey: input.idempotency.actorKey,
+        fingerprint: input.idempotency.requestFingerprint,
+        giftId: input.gift.id,
+      });
+      return Promise.resolve({ publication: input.publication, status: "published" as const });
+    },
+    updateDraft: () => Promise.resolve(null),
+    validateMediaReferences: () => Promise.resolve(true),
+  };
+
+  function createService(
+    overrides: Partial<GiftServiceDependencies> = {},
+    options: Readonly<{ withoutPublishing?: boolean }> = {},
+  ) {
+    const dependencies: GiftServiceDependencies = {
+      audioTracks: {
+        findSelectableTrack: (id) => (id === activeTrack.id ? activeTrack : null),
+        isSelectableTrack: (id) => id === activeTrack.id,
+      },
+      clock: () => now,
+      createAnonymousIdentity: () => {
+        throw new Error("unused");
+      },
+      createId: () => "0f8fad5b-d9cb-469f-a165-70867728950e",
+      createPublicId: () => publicId,
+      gifts: repository,
+      publishing: {
+        artifacts: {
+          resolve: (templateId, version) =>
+            templateId === "memory-box" && version === "1.1.0" ? { contentHash } : null,
+        },
+        assets: { listByGiftId: () => Promise.resolve(assets) },
+        createShareId: () => shareId,
+        entitlement: { canPublish: () => publishEnabled },
+      },
+      templates: {
+        findCreatableManifest: () => Promise.resolve(null),
+        findEditableManifest: (templateId, version) => {
+          if (!editable || templateId !== "memory-box") return Promise.resolve(null);
+          if (version === "1.1.0") return Promise.resolve(memoryBoxManifest);
+          if (version === "1.0.0") return Promise.resolve(retiredMemoryBoxManifest);
+          return Promise.resolve(null);
+        },
+      },
+      ...overrides,
+    };
+    if (!options.withoutPublishing) return createGiftService(dependencies);
+    const { publishing: _publishing, ...withoutPublishing } = dependencies;
+    return createGiftService(withoutPublishing);
+  }
+
+  beforeEach(() => {
+    gift = ownedGift();
+    assets = assetIds.slice(0, 3).map((id) => mediaAsset(id));
+    publications = [];
+    keys = new Map();
+    publishEnabled = true;
+    editable = true;
+    publishInputs = [];
+    beforeWrite = null;
+    service = createService();
+  });
+
+  function publish(
+    input: Partial<{
+      expectedRevision: number;
+      idempotencyKey: string;
+      userId: string | null;
+    }> = {},
+  ) {
+    return service.publishGift({
+      expectedRevision: 7,
+      idempotencyKey: key,
+      publicId,
+      userId: ownerId,
+      ...input,
+    });
+  }
+
+  describe("authorization and entitlement", () => {
+    it("answers NOT_AUTHENTICATED without a session (Not signed in)", async () => {
+      await expect(publish({ userId: null })).resolves.toEqual({
+        error: { code: "NOT_AUTHENTICATED" },
+        ok: false,
+      });
+      expect(gift.status).toBe("draft");
+    });
+
+    it("answers NOT_FOUND to a signed-in non-owner (Not the owner)", async () => {
+      await expect(publish({ userId: "someone-else" })).resolves.toEqual({
+        error: { code: "NOT_FOUND" },
+        ok: false,
+      });
+    });
+
+    it("answers NOT_FOUND for an unclaimed anonymous draft (Unclaimed anonymous draft)", async () => {
+      gift = ownedGift({
+        ownership: {
+          anonymousDraftId: "2f7d675f-55d2-4e4b-b017-b0e0f9277ac2",
+          claimTokenHash: "a".repeat(64),
+          ownerId: null,
+        },
+      });
+
+      await expect(publish()).resolves.toEqual({ error: { code: "NOT_FOUND" }, ok: false });
+      expect(gift.status).toBe("draft");
+    });
+
+    it("answers FORBIDDEN to the owner while the flag is off (Flag off for the owner)", async () => {
+      publishEnabled = false;
+
+      await expect(publish()).resolves.toEqual({ error: { code: "FORBIDDEN" }, ok: false });
+      expect(gift.status).toBe("draft");
+      expect(publishInputs).toHaveLength(0);
+    });
+
+    it("answers NOT_FOUND before the flag to a non-owner (Flag off for a non-owner)", async () => {
+      publishEnabled = false;
+
+      await expect(publish({ userId: "someone-else" })).resolves.toEqual({
+        error: { code: "NOT_FOUND" },
+        ok: false,
+      });
+    });
+
+    it("refuses when publishing is not configured", async () => {
+      service = createService({}, { withoutPublishing: true });
+
+      await expect(publish()).rejects.toThrow("Gift publishing is not configured.");
+    });
+  });
+
+  describe("pre-publish checks", () => {
+    it("answers a revision conflict for a stale revision (Stale revision)", async () => {
+      gift = ownedGift({ revision: 5 });
+
+      await expect(publish({ expectedRevision: 4 })).resolves.toEqual({
+        error: { actualRevision: 5, code: "REVISION_CONFLICT", expectedRevision: 4 },
+        ok: false,
+      });
+    });
+
+    it("answers INVALID_STATE to a new key for a published gift (Already published)", async () => {
+      await publish();
+      const first = publications[0];
+
+      await expect(
+        publish({ idempotencyKey: "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed" }),
+      ).resolves.toEqual({ error: { code: "INVALID_STATE" }, ok: false });
+      expect(publications).toEqual([first]);
+    });
+
+    it("lists missing and too few values (Invalid content)", async () => {
+      const content = completeContent();
+      delete content["receiver-name"];
+      content["memories"] = (content["memories"] as unknown[]).slice(0, 2);
+      gift = ownedGift({ content: { ...gift.content, data: content } });
+
+      const result = await publish();
+
+      expect(result).toEqual({
+        error: {
+          code: "INVALID_CONTENT",
+          fieldErrors: {
+            memories: "Add at least 3 images.",
+            "receiver-name": "This field is required.",
+          },
+        },
+        ok: false,
+      });
+      expect(JSON.stringify(result)).not.toContain("Đà Lạt");
+    });
+
+    it("names the photo that is not ready (Asset not ready)", async () => {
+      assets[2] = mediaAsset(assetIds[2], { status: "processing" });
+
+      await expect(publish()).resolves.toEqual({
+        error: {
+          code: "INVALID_CONTENT",
+          fieldErrors: { "memories.2": "This image is not ready." },
+        },
+        ok: false,
+      });
+      expect(publishInputs).toHaveLength(0);
+    });
+
+    it("refuses a withdrawn audio track (Withdrawn audio track)", async () => {
+      gift = ownedGift({
+        content: { ...gift.content, data: { ...completeContent(), audio: "old-piano" } },
+      });
+
+      await expect(publish()).resolves.toEqual({
+        error: { code: "INVALID_CONTENT", fieldErrors: { audio: "This value is not valid." } },
+        ok: false,
+      });
+    });
+
+    it("refuses a version without a registered artifact (Artifact missing)", async () => {
+      gift = ownedGift({ content: { ...gift.content, templateVersion: "1.0.0" } });
+
+      await expect(publish()).resolves.toEqual({
+        error: { code: "TEMPLATE_UNPUBLISHABLE" },
+        ok: false,
+      });
+    });
+
+    it("fails closed for another access policy (Unsupported access policy)", async () => {
+      gift = ownedGift({ access: { mode: "password", passwordHash: "h".repeat(40) } });
+
+      await expect(publish()).resolves.toEqual({
+        error: { code: "ACCESS_POLICY_UNSUPPORTED" },
+        ok: false,
+      });
+      expect(publishInputs).toHaveLength(0);
+    });
+
+    it("refuses a version that is no longer editable (Template version no longer editable)", async () => {
+      editable = false;
+
+      await expect(publish()).resolves.toEqual({
+        error: { code: "TEMPLATE_NOT_EDITABLE" },
+        ok: false,
+      });
+    });
+  });
+
+  describe("the publish transaction", () => {
+    it("publishes a complete gift with a pinned snapshot (Owner publishes a complete gift)", async () => {
+      const result = await publish();
+
+      expect(result).toEqual({
+        data: {
+          publicId,
+          publishedAt: now.toISOString(),
+          revision: 7,
+          shareId,
+          sharePath: `/g/${shareId}`,
+          status: "published",
+        },
+        ok: true,
+      });
+      expect(gift).toMatchObject({ publishedAt: now, revision: 7, shareId, status: "published" });
+      expect(publications).toEqual([
+        expect.objectContaining({
+          artifactContentHash: contentHash,
+          assetIds: assetIds.slice(0, 3),
+          audioTrackId: "acoustic-morning",
+          content: completeContent(),
+          revision: 7,
+          shareId,
+          templateId: "memory-box",
+          templateVersion: "1.1.0",
+        }),
+      ]);
+      expect(publishInputs[0]).toMatchObject({
+        assetRefs: [{ assetIds: assetIds.slice(0, 3), fieldId: "memories" }],
+        expectedRevision: 7,
+        idempotency: {
+          actorKey: `user:${ownerId}`,
+          expiresAt: new Date("2026-10-02T08:00:00.000Z"),
+          key,
+          requestFingerprint: JSON.stringify(["publish", publicId, 7]),
+          scope: "gift-publish",
+        },
+        ownerId,
+      });
+    });
+
+    it("stores no audio track when the content has none", async () => {
+      const content = completeContent();
+      delete content["audio"];
+      gift = ownedGift({ content: { ...gift.content, data: content } });
+
+      await publish();
+
+      expect(publications[0]?.audioTrackId).toBeNull();
+    });
+
+    it("answers the newer revision when a save commits first (Concurrent save loses)", async () => {
+      beforeWrite = () => {
+        gift = ownedGift({ revision: 8 });
+        return null;
+      };
+
+      await expect(publish()).resolves.toEqual({
+        error: { actualRevision: 8, code: "REVISION_CONFLICT", expectedRevision: 7 },
+        ok: false,
+      });
+      expect(publications).toHaveLength(0);
+    });
+
+    it("answers INVALID_STATE when the gift was published elsewhere meanwhile", async () => {
+      beforeWrite = () => {
+        gift = GiftSchema.parse({ ...gift, publishedAt: now, shareId, status: "published" });
+        return null;
+      };
+
+      await expect(publish()).resolves.toEqual({ error: { code: "INVALID_STATE" }, ok: false });
+    });
+
+    it("answers NOT_FOUND when ownership changed meanwhile", async () => {
+      beforeWrite = () => {
+        gift = ownedGift({
+          ownership: { anonymousDraftId: null, claimTokenHash: null, ownerId: "user-2" },
+        });
+        return null;
+      };
+
+      await expect(publish()).resolves.toEqual({ error: { code: "NOT_FOUND" }, ok: false });
+    });
+
+    it("answers ACCESS_POLICY_UNSUPPORTED when the policy changed meanwhile", async () => {
+      beforeWrite = () => {
+        gift = ownedGift({ access: { mode: "password", passwordHash: "h".repeat(40) } });
+        return null;
+      };
+
+      await expect(publish()).resolves.toEqual({
+        error: { code: "ACCESS_POLICY_UNSUPPORTED" },
+        ok: false,
+      });
+    });
+
+    it("answers invalid content when an asset left ready (Asset deleted during publish)", async () => {
+      beforeWrite = () => {
+        assets[1] = mediaAsset(assetIds[1], { status: "deleting" });
+        return { status: "assets-changed" };
+      };
+
+      await expect(publish()).resolves.toEqual({
+        error: {
+          code: "INVALID_CONTENT",
+          fieldErrors: { "memories.1": "This image is not ready." },
+        },
+        ok: false,
+      });
+      expect(gift.status).toBe("draft");
+      expect(publications).toHaveLength(0);
+    });
+
+    it("still answers invalid content when the refreshed list shows no issue", async () => {
+      beforeWrite = () => ({ status: "assets-changed" });
+
+      await expect(publish()).resolves.toEqual({
+        error: { code: "INVALID_CONTENT", fieldErrors: { memories: "This image is not ready." } },
+        ok: false,
+      });
+    });
+
+    it("answers IDEMPOTENCY_CONFLICT when the transaction finds another request's key", async () => {
+      beforeWrite = () => ({ status: "idempotency-conflict" });
+
+      await expect(publish()).resolves.toEqual({
+        error: { code: "IDEMPOTENCY_CONFLICT" },
+        ok: false,
+      });
+    });
+
+    it("returns the publication a concurrent same-key request stored (Double click)", async () => {
+      const stored = {
+        ...(await (async () => {
+          await publish();
+          return publications[0]!;
+        })()),
+      };
+      gift = ownedGift();
+      beforeWrite = () => ({ publication: stored, status: "replayed" });
+
+      await expect(
+        publish({ idempotencyKey: "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed" }),
+      ).resolves.toMatchObject({ data: { shareId }, ok: true });
+    });
+  });
+
+  describe("idempotent replay", () => {
+    it("replays a lost response with the same publication (Lost response replayed)", async () => {
+      const first = await publish();
+      const second = await publish();
+
+      expect(second).toEqual(first);
+      expect(publications).toHaveLength(1);
+      expect(publishInputs).toHaveLength(1);
+    });
+
+    it("refuses the key of a successful publish with another body (Replay with a different body)", async () => {
+      await publish();
+
+      await expect(publish({ expectedRevision: 8 })).resolves.toEqual({
+        error: { code: "IDEMPOTENCY_CONFLICT" },
+        ok: false,
+      });
+    });
+
+    it("accepts the same key after a failed attempt (Retry after a validation failure)", async () => {
+      assets[2] = mediaAsset(assetIds[2], { status: "processing" });
+      const failed = await publish();
+      assets[2] = mediaAsset(assetIds[2]);
+      gift = ownedGift({ revision: 8 });
+
+      const retried = await publish({ expectedRevision: 8 });
+
+      expect(failed.ok).toBe(false);
+      expect(retried).toMatchObject({ data: { revision: 8, shareId }, ok: true });
+    });
+  });
+
+  describe("getStudioGift", () => {
+    const owner: readonly GiftAccessor[] = [{ kind: "user", userId: ownerId }];
+
+    it("opens the editor for a draft", async () => {
+      await expect(service.getStudioGift({ accessors: owner, publicId })).resolves.toMatchObject({
+        data: { draft: { publicId, revision: 7, status: "draft" }, kind: "draft" },
+        ok: true,
+      });
+    });
+
+    it("shows the published panel for a published gift", async () => {
+      await publish();
+
+      await expect(service.getStudioGift({ accessors: owner, publicId })).resolves.toEqual({
+        data: {
+          kind: "published",
+          publication: {
+            publicId,
+            publishedAt: now.toISOString(),
+            revision: 7,
+            shareId,
+            sharePath: `/g/${shareId}`,
+            status: "published",
+          },
+        },
+        ok: true,
+      });
+    });
+
+    it("answers NOT_FOUND for another status and for no access", async () => {
+      gift = GiftSchema.parse({ ...ownedGift(), status: "deleting" });
+      await expect(service.getStudioGift({ accessors: owner, publicId })).resolves.toEqual({
+        error: { code: "NOT_FOUND" },
+        ok: false,
+      });
+
+      gift = ownedGift();
+      await expect(
+        service.getStudioGift({ accessors: [{ kind: "user", userId: "other" }], publicId }),
+      ).resolves.toEqual({ error: { code: "NOT_FOUND" }, ok: false });
+      await expect(service.getStudioGift({ accessors: [], publicId })).resolves.toEqual({
+        error: { code: "NOT_FOUND" },
+        ok: false,
+      });
+    });
+  });
+
+  describe("funnel analytics ports", () => {
+    const owner: readonly GiftAccessor[] = [{ kind: "user", userId: ownerId }];
+    const giftRef = "R".repeat(43);
+    let giftPublished: ReturnType<typeof vi.fn<PublishAnalytics["giftPublished"]>>;
+    let contextForGift: ReturnType<typeof vi.fn<AnalyticsContextFactory>>;
+
+    function withAnalytics(enabled = true) {
+      giftPublished = vi.fn<PublishAnalytics["giftPublished"]>();
+      contextForGift = vi.fn<AnalyticsContextFactory>((identity) =>
+        enabled
+          ? {
+              giftRef,
+              templateId: identity.templateId,
+              templateVersion: identity.templateVersion,
+            }
+          : null,
+      );
+      service = createService({
+        analytics: { contextForGift, publish: { giftPublished } },
+      });
+    }
+
+    it("gives an authorized draft its analytics context from the internal gift id", async () => {
+      withAnalytics();
+      const result = await service.getStudioGift({ accessors: owner, publicId });
+      expect(result).toMatchObject({
+        data: {
+          analytics: { giftRef, templateId: "memory-box", templateVersion: "1.1.0" },
+          kind: "draft",
+        },
+        ok: true,
+      });
+      expect(contextForGift).toHaveBeenCalledWith({
+        id: fixtureGiftId,
+        templateId: "memory-box",
+        templateVersion: "1.1.0",
+      });
+    });
+
+    it("gives a draft analytics null while disabled or without the port", async () => {
+      withAnalytics(false);
+      await expect(service.getStudioGift({ accessors: owner, publicId })).resolves.toMatchObject({
+        data: { analytics: null, kind: "draft" },
+      });
+      service = createService();
+      await expect(service.getStudioGift({ accessors: owner, publicId })).resolves.toMatchObject({
+        data: { analytics: null, kind: "draft" },
+      });
+    });
+
+    it("gives a published gift no analytics context and no access no context at all", async () => {
+      withAnalytics();
+      await publish();
+      contextForGift.mockClear();
+      const published = await service.getStudioGift({ accessors: owner, publicId });
+      expect(published.ok && published.data).not.toHaveProperty("analytics");
+
+      gift = ownedGift();
+      await expect(
+        service.getStudioGift({ accessors: [{ kind: "user", userId: "other" }], publicId }),
+      ).resolves.toEqual({ error: { code: "NOT_FOUND" }, ok: false });
+      expect(contextForGift).not.toHaveBeenCalled();
+    });
+
+    it("records gift_published once for a first publish (First publish)", async () => {
+      withAnalytics();
+      const result = await service.publishGift({
+        expectedRevision: 7,
+        idempotencyKey: key,
+        publicId,
+        requestId: "request-9",
+        userId: ownerId,
+      });
+      expect(result.ok).toBe(true);
+      expect(giftPublished).toHaveBeenCalledTimes(1);
+      expect(giftPublished).toHaveBeenCalledWith({
+        giftId: fixtureGiftId,
+        requestId: "request-9",
+        templateId: "memory-box",
+        templateVersion: "1.1.0",
+      });
+    });
+
+    it("records nothing for a replayed publish (Replayed publish)", async () => {
+      withAnalytics();
+      await publish();
+      giftPublished.mockClear();
+      await expect(publish()).resolves.toMatchObject({ ok: true });
+      expect(giftPublished).not.toHaveBeenCalled();
+    });
+
+    it("records nothing for any rejected publish (Rejected publish)", async () => {
+      withAnalytics();
+      await expect(publish({ expectedRevision: 6 })).resolves.toMatchObject({
+        error: { code: "REVISION_CONFLICT" },
+      });
+      await expect(publish({ userId: "someone-else" })).resolves.toMatchObject({
+        error: { code: "NOT_FOUND" },
+      });
+      publishEnabled = false;
+      await expect(publish()).resolves.toMatchObject({ error: { code: "FORBIDDEN" } });
+      publishEnabled = true;
+      assets = [];
+      await expect(publish()).resolves.toMatchObject({ error: { code: "INVALID_CONTENT" } });
+      expect(giftPublished).not.toHaveBeenCalled();
+    });
+
+    it("records nothing when the transaction throws", async () => {
+      withAnalytics();
+      beforeWrite = () => {
+        throw new Error("transaction aborted");
+      };
+      await expect(publish()).rejects.toThrow("transaction aborted");
+      expect(giftPublished).not.toHaveBeenCalled();
+    });
+
+    it("still publishes when the port throws synchronously (Analytics write fails)", async () => {
+      withAnalytics();
+      giftPublished.mockImplementation(() => {
+        throw new Error("analytics down");
+      });
+      await expect(publish()).resolves.toMatchObject({ data: { shareId }, ok: true });
+      expect(gift.status).toBe("published");
+    });
+  });
+});
+
+describe("changedImageFieldErrors", () => {
+  const references = [
+    { assetIds: [assetIds[0], assetIds[1]], fieldId: "memories" },
+    { assetIds: [assetIds[2]], fieldId: "cover" },
+  ];
+  const before = [
+    mediaAsset(assetIds[0]),
+    mediaAsset(assetIds[1]),
+    mediaAsset(assetIds[2], { fieldId: "cover" }),
+  ];
+
+  it("names only the fields whose referenced assets changed", () => {
+    const after = [before[0]!, mediaAsset(assetIds[1], { status: "deleting" }), before[2]!];
+
+    expect(changedImageFieldErrors(references, before, after)).toEqual({
+      memories: "This image is not ready.",
+    });
+  });
+
+  it("treats a vanished asset as changed", () => {
+    expect(changedImageFieldErrors(references, before, before.slice(0, 2))).toEqual({
+      cover: "This image is not ready.",
+    });
+  });
+
+  it("names every referenced field when no difference is visible", () => {
+    expect(changedImageFieldErrors(references, before, before)).toEqual({
+      cover: "This image is not ready.",
+      memories: "This image is not ready.",
+    });
   });
 });

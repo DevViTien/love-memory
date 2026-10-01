@@ -1,7 +1,7 @@
 import { type MongoClient, type MongoClientOptions } from "mongodb";
 import { describe, expect, it, vi } from "vitest";
 
-import { connectMongoClient, createMongoGateway } from "./client";
+import { connectDiagnosticMongoClient, connectMongoClient, createMongoGateway } from "./client";
 
 describe("MongoDB client connection", () => {
   it("uses bounded pooling and the stable server API", async () => {
@@ -26,6 +26,41 @@ describe("MongoDB client connection", () => {
         waitQueueTimeoutMS: 5000,
       }),
     );
+  });
+
+  it("connects a diagnostic client without the strict server API", async () => {
+    const connect = vi.fn<() => Promise<MongoClient>>();
+    const client = { close: vi.fn(() => Promise.resolve()), connect } as unknown as MongoClient;
+    connect.mockResolvedValue(client);
+    const factory = vi.fn((_uri: string, _options: MongoClientOptions) => client);
+
+    await expect(
+      connectDiagnosticMongoClient(
+        { databaseName: "love_memory", uri: "mongodb://localhost" },
+        factory,
+      ),
+    ).resolves.toBe(client);
+
+    const options = factory.mock.calls[0]?.[1];
+    expect(options).toMatchObject({ maxPoolSize: 1 });
+    expect(options).not.toHaveProperty("serverApi");
+  });
+
+  it("closes a diagnostic client whose connection fails", async () => {
+    const connectionError = new Error("unavailable");
+    const close = vi.fn(() => Promise.resolve());
+    const client = {
+      close,
+      connect: vi.fn(() => Promise.reject(connectionError)),
+    } as unknown as MongoClient;
+
+    await expect(
+      connectDiagnosticMongoClient(
+        { databaseName: "love_memory", uri: "mongodb://x" },
+        () => client,
+      ),
+    ).rejects.toBe(connectionError);
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it("closes a client whose initial connection fails", async () => {

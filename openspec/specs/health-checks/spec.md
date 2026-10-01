@@ -32,13 +32,17 @@ liveness endpoint MUST NOT contact MongoDB, object storage or any other dependen
 ### Requirement: Readiness dependency checks
 
 The system SHALL respond to `GET /api/health/ready` by evaluating, in order: the object storage
-configuration (`BLOB_READ_WRITE_TOKEN` or `BLOB_STORE_ID` must be configured, and `BLOB_STORE_ID` is
-required when `VERCEL_OIDC_TOKEN` is configured), the media worker configuration (`MEDIA_WORKER_MODE`,
-when set, must be `inline` or `trigger`; the effective mode defaults to `trigger` when `NODE_ENV` is
-`production` and `inline` otherwise; `TRIGGER_SECRET_KEY` is required in `trigger` mode), and a
-MongoDB `ping` command against the configured database. Readiness SHALL NOT perform MongoDB reads or
-writes of application data. Readiness SHALL be evaluated on every request and never served from a
-prerendered or cached result.
+configuration for the selected `STORAGE_DRIVER` (see `local-object-storage`; for the default
+`vercel-blob` driver `BLOB_READ_WRITE_TOKEN` or `BLOB_STORE_ID` must be configured, and
+`BLOB_STORE_ID` is required when `VERCEL_OIDC_TOKEN` is configured; for the `local` driver
+`LOCAL_OBJECT_STORAGE_SECRET` and `APP_URL` must be valid and `VERCEL_ENV` must be unset, empty or
+`development`), the media worker configuration (`MEDIA_WORKER_MODE`, when set, must be `inline` or
+`trigger`; the effective mode defaults to `trigger` when `NODE_ENV` is `production` and `inline`
+otherwise; `TRIGGER_SECRET_KEY` is required in `trigger` mode; the effective mode must be `inline`
+when the storage driver is `local`), and a MongoDB `ping` command against the configured database.
+Readiness SHALL NOT perform MongoDB reads or writes of application data and SHALL NOT read or write
+stored objects. Readiness SHALL be evaluated on every request and never served from a prerendered
+or cached result.
 
 #### Scenario: All dependencies ready
 
@@ -48,7 +52,23 @@ prerendered or cached result.
 
 #### Scenario: Missing storage configuration
 
-- **WHEN** neither `BLOB_READ_WRITE_TOKEN` nor `BLOB_STORE_ID` is configured
+- **WHEN** the storage driver is `vercel-blob` and neither `BLOB_READ_WRITE_TOKEN` nor `BLOB_STORE_ID` is configured
+- **THEN** the response status is `503`
+
+#### Scenario: Local storage without Blob credentials
+
+- **WHEN** `STORAGE_DRIVER` is `local` with a valid `LOCAL_OBJECT_STORAGE_SECRET` and `APP_URL`,
+  `MEDIA_WORKER_MODE` is `inline`, no Blob credential is configured and MongoDB answers `ping`
+- **THEN** the response status is `200`
+
+#### Scenario: Local storage on a Vercel deployment
+
+- **WHEN** `STORAGE_DRIVER` is `local` and `VERCEL_ENV` is `production` or `preview`
+- **THEN** the response status is `503`
+
+#### Scenario: Local storage with Trigger.dev workers
+
+- **WHEN** `STORAGE_DRIVER` is `local` and the effective media worker mode is `trigger`
 - **THEN** the response status is `503`
 
 #### Scenario: Trigger mode without secret

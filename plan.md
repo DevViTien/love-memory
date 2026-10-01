@@ -792,6 +792,8 @@ Hai nhánh có thể chạy song song.
 - Template lỗi không làm mất nội dung cốt lõi.
 - Có kết quả performance và danh sách issue thực tế.
 - Không bắt đầu Template 2–3 nếu gate này chưa đạt.
+- Phụ thuộc Product Owner: cần ít nhất một bản nhạc có giấy phép trong thư viện audio cho buổi demo
+  Gate M2; `audio` của `memory-box@1.1.0` vẫn là tùy chọn nên thư viện rỗng không chặn gift.
 
 ---
 

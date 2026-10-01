@@ -39,6 +39,9 @@ export function MagicLinkForm({ callbackUrl = "/studio/new" }: Readonly<{ callba
           Nếu địa chỉ hợp lệ, LoveMemory đã gửi một liên kết đăng nhập dùng một lần. Liên kết hết
           hạn sau 10 phút.
         </p>
+        <p className="mt-2 text-sm leading-6 font-semibold">
+          Hãy mở liên kết trên cùng trình duyệt và thiết bị này để tiếp tục bản nháp của bạn.
+        </p>
       </div>
     );
   }

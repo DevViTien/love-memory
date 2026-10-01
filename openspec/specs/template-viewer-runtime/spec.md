@@ -42,7 +42,13 @@ Template-to-host events SHALL be:
 - `SCENE` with `sceneId` of 1 to 80 characters.
 - `COMPLETE` with no other properties.
 - `ERROR` with `code` `INVALID_MESSAGE` or `RUNTIME_ERROR`.
+- `ISSUE` (optional for templates) with `protocolVersion` `1`, `code` `ASSET_UNAVAILABLE` or
+  `CONTENT_MISSING`, `fieldId` (a lowercase kebab-case field id of 1 to 80 characters) and an
+  optional `itemIndex` (an integer from 0 to 29). An `ISSUE` reports content that the template
+  could not show: a referenced image without a usable URL (`ASSET_UNAVAILABLE`) or a required value
+  that is missing (`CONTENT_MISSING`). It MUST NOT carry gift content.
 
+Adding `ISSUE` does not change the protocol version: templates that never send it stay conforming.
 The host SHALL send `INIT` with `locale` `vi-VN`.
 
 #### Scenario: Valid event
@@ -58,6 +64,18 @@ The host SHALL send `INIT` with `locale` `vi-VN`.
 #### Scenario: Wrong protocol version
 
 - **WHEN** the template posts `READY` with a `protocolVersion` other than `1`
+- **THEN** the host rejects the message
+
+#### Scenario: Valid issue
+
+- **WHEN** the template posts `{ "protocolVersion": 1, "type": "ISSUE", "code": "ASSET_UNAVAILABLE",
+"fieldId": "memories", "itemIndex": 1 }`
+- **THEN** the host accepts it as an `ISSUE` event
+
+#### Scenario: Malformed issue
+
+- **WHEN** the template posts an `ISSUE` with `code` `BROKEN`, with `itemIndex` `-1` or `1.5`, with a
+  `fieldId` of `Memories`, without `protocolVersion`, or with an extra property such as `caption`
 - **THEN** the host rejects the message
 
 ### Requirement: Trusted event source
@@ -79,10 +97,13 @@ changing Viewer state.
 
 ### Requirement: Initialization handshake
 
-The system SHALL send `INIT` to the iframe after mount and on every iframe load, and SHALL resend
-`INIT` every 250 ms until a `READY` event is received, up to 20 attempts in total. When 20 attempts
-pass without `READY`, the host MUST stop resending and report the status `INIT timeout`. Receiving
-`READY` MUST stop the resend timer.
+The system SHALL send `INIT` to the iframe after mount and on every iframe load. It SHALL resend
+`INIT` every 250 ms until a `READY` event is received, up to 20 attempts in total. An iframe `load`
+event SHALL start a new handshake, with its own count of 20 attempts. When 20 attempts pass without
+`READY`, the host MUST stop resending. The Viewer harness then reports the status `INIT timeout`,
+and the gift viewer switches to its static fallback (see `gift-viewer`). The gift viewer counts
+only the attempts after the iframe's latest `load` event, so an artifact that is slow to load is
+not treated as a timeout. Receiving `READY` MUST stop the resend timer.
 
 #### Scenario: Template becomes ready
 
@@ -94,14 +115,27 @@ pass without `READY`, the host MUST stop resending and report the status `INIT t
 - **WHEN** no `READY` event arrives after 20 `INIT` attempts
 - **THEN** the host stops resending and shows the status `INIT timeout`
 
+#### Scenario: Slow artifact load in the gift viewer
+
+- **WHEN** the gift viewer's iframe fires `load` 8 seconds after mount and the template answers
+  `READY` within its next 20 attempts
+- **THEN** the gift viewer does not switch to its static fallback
+
 ### Requirement: Lifecycle control
 
-The system SHALL let the viewer drive the runtime with `PLAY`, `PAUSE` and `DESTROY` commands and
-SHALL reflect the latest valid event type as the Viewer status, showing `Runtime error: {code}` for
-an `ERROR` event. `DESTROY` MUST stop the host from listening for further template events and
-release any audio. When the Viewer is unmounted, the host MUST send `DESTROY` and stop listening.
-A conforming template SHALL go `READY` → (`PLAY`) → `SCENE` → `COMPLETE`, and SHALL answer `PLAY`
-received before a valid `INIT`, or a malformed `INIT`, with `ERROR` code `INVALID_MESSAGE`.
+The system SHALL let a host drive the runtime with `PLAY`, `PAUSE` and `DESTROY` commands. The
+Viewer harness SHALL reflect the latest valid event type other than `ISSUE` as the Viewer status,
+showing `Runtime error: {code}` for an `ERROR` event. The gift viewer reacts to events as specified
+in `gift-viewer`, and shows no status text. A valid `ISSUE` event MUST be recorded in the harness
+event log without changing the Viewer status. `DESTROY` MUST stop the host from listening for
+further template events and release any audio. When a host is unmounted, it MUST send `DESTROY`
+and stop listening. A host other than the diagnostic Viewer harness, such as the gift viewer, MUST
+send `PLAY` only after it has received `READY`. A conforming template SHALL go `READY` → (`PLAY`) →
+`SCENE` → `COMPLETE`, MAY send `ISSUE` events after `READY`, and SHALL answer a malformed `INIT`
+with `ERROR` code `INVALID_MESSAGE`. For a `PLAY` received before a valid `INIT`, a conforming
+template SHALL do one of two things. It SHALL either answer with `ERROR` code `INVALID_MESSAGE`, as
+the reference template does, or hold the `PLAY` until its first valid `INIT` without sending
+`ERROR`, as `memory-box` does.
 
 #### Scenario: Full lifecycle
 
@@ -119,16 +153,38 @@ received before a valid `INIT`, or a malformed `INIT`, with `ERROR` code `INVALI
 - **WHEN** the reference template receives `PAUSE` after `PLAY` but before completing
 - **THEN** it does not emit `COMPLETE` for that play
 
+#### Scenario: Issue does not change the status
+
+- **WHEN** the Viewer shows `READY` and a valid `ISSUE` event arrives from the iframe
+- **THEN** the status stays `READY` and the issue appears in the event log
+
+#### Scenario: Gift viewer waits for READY
+
+- **WHEN** the person opens a gift in the gift viewer before the template has sent `READY`
+- **THEN** the gift viewer sends no `PLAY` until `READY` arrives
+
+#### Scenario: Unmounting the gift viewer
+
+- **WHEN** the page that shows a gift viewer navigates away
+- **THEN** the gift viewer sends `DESTROY`, stops listening for template events and releases its
+  audio
+
 ### Requirement: Pause when the page is hidden
 
 The system SHALL, when the host document becomes hidden (`visibilitychange` with `document.hidden`
-true), send `PAUSE` to the template, pause any playing audio, and show the status
-`PAUSE · tab ẩn`.
+true), send `PAUSE` to the template and pause any playing audio. The Viewer harness SHALL show the
+status `PAUSE · tab ẩn`. The gift viewer SHALL do this only after the gift was opened and before
+`COMPLETE`, and SHALL offer `Tiếp tục` to resume (see `gift-viewer`).
 
 #### Scenario: Tab hidden during playback
 
 - **WHEN** the viewer switches to another tab while the template is playing
 - **THEN** the host sends `PAUSE` and pauses audio
+
+#### Scenario: Harness status while hidden
+
+- **WHEN** the Viewer harness page becomes hidden
+- **THEN** the harness shows the status `PAUSE · tab ẩn`
 
 ### Requirement: Reduced motion
 
@@ -149,11 +205,17 @@ immediately after `PLAY` when reduced motion is requested, and after 700 ms othe
 
 ### Requirement: Audio only after a user gesture
 
-The system SHALL NOT start audio automatically. When an audio source is supplied to the Viewer, it
-SHALL be loaded with `preload="none"` and play only inside the handler of the user's `Phát` action.
-Playback results SHALL be classified as `playing`, `blocked` (the browser's autoplay policy
-rejected playback with `NotAllowedError`) or `failed` (any other error); for `blocked` or `failed`
-the Viewer MUST keep the template running and show `PLAY · audio {result}` as a visible fallback.
+The system SHALL NOT start audio automatically. When an audio source is supplied to a host, it
+SHALL be loaded with `preload="none"`. It SHALL play only inside the handler of a user action: the
+Viewer harness's `Phát` action, or the gift viewer's `Mở quà` or `Tiếp tục` action. Playback
+results SHALL be classified as:
+
+- `playing`;
+- `blocked`: the browser's autoplay policy rejected playback with `NotAllowedError`;
+- `failed`: any other error.
+
+For `blocked` or `failed`, the host MUST keep the template running and show a visible fallback. The
+Viewer harness shows `PLAY · audio {result}`, and the gift viewer shows `Không phát được nhạc.`.
 Destroying the runtime MUST pause the audio, remove its source and reset the element.
 
 #### Scenario: Autoplay policy blocks playback
@@ -170,6 +232,11 @@ Destroying the runtime MUST pause the audio, remove its source and reset the ele
 
 - **WHEN** the Viewer loads and the user has not pressed `Phát`
 - **THEN** no audio playback is attempted
+
+#### Scenario: Gift viewer audio blocked
+
+- **WHEN** a person chooses `Mở quà` and the browser rejects audio playback
+- **THEN** the template still receives `PLAY` and the gift viewer shows `Không phát được nhạc.`
 
 ### Requirement: Asset URL allowlist injection
 
@@ -194,18 +261,46 @@ an injected URL. When the host supplies no asset URLs, `assets` MUST be sent as 
 
 The system SHALL serve a Viewer harness at `/viewer/{templateId}/{version}` for an artifact that
 exists at that exact version, running the fixture named by the `fixture` query parameter (default
-`default`) and linking every available fixture in a navigation labelled `Fixture Viewer`. The
-harness MUST return the not-found page for an unknown template version or an unknown fixture name.
-It SHALL provide controls for play (`Phát`), pause (`Tạm dừng`), destroy (`Hủy runtime`), a
-mobile/desktop viewport toggle and the reduced-motion switch, and SHALL display the status, the count
-and log of valid events (the most recent 20), and the elapsed milliseconds to `READY` and to
-`COMPLETE`. The harness page SHALL be served with the per-request nonce CSP (`strict-dynamic`).
+`default`) and linking every available fixture in a navigation labelled `Fixture Viewer`. A fixture
+consists of a payload and optional asset URLs. The harness SHALL send the fixture's asset URLs as
+the `INIT` `assets`, or `{}` when the fixture has none. The harness MUST return the not-found page
+for an unknown template version or an unknown fixture name.
+
+It SHALL provide these controls:
+
+- play (`Phát`), pause (`Tạm dừng`) and destroy (`Hủy runtime`);
+- a mobile/desktop viewport toggle, where the mobile viewport frames the iframe in a portrait 9:16
+  aspect ratio;
+- the reduced-motion switch.
+
+It SHALL display:
+
+- the status;
+- the count and log of valid events (the most recent 20);
+- the number of distinct `ISSUE` events, keyed by `code`, `fieldId` and `itemIndex`, received
+  since the payload or context last changed, as `Vấn đề nội dung: {n}`. `INIT` messages resent
+  during the handshake or on iframe load do not reset it;
+- the elapsed milliseconds to `READY` and to `COMPLETE`.
+
+The harness page SHALL be served with the per-request nonce CSP (`strict-dynamic`).
 
 #### Scenario: Reference template fixtures
 
 - **WHEN** a visitor opens `/viewer/memory-box-spike/0.1.0`
 - **THEN** the `Fixture Viewer` navigation lists three fixtures (`default`, `max-length`,
-  `missing-fields`) and the status reaches `READY`
+  `missing-fields`), the status reaches `READY`, and `INIT` carries `assets` `{}`
+
+#### Scenario: Fixture with asset URLs
+
+- **WHEN** a visitor opens `/viewer/memory-box/1.1.0`
+- **THEN** `INIT` carries the `default` fixture's `data:` image URLs in `assets`, and the harness
+  shows `Vấn đề nội dung: 0` after `READY`
+
+#### Scenario: Repeated issues are counted once
+
+- **WHEN** the template sends the same `ISSUE` (`ASSET_UNAVAILABLE`, `memories`, `1`) twice because
+  it received `INIT` twice
+- **THEN** the harness shows `Vấn đề nội dung: 1` and logs both events
 
 #### Scenario: Unknown version or fixture
 

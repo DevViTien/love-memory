@@ -11,6 +11,7 @@ import {
   readJsonBody,
   validateJsonMutationRequest,
 } from "@/http/api-response";
+import { reportOperationalFailure } from "@/observability/operational-errors";
 import { serializeAnonymousDraftCookie } from "@/modules/gifts/infrastructure/anonymous-draft-identity";
 import {
   enforceGiftMutationRateLimit,
@@ -73,8 +74,8 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
     return response;
-  } catch {
-    console.error(JSON.stringify({ event: "gift_draft_create_failed", requestId: id }));
+  } catch (error) {
+    reportOperationalFailure("gift_draft_create", error, id);
     return createApiErrorResponse({
       code: API_ERROR_CODES.internal,
       message: "The gift draft could not be created.",

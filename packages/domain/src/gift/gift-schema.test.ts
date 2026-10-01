@@ -16,7 +16,9 @@ describe("GiftSchema", () => {
       id: "7afd9fe9-d30d-41cc-8f9a-0fe907f7df89",
       ownership: { anonymousDraftId: null, claimTokenHash: null, ownerId: "owner-1" },
       publicId: "q1w2e3r4t5y6u7i8",
+      publishedAt: "2026-09-16T00:00:00.000Z",
       revision: 2,
+      shareId: "Ab0_-cdefghijklmnopqrs",
       status: "published",
       updatedAt: "2026-09-16T00:00:00.000Z",
     });
@@ -96,5 +98,54 @@ describe("GiftSchema", () => {
     });
 
     expect(result.success).toBe(false);
+  });
+
+  describe("share fields", () => {
+    const base = {
+      access: { mode: "unlisted" },
+      content: { data: {}, schemaVersion: 1, templateId: "memory-box", templateVersion: "1.1.0" },
+      createdAt: new Date("2026-09-16T00:00:00.000Z"),
+      id: "7afd9fe9-d30d-41cc-8f9a-0fe907f7df89",
+      ownership: { anonymousDraftId: null, claimTokenHash: null, ownerId: "owner-1" },
+      publicId: "q1w2e3r4t5y6u7i8",
+      revision: 3,
+      updatedAt: new Date("2026-09-16T00:00:00.000Z"),
+    } as const;
+    const shareFields = {
+      publishedAt: new Date("2026-09-16T00:00:00.000Z"),
+      shareId: "Ab0_-cdefghijklmnopqrs",
+    };
+
+    it("rejects a published gift without a share id or publication time", () => {
+      expect(GiftSchema.safeParse({ ...base, status: "published" }).success).toBe(false);
+      expect(
+        GiftSchema.safeParse({ ...base, shareId: shareFields.shareId, status: "published" })
+          .success,
+      ).toBe(false);
+    });
+
+    it("rejects a draft that carries a share id or publication time", () => {
+      expect(GiftSchema.safeParse({ ...base, ...shareFields, status: "draft" }).success).toBe(
+        false,
+      );
+      expect(
+        GiftSchema.safeParse({ ...base, publishedAt: shareFields.publishedAt, status: "draft" })
+          .success,
+      ).toBe(false);
+    });
+
+    it("accepts a draft without share fields and a published gift with both", () => {
+      expect(GiftSchema.safeParse({ ...base, status: "draft" }).success).toBe(true);
+      expect(GiftSchema.safeParse({ ...base, ...shareFields, status: "published" }).success).toBe(
+        true,
+      );
+    });
+
+    it("rejects a malformed share id", () => {
+      expect(
+        GiftSchema.safeParse({ ...base, ...shareFields, shareId: "short", status: "published" })
+          .success,
+      ).toBe(false);
+    });
   });
 });

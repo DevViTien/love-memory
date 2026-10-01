@@ -3,9 +3,15 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  createLicensedAudioCatalog,
+  type LicensedAudioCatalog,
+  licensedAudioCatalog,
+} from "@love-memory/domain";
+import {
   assertTemplateBuildWithinBudget,
   parseTemplateManifest,
   parseTemplatePayload,
+  type TemplateManifest,
 } from "@love-memory/template-sdk";
 import { describe, expect, it } from "vitest";
 
@@ -14,6 +20,20 @@ const templatesRoot = join(repositoryRoot, "templates");
 
 function readJson(path: string): unknown {
   return JSON.parse(readFileSync(path, "utf8")) as unknown;
+}
+
+/** Fixture `audio` values that do not name a track of the licensed audio catalog. */
+function findUnknownFixtureTracks(
+  manifest: TemplateManifest,
+  fixture: Readonly<Record<string, unknown>>,
+  catalog: LicensedAudioCatalog,
+): string[] {
+  return manifest.fields.flatMap((field) => {
+    const value = fixture[field.id];
+    return field.type === "audio" && typeof value === "string" && !catalog.find(value)
+      ? [`${manifest.id}: preview fixture uses unknown audio track ${value}`]
+      : [];
+  });
 }
 
 describe("built template artifacts", () => {
@@ -45,7 +65,8 @@ describe("built template artifacts", () => {
       expect(manifest.id).toBe(directory.name);
       expect(existsSync(join(templateRoot, "dist", manifest.entry))).toBe(true);
       expect(existsSync(fixturePath)).toBe(true);
-      expect(() => parseTemplatePayload(manifest, readJson(fixturePath))).not.toThrow();
+      const fixture = parseTemplatePayload(manifest, readJson(fixturePath));
+      expect(findUnknownFixtureTracks(manifest, fixture, licensedAudioCatalog)).toEqual([]);
       expect(() => assertTemplateBuildWithinBudget(manifest, readJson(metricsPath))).not.toThrow();
       const metadata = readJson(artifactPath);
       expect(typeof metadata === "object" && metadata !== null).toBe(true);
@@ -55,5 +76,40 @@ describe("built template artifacts", () => {
       expect(values["version"]).toBe(manifest.version);
       expect(readJson(builtManifestPath)).toEqual(readJson(manifestPath));
     }
+  });
+});
+
+describe("findUnknownFixtureTracks", () => {
+  const manifest = parseTemplateManifest({
+    budgets: { initialJsKbGzip: 20, initialMediaKb: 100, maxTextureMb: 16 },
+    capabilities: ["audio", "dom"],
+    engineVersion: "1.0.0",
+    entry: "index.html",
+    fields: [{ id: "audio", label: "Nhạc", source: "licensedLibrary", type: "audio" }],
+    id: "audio-fixture",
+    meta: {
+      description: "Audio fixture",
+      estimatedDurationSec: 10,
+      moods: ["warm"],
+      name: "Audio",
+      occasions: ["anniversary"],
+    },
+    previewFixture: "fixture.json",
+    status: "draft",
+    version: "1.0.0",
+  });
+
+  it("names the template and the unknown track id", () => {
+    expect(
+      findUnknownFixtureTracks(
+        manifest,
+        { audio: "missing-track" },
+        createLicensedAudioCatalog([]),
+      ),
+    ).toEqual(["audio-fixture: preview fixture uses unknown audio track missing-track"]);
+  });
+
+  it("accepts fixtures without audio", () => {
+    expect(findUnknownFixtureTracks(manifest, {}, createLicensedAudioCatalog([]))).toEqual([]);
   });
 });

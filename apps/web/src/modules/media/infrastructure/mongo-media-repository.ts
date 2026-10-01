@@ -5,7 +5,7 @@ import { MEDIA_ASSET_LIMITS, MediaAssetSchema, type MediaAsset } from "@love-mem
 import { MongoServerError } from "mongodb";
 import { randomUUID } from "node:crypto";
 
-import { type MediaAssetRepository } from "../application/media-service";
+import { type MarkDeletingResult, type MediaAssetRepository } from "../application/media-service";
 import {
   type ClaimedMediaJob,
   type ExhaustedMediaJob,
@@ -143,6 +143,16 @@ export const mongoMediaAssetRepository: MediaAssetRepository = {
     return documents.map(toDomain);
   },
 
+  async listByIdsForGift(giftId, assetIds) {
+    if (assetIds.length === 0) return [];
+    const database = await getDatabase();
+    const documents = await database
+      .collection<MediaAssetDocument>(COLLECTIONS.assets)
+      .find({ _id: { $in: [...assetIds] }, giftId })
+      .toArray();
+    return documents.map(toDomain);
+  },
+
   async releaseInitiated(assetId, now) {
     const database = await getDatabase();
     const result = await database.collection<MediaAssetDocument>(COLLECTIONS.assets).updateOne(
@@ -170,22 +180,44 @@ export const mongoMediaAssetRepository: MediaAssetRepository = {
     return result.modifiedCount === 1;
   },
 
-  async markDeleting(assetId, now) {
+  async markDeleting(assetId, giftId, now) {
     const database = await getDatabase();
-    const document = await database
-      .collection<MediaAssetDocument>(COLLECTIONS.assets)
-      .findOneAndUpdate(
-        { _id: assetId, status: { $ne: "deleted" } },
-        {
-          $set: {
-            expiresAt: new Date(now.getTime() + 60_000),
-            status: "deleting",
-            updatedAt: now,
-          },
-        },
-        { returnDocument: "after" },
-      );
-    return document ? toDomain(document) : null;
+    const client = await getMongoClient();
+    let result: MarkDeletingResult | null = null;
+
+    await client.withSession(async (session) => {
+      await session.withTransaction(async () => {
+        result = null;
+        // Read in the same transaction as the asset write. A publish writes every asset it
+        // references, so the two transactions conflict and the retried one sees the other's state.
+        const gift = await database
+          .collection<{ _id: string; status: string }>(COLLECTIONS.gifts)
+          .findOne({ _id: giftId, status: "draft" }, { projection: { _id: 1 }, session });
+        if (!gift) {
+          result = { kind: "gift-not-draft" };
+          return;
+        }
+        const document = await database
+          .collection<MediaAssetDocument>(COLLECTIONS.assets)
+          .findOneAndUpdate(
+            { _id: assetId, giftId, status: { $ne: "deleted" } },
+            {
+              $set: {
+                expiresAt: new Date(now.getTime() + 60_000),
+                status: "deleting",
+                updatedAt: now,
+              },
+            },
+            { returnDocument: "after", session },
+          );
+        result = document
+          ? { asset: toDomain(document), kind: "deleting" }
+          : { kind: "asset-unavailable" };
+      });
+    });
+
+    if (!result) throw new Error("Asset deletion transaction completed without a result.");
+    return result;
   },
 
   async markFailed(assetId, failureCode, now) {

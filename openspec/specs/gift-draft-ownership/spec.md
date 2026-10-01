@@ -42,7 +42,16 @@ The anonymous draft ID SHALL be a UUID, and the claim token SHALL be 256 bits en
 
 ### Requirement: Draft authorization
 
-The system SHALL authorize every draft read and update by combining all credentials the request presents (the signed-in user, the anonymous cookie, or both) in a single repository query. A draft SHALL be accessible when either of these is true: its owner is the signed-in user; or the draft has no owner and both the anonymous draft ID and the claim-token hash match the cookie. The user's role, including `admin`, MUST NOT grant access to another creator's draft. The check SHALL be applied atomically as part of the update write itself, not only before it.
+The system SHALL authorize every draft read and update by combining all credentials the request presents (the signed-in user, the anonymous cookie, or both) in a single repository query. The only exceptions are the preview read and publishing, described below. A draft SHALL be accessible when either of these is true: its owner is the signed-in user; or the draft has no owner and both the anonymous draft ID and the claim-token hash match the cookie. The user's role, including `admin`, MUST NOT grant access to another creator's draft. The check SHALL be applied atomically as part of the update write itself, not only before it.
+
+A valid, unexpired preview token (see `gift-preview`) SHALL be the only other credential. It grants read-only access to the current content of the one draft it was issued for, and only through the preview page. That read uses two queries, each filtering by its own credential:
+
+- a token lookup by the token's hash, filtered on `expiresAt` later than now;
+- a read of the bound gift by its id, filtered on status `draft`.
+
+The preview payload MAY embed short-lived signed download URLs of that draft's `ready` asset derivatives, as specified in `viewer-payload`. The token MUST NOT grant anything else: no draft API read or update, no claim, no media operation, no asset listing and no Studio access, and it MUST NOT be accepted by those routes. Issuing a preview token SHALL require the draft access defined in the first paragraph. Every other guarantee of this requirement also applies to the preview read: the role grants nothing, and the check happens inside the query filter.
+
+Publishing a draft (see `gift-publishing`) SHALL be authorized by the signed-in user alone: the draft's owner MUST be that user, checked inside the query filter of both the lookup and the publish write. The anonymous cookie MUST NOT authorize publishing, even when its credentials match an unclaimed draft; such a draft must be claimed first. A preview token MUST NOT authorize publishing either.
 
 #### Scenario: Signed-in creator keeps access to a pre-sign-in draft
 
@@ -58,6 +67,16 @@ The system SHALL authorize every draft read and update by combining all credenti
 
 - **WHEN** a signed-in user with role `admin` who does not own a draft requests it
 - **THEN** the response is `404` with code `NOT_FOUND`
+
+#### Scenario: Preview token does not unlock the draft API
+
+- **WHEN** a requester who holds only a valid preview link for a draft calls `GET /api/gifts/{publicId}`, `PATCH /api/gifts/{publicId}` or opens `/studio/{publicId}`
+- **THEN** the API answers `404` with code `NOT_FOUND` and the Studio renders the not-found page
+
+#### Scenario: Anonymous credentials cannot publish
+
+- **WHEN** a signed-in creator whose anonymous cookie matches an unclaimed draft sends `POST /api/gifts/{publicId}/publish` for it
+- **THEN** the response is `404` with code `NOT_FOUND`, and the draft can still be read and saved with the same cookie
 
 ### Requirement: Opaque not-found for non-owners
 
@@ -75,7 +94,9 @@ The system MUST respond to unauthorized draft access exactly as it responds to a
 
 ### Requirement: Claim an anonymous draft after sign-in
 
-The system SHALL let a signed-in creator claim an anonymous draft through `POST /api/gifts/{publicId}/claim` with the strict JSON body `{}`. Without a session the system SHALL respond `401` with code `UNAUTHORIZED`. A claim SHALL succeed only when all of these are true: the request carries the draft's anonymous cookie, both credentials match, the draft still has no owner, and its status is `draft`. Otherwise the system SHALL respond `404` with code `NOT_FOUND`, including when the draft has already been claimed. A successful claim SHALL, in one atomic write, set the owner to the signed-in user, clear the anonymous draft ID and claim-token hash, and update `updatedAt` without changing `revision`. It SHALL then respond `200` with a DTO whose `ownerKind` is `user`. The studio page SHALL offer the claim action for an anonymous draft when the viewer is signed in, and otherwise a sign-in link to `/auth/sign-in?next=/studio/{publicId}`.
+The system SHALL let a signed-in creator claim an anonymous draft through `POST /api/gifts/{publicId}/claim` with the strict JSON body `{}`. Without a session the system SHALL respond `401` with code `UNAUTHORIZED`. A claim SHALL succeed only when all of these are true: the request carries the draft's anonymous cookie, both credentials match, the draft still has no owner, and its status is `draft`. Otherwise the system SHALL respond `404` with code `NOT_FOUND`, including when the draft has already been claimed. A successful claim SHALL, in one atomic write, set the owner to the signed-in user, clear the anonymous draft ID and claim-token hash, and update `updatedAt` without changing `revision`. It SHALL then respond `200` with a DTO whose `ownerKind` is `user`.
+
+The studio page SHALL claim an anonymous draft automatically when a signed-in viewer opens `/studio/{publicId}` and the request carries that draft's matching anonymous cookie, so that a creator who returns from the sign-in link does not need a second step. The automatic claim SHALL use the same conditions and the same atomic write as the claim endpoint, SHALL be idempotent, and SHALL happen before the page renders, which then shows the draft as owned (`ownerKind` `user`). When the automatic claim does not succeed, the page SHALL render the draft as it is and offer the claim action. For an anonymous draft opened without a session, the studio page SHALL offer a sign-in link to `/auth/sign-in?next=/studio/{publicId}`.
 
 #### Scenario: Successful claim
 
@@ -92,6 +113,17 @@ The system SHALL let a signed-in creator claim an anonymous draft through `POST 
 - **WHEN** a signed-in creator posts a claim without the anonymous cookie, or with a claim token that does not match
 - **THEN** the response is `404` with code `NOT_FOUND`, and ownership is unchanged
 
+#### Scenario: Returning from the sign-in link in the same browser
+
+- **WHEN** a creator who started an anonymous draft in this browser signs in through the magic link and lands on `/studio/{publicId}`
+- **THEN** the draft is claimed before the page renders, the page shows it as owned by the account, and `Xuất bản` needs no separate claim action
+- **AND** the draft's revision is unchanged
+
+#### Scenario: Automatic claim lost to another account
+
+- **WHEN** the draft was claimed by another account between the page's read and its automatic claim
+- **THEN** ownership is unchanged by this request and the page does not show the draft as owned by the viewer
+
 ### Requirement: Anonymous access revoked after claim
 
 After a draft is claimed, its former anonymous credentials MUST NOT grant any access to it. Reads and saves using only the anonymous cookie SHALL receive `404` with code `NOT_FOUND`, and replaying the original create request with its `Idempotency-Key` SHALL receive `409` with code `CONFLICT`. The claiming account SHALL keep full access after signing out and back in. The server does not clear the anonymous cookie on claim; the cookie simply no longer matches the draft.
@@ -105,3 +137,17 @@ After a draft is claimed, its former anonymous credentials MUST NOT grant any ac
 
 - **WHEN** a request without a session presents the former anonymous cookie for a claimed draft
 - **THEN** reading or saving the draft returns `404` with code `NOT_FOUND`
+
+### Requirement: Studio not-found guidance
+
+The not-found page of `/studio/{publicId}` SHALL be one page for every cause (unknown draft, no access, another owner, a status other than `draft` or `published`). It MUST NOT reveal whether the draft exists. It SHALL explain the most common cause after a sign-in in another browser, with the heading `Không mở được bản nháp này` and the text `Bản nháp tạo khi chưa đăng nhập chỉ mở được trên trình duyệt đã tạo ra nó. Hãy mở lại trình duyệt hoặc điện thoại bạn đã dùng để tạo quà, đăng nhập ở đó để lưu quà vào tài khoản.`, and SHALL link to `/templates`.
+
+#### Scenario: Magic link opened in another browser
+
+- **WHEN** a creator signs in through a magic link that opened in a browser without the draft's anonymous cookie and lands on `/studio/{publicId}`
+- **THEN** the page shows `Không mở được bản nháp này` with the explanation, and no draft content
+
+#### Scenario: Unknown draft
+
+- **WHEN** anyone opens `/studio/{publicId}` for a draft that does not exist
+- **THEN** the same page is shown as for a draft the requester cannot access

@@ -1,6 +1,15 @@
 import "server-only";
 
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+
 import { z } from "zod";
+
+import {
+  readLocalStorageSettings,
+  readStorageDriver,
+  StorageConfigurationError,
+} from "./local-object-origin";
 
 const optionalSecretSchema = z.preprocess(
   (value) => (value === "" ? undefined : value),
@@ -60,4 +69,63 @@ export function parseStorageEnvironment(
 
 export function getStorageEnvironment(): StorageEnvironment {
   return parseStorageEnvironment(process.env);
+}
+
+export const LOCAL_OBJECT_STORAGE_DIRECTORY = join(".tmp", "object-storage");
+
+export type StorageConfiguration =
+  | Readonly<{ credentials: StorageEnvironment; driver: "vercel-blob" }>
+  | Readonly<{
+      driver: "local";
+      publicOrigin: string;
+      rootDirectory: string;
+      signingSecret: string;
+    }>;
+
+type Source = Readonly<Record<string, string | undefined>>;
+
+function issueMessages(error: z.ZodError): string {
+  return error.issues.map((issue) => issue.message).join(" ");
+}
+
+export function parseStorageConfiguration(
+  source: Source,
+  // A resolver keeps the Blob path free of filesystem access; only the local driver needs it.
+  { workspaceRoot }: Readonly<{ workspaceRoot: string | (() => string) }>,
+): StorageConfiguration {
+  if (readStorageDriver(source) === "vercel-blob") {
+    const credentials = StorageEnvironmentSchema.safeParse(source);
+    if (!credentials.success) {
+      throw new StorageConfigurationError(issueMessages(credentials.error));
+    }
+    return { credentials: credentials.data, driver: "vercel-blob" };
+  }
+
+  const settings = readLocalStorageSettings(source);
+  const root = typeof workspaceRoot === "function" ? workspaceRoot() : workspaceRoot;
+  return {
+    driver: "local",
+    publicOrigin: settings.publicOrigin,
+    rootDirectory: join(root, LOCAL_OBJECT_STORAGE_DIRECTORY),
+    signingSecret: settings.signingSecret,
+  };
+}
+
+/** The nearest ancestor (or the directory itself) that contains `pnpm-workspace.yaml`. */
+export function findWorkspaceRoot(startDirectory: string): string {
+  let directory = resolve(startDirectory);
+  while (!existsSync(join(directory, "pnpm-workspace.yaml"))) {
+    const parent = dirname(directory);
+    if (parent === directory) {
+      throw new StorageConfigurationError("The repository workspace root was not found.");
+    }
+    directory = parent;
+  }
+  return directory;
+}
+
+export function getStorageConfiguration(): StorageConfiguration {
+  return parseStorageConfiguration(process.env, {
+    workspaceRoot: () => findWorkspaceRoot(process.cwd()),
+  });
 }

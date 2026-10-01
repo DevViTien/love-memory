@@ -1,6 +1,6 @@
 import { API_ERROR_CODES } from "@love-memory/contracts";
 import { pingDatabase } from "@love-memory/database";
-import { getStorageEnvironment } from "@love-memory/storage";
+import { getStorageConfiguration } from "@love-memory/storage";
 import { NextResponse } from "next/server";
 
 import { WEB_APP_VERSION } from "@/config/application";
@@ -15,8 +15,8 @@ export async function GET() {
   const requestId = crypto.randomUUID();
 
   try {
-    getStorageEnvironment();
-    assertMediaRuntimeReady(process.env);
+    const storage = getStorageConfiguration();
+    assertMediaRuntimeReady(process.env, storage.driver);
     await pingDatabase();
 
     return NextResponse.json(

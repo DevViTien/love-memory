@@ -4,6 +4,7 @@ import {
   GiftTemplateIdSchema,
   GiftTemplateVersionSchema,
   PublicGiftIdSchema,
+  ShareIdSchema,
 } from "./gift-identity";
 import { GiftStatusSchema } from "./gift-status";
 
@@ -74,11 +75,30 @@ export const GiftSchema = z
     id: z.uuid(),
     ownership: GiftOwnershipSchema,
     publicId: PublicGiftIdSchema,
+    publishedAt: z.coerce.date().optional(),
     revision: z.number().int().nonnegative(),
+    shareId: ShareIdSchema.optional(),
     status: GiftStatusSchema,
     updatedAt: z.coerce.date(),
   })
-  .strict();
+  .strict()
+  .superRefine((gift, context) => {
+    const hasShareId = gift.shareId !== undefined;
+    const hasPublishedAt = gift.publishedAt !== undefined;
+    // Other statuses stay unconstrained until pause, expiry and deletion are specified.
+    if (gift.status === "published" && (!hasShareId || !hasPublishedAt)) {
+      context.addIssue({
+        code: "custom",
+        message: "A published gift requires a share id and a publication time.",
+      });
+    }
+    if (gift.status === "draft" && (hasShareId || hasPublishedAt)) {
+      context.addIssue({
+        code: "custom",
+        message: "A draft has no share id and no publication time.",
+      });
+    }
+  });
 
 export const GiftRevisionSchema = z
   .object({

@@ -9,7 +9,12 @@ const noStoreHeaders = {
 
 export type RequestBodyFailure = Readonly<{
   fieldErrors?: Readonly<Record<string, string>>;
-  kind: "invalid-json" | "validation";
+  kind: "invalid-json" | "too-large" | "validation";
+}>;
+
+export type ReadJsonBodyOptions = Readonly<{
+  /** The largest accepted body in bytes, checked on `Content-Length` and while reading. */
+  maxBytes?: number;
 }>;
 
 function firstHeaderValue(value: string | null): string | null {
@@ -76,14 +81,52 @@ export function validateJsonMutationRequest(request: Request, requestId: string)
   return null;
 }
 
+/**
+ * Reads at most `maxBytes` of the body: a larger declared `Content-Length` is refused without
+ * reading, and a stream that grows past the cap is cancelled. `null` means the body was too large.
+ */
+async function readCappedText(request: Request, maxBytes: number): Promise<string | null> {
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) return null;
+  if (!request.body) return "";
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
 export async function readJsonBody<TSchema extends z.ZodType>(
   request: Request,
   schema: TSchema,
+  options: ReadJsonBodyOptions = {},
 ): Promise<Result<z.output<TSchema>, RequestBodyFailure>> {
   let body: unknown;
 
   try {
-    body = await request.json();
+    if (options.maxBytes === undefined) {
+      body = await request.json();
+    } else {
+      const text = await readCappedText(request, options.maxBytes);
+      if (text === null) return failure({ kind: "too-large" });
+      body = JSON.parse(text);
+    }
   } catch {
     return failure({ kind: "invalid-json" });
   }
@@ -131,10 +174,39 @@ export function createApiErrorResponse({
   );
 }
 
+/** The caller's `x-request-id` when it is at most 128 characters, otherwise a new UUID. */
+export function requestId(request: Request): string {
+  const supplied = request.headers.get("x-request-id");
+  return supplied && supplied.length <= 128 ? supplied : crypto.randomUUID();
+}
+
+/** `429 RATE_LIMITED` with `details.retryAfterSeconds` and a matching `Retry-After` header. */
+export function createRateLimitedResponse(retryAfterSeconds: number, requestId: string): Response {
+  const response = createApiErrorResponse({
+    code: API_ERROR_CODES.rateLimited,
+    details: { retryAfterSeconds },
+    message: "Too many requests. Please try again later.",
+    requestId,
+    status: 429,
+  });
+  response.headers.set("Retry-After", String(retryAfterSeconds));
+  return response;
+}
+
+export function createPayloadTooLargeResponse(requestId: string): Response {
+  return createApiErrorResponse({
+    code: API_ERROR_CODES.validation,
+    message: "Request body is too large.",
+    requestId,
+    status: 413,
+  });
+}
+
 export function createInvalidBodyResponse(
   failureReason: RequestBodyFailure,
   requestId: string,
 ): Response {
+  if (failureReason.kind === "too-large") return createPayloadTooLargeResponse(requestId);
   return createApiErrorResponse({
     code: API_ERROR_CODES.validation,
     ...(failureReason.fieldErrors ? { fieldErrors: failureReason.fieldErrors } : {}),

@@ -2,7 +2,7 @@ import { buttonVariants, cn } from "@love-memory/ui";
 import Link from "next/link";
 
 import { type TemplateSummary } from "../domain/template-summary";
-import { toTemplateCardViewModel } from "./template-card-view-model";
+import { COMING_SOON_LABEL, toTemplateCardViewModel } from "./template-card-view-model";
 
 type TemplateGalleryProps = Readonly<{
   className?: string;
@@ -31,6 +31,11 @@ export function TemplateGallery({ className, templates }: TemplateGalleryProps) 
               {template.moodLabel}
             </p>
             <h3 className="mt-2 text-xl font-black text-stone-900">{template.name}</h3>
+            {template.comingSoon ? (
+              <p className="mt-2 inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">
+                {COMING_SOON_LABEL}
+              </p>
+            ) : null}
             <p className="mt-3 min-h-20 text-sm leading-6 text-stone-600">{template.description}</p>
             <div className="mt-5 flex justify-between text-xs font-semibold text-stone-500">
               <span>{template.durationLabel}</span>

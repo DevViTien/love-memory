@@ -1,7 +1,11 @@
 import { COLLECTIONS, getDatabase } from "@love-memory/database";
-import { parseTemplateManifest, type TemplateManifest } from "@love-memory/template-sdk";
+import {
+  isImageField,
+  parseTemplateManifest,
+  type TemplateManifest,
+} from "@love-memory/template-sdk";
 
-import { type TemplateCatalog, type TemplateSummary } from "../domain/template-summary";
+import { type StoredTemplateSummary, type TemplateCatalog } from "../domain/template-summary";
 
 type TemplateVersionDocument = Readonly<{
   manifest: TemplateManifest;
@@ -17,9 +21,9 @@ type TemplateDocument = Readonly<{
   status: "draft" | "published" | "retired";
 }>;
 
-function toSummary(document: TemplateVersionDocument): TemplateSummary {
+function toSummary(document: TemplateVersionDocument): StoredTemplateSummary {
   const manifest = parseTemplateManifest(document.manifest);
-  const imageField = manifest.fields.find((field) => field.type === "imageList");
+  const imageField = manifest.fields.find(isImageField);
 
   return {
     description: manifest.meta.description,

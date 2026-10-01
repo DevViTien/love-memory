@@ -21,11 +21,11 @@ catalog:
   class-variance-authority: 0.7.1
   clsx: 2.1.1
   eslint: 9.39.5
-  eslint-config-next: 16.3.5
+  eslint-config-next: 16.3.6
   jsdom: 30.0.1
   better-auth: 1.7.5
   mongodb: 7.6.0
-  next: 16.3.5
+  next: 16.3.6
   postcss: 8.5.28
   prettier: 3.9.6
   prettier-plugin-tailwindcss: 0.8.1
@@ -43,3 +43,4 @@ catalog:
   vite: 8.3.0
   vitest: 5.0.1
   zod: 4.6.5
+  zustand: 5.0.15

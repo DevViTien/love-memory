@@ -16,8 +16,8 @@ The system SHALL select exactly one CSP mode per request path:
 
 - `template` for `/template-spikes`, any path under `/template-spikes/`, and any path under
   `/template-artifacts/`;
-- `nonce` for `/studio`, any path under `/studio/`, any path under `/viewer/`, `/g`, and any path
-  under `/g/`;
+- `nonce` for `/studio`, any path under `/studio/`, any path under `/viewer/`, `/preview`, any path
+  under `/preview/`, `/g`, and any path under `/g/`;
 - `static` for every other path (for example `/`, `/templates`, `/templates/memory-box`,
   `/auth/sign-in`).
 
@@ -33,6 +33,16 @@ The template classification SHALL take precedence over the other rules.
 
 - **WHEN** a browser requests `/studio`, `/studio/new`, `/g/a-public-gift-slug` or `/viewer/memory-box-spike/0.1.0`
 - **THEN** the response `Content-Security-Policy` is the nonce policy containing `'strict-dynamic'`
+
+#### Scenario: Preview uses the nonce policy
+
+- **WHEN** a browser requests `/preview/` followed by a 43-character token, whether or not the token is valid
+- **THEN** the response `Content-Security-Policy` is the nonce policy containing `'strict-dynamic'`
+
+#### Scenario: Look-alike path stays static
+
+- **WHEN** a browser requests `/previews` or `/preview-guide`
+- **THEN** the response `Content-Security-Policy` is the static-compatible policy
 
 #### Scenario: Template documents use the template policy
 
@@ -98,8 +108,9 @@ set as the `Content-Security-Policy` response header.
 
 The system SHALL render every page that is served with a `nonce`-mode policy per request and MUST
 NOT serve such a page from a prerendered (static) build output, because a nonce can only be applied
-while rendering. The entire `/studio` and `/viewer` route trees SHALL explicitly opt out of
-prerendering in their layouts rather than relying on incidental dynamic APIs in individual pages.
+while rendering. The entire `/studio`, `/viewer`, `/preview` and `/g` route trees SHALL explicitly
+opt out of prerendering in their layouts rather than relying on incidental dynamic APIs in
+individual pages.
 
 #### Scenario: Studio is never prerendered
 
@@ -113,15 +124,32 @@ prerendering in their layouts rather than relying on incidental dynamic APIs in 
 - **THEN** no page under `/viewer` is emitted as static output
 - **AND** each request to a Viewer page renders with the nonce from that request
 
+#### Scenario: Preview is never prerendered
+
+- **WHEN** the application is built with `next build`
+- **THEN** no page under `/preview` is emitted as static output
+- **AND** each request to a preview page renders with the nonce from that request
+
+#### Scenario: Public gift page is never prerendered
+
+- **WHEN** the application is built with `next build`
+- **THEN** no page under `/g` is emitted as static output
+- **AND** each request to `/g/{shareId}` renders with the nonce from that request
+
 ### Requirement: Isolated template document policy
 
 The system SHALL send, for `template` mode, a policy that denies network, form, object, worker and
 cross-origin framing capabilities, independent of development or production mode:
 `default-src 'none'`; `base-uri 'none'`; `connect-src 'none'`; `font-src 'none'`;
 `form-action 'none'`; `frame-ancestors 'self'`; `img-src data: https://*.private.blob.vercel-storage.com`
-followed by the configured asset origin when present; `media-src 'none'`; `object-src 'none'`;
-`script-src 'self'`; `style-src 'unsafe-inline'`; `worker-src 'none'`. Content-addressed template
-artifact responses SHALL carry this policy themselves.
+followed by the configured asset origin when present and then, when the `local` storage driver is
+active (see `local-object-storage`), by the local object route source: the local storage origin
+followed by the path `/api/local-object-storage/`, never the bare application origin;
+`media-src 'none'`; `object-src 'none'`; `script-src 'self'`; `style-src 'unsafe-inline'`;
+`worker-src 'none'`. A source already listed SHALL NOT be repeated. The local object route source
+MUST NOT be listed when the effective storage driver is not `local`, including when the `local`
+driver is refused on Vercel.
+Content-addressed template artifact responses SHALL carry this policy themselves.
 
 #### Scenario: Template document can be framed only by the same origin
 
@@ -129,11 +157,29 @@ artifact responses SHALL carry this policy themselves.
 - **THEN** its policy contains `frame-ancestors 'self'` and `connect-src 'none'`
 - **AND** its policy contains `script-src 'self'` without `'unsafe-inline'` or `'strict-dynamic'`
 
+#### Scenario: Template images in local storage mode
+
+- **WHEN** `STORAGE_DRIVER` is `local`, `APP_URL` is `http://127.0.0.1:3100` and a template
+  artifact document is served
+- **THEN** its policy contains `img-src data: https://*.private.blob.vercel-storage.com http://127.0.0.1:3100/api/local-object-storage/`
+- **AND** its `img-src` does not contain the bare origin `http://127.0.0.1:3100` as a source
+- **AND** its policy still contains `connect-src 'none'`
+
+#### Scenario: Refused local driver adds no origin
+
+- **WHEN** `VERCEL_ENV` is `production`, `STORAGE_DRIVER` is `local` and a template artifact
+  document is served
+- **THEN** its `img-src` is `data: https://*.private.blob.vercel-storage.com` followed only by the
+  configured asset origin when present
+
 ### Requirement: Asset and upload origins
 
 The system SHALL build the application (`static` and `nonce`) media sources as
 `'self' blob: https://*.private.blob.vercel-storage.com` followed by the configured `ASSET_ORIGIN`
-(normalized to its origin) when set, and SHALL use them as follows:
+(normalized to its origin) when set, and then by the local storage origin when the `local` storage
+driver is active (see `local-object-storage`); an origin already listed SHALL NOT be repeated, and
+the local storage origin MUST NOT be listed when the effective storage driver is not `local`. The
+system SHALL use the media sources as follows:
 
 - `img-src`: media sources plus `data:`;
 - `media-src`: media sources;
@@ -148,7 +194,25 @@ The system SHALL build the application (`static` and `nonce`) media sources as
 
 #### Scenario: No asset origin configured
 
-- **WHEN** `ASSET_ORIGIN` is unset or empty
+- **WHEN** `ASSET_ORIGIN` is unset or empty and the storage driver is `vercel-blob`
+- **THEN** `img-src` is `'self' blob: https://*.private.blob.vercel-storage.com data:`
+
+#### Scenario: Local storage origin is allowed for uploads and images
+
+- **WHEN** `STORAGE_DRIVER` is `local`, `APP_URL` is `http://localhost:3000`, `ASSET_ORIGIN` is
+  unset and a Studio page is served
+- **THEN** the policy contains `connect-src 'self' blob: https://*.private.blob.vercel-storage.com http://localhost:3000 https://blob.vercel-storage.com https://vercel.com/api/blob/`
+- **AND** `img-src` and `media-src` include `http://localhost:3000`
+
+#### Scenario: Local origin equal to the asset origin is listed once
+
+- **WHEN** `STORAGE_DRIVER` is `local`, both `APP_URL` and `ASSET_ORIGIN` have the origin
+  `http://localhost:3000` and a Studio page is served
+- **THEN** `http://localhost:3000` appears exactly once in `img-src`
+
+#### Scenario: Refused local driver adds no application origin
+
+- **WHEN** `VERCEL_ENV` is `preview`, `STORAGE_DRIVER` is `local` and `ASSET_ORIGIN` is unset
 - **THEN** `img-src` is `'self' blob: https://*.private.blob.vercel-storage.com data:`
 
 ### Requirement: Development relaxations

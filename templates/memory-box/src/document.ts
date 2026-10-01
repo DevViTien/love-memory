@@ -1,0 +1,98 @@
+/**
+ * The artifact entry document. Styles are inline (template CSP `style-src 'unsafe-inline'`); the
+ * only script is the self-contained `runtime.mjs`. Theme colors arrive as `--mb-*` variables set by
+ * the runtime on `<body>`; the defaults below are the `rose-night` palette.
+ */
+export const MEMORY_BOX_DOCUMENT = `<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hộp ký ức</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        --mb-accent: #fb7185; --mb-background: #1c0f1d; --mb-box: #e11d48; --mb-focus: #fde68a;
+        --mb-lid: #fda4af; --mb-muted: #f5c6d0; --mb-on-accent: #2a0a14; --mb-surface: #2c1a2c;
+        --mb-text: #fff4f6;
+        margin: 0; min-height: 100%; color-scheme: dark;
+        background: var(--mb-background); color: var(--mb-text);
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
+        font-size: 1rem; line-height: 1.5; overflow-wrap: anywhere; word-break: normal;
+        -webkit-text-size-adjust: 100%;
+      }
+      body[data-theme="warm-paper"] { color-scheme: light; }
+      #app {
+        display: flex; flex-direction: column; align-items: center; gap: .75rem;
+        width: 100%; max-width: 36rem; min-height: 100%; margin: 0 auto; padding: 1rem;
+        text-align: center;
+      }
+      body[data-state="playing"] #app, body[data-state="paused"] #app, body[data-state="complete"] #app { height: 100%; }
+      .loading, .fatal { margin: auto; color: var(--mb-muted); }
+      .masthead { width: 100%; }
+      .title { margin: 0; font-size: 1.125rem; line-height: 1.25; font-weight: 800; }
+      .date { margin: .125rem 0 0; color: var(--mb-muted); font-size: .875rem; font-variant-numeric: tabular-nums; }
+      body[data-state="cover"] .masthead { margin-top: auto; }
+      body[data-state="cover"] .title { font-size: clamp(1.75rem, 8vw, 2.75rem); line-height: 1.15; }
+      body[data-state="cover"] .date { font-size: 1rem; }
+      .stage { display: flex; flex: 1; flex-direction: column; width: 100%; min-height: 0; }
+      .scene { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; width: 100%; min-width: 0; min-height: 0; }
+      .scene-memory { gap: .75rem; }
+      .scene-cover { justify-content: flex-start; padding-top: 1.5rem; margin-bottom: auto; }
+      .box { position: relative; width: 8rem; height: 6rem; margin: 1.75rem auto .5rem; border-radius: .9rem; background: var(--mb-box); flex: none; }
+      .box .lid { position: absolute; left: -.5rem; right: -.5rem; top: -1.25rem; height: 1.75rem; border-radius: .6rem; background: var(--mb-lid); transition: transform .8s cubic-bezier(.2,.8,.2,1), opacity .24s ease-in; }
+      .box .ribbon { position: absolute; left: calc(50% - .5rem); top: 0; bottom: 0; width: 1rem; background: var(--mb-lid); opacity: .85; }
+      .opening-message { max-width: 30rem; margin: 0; font-size: 1.25rem; line-height: 1.4; font-weight: 700; }
+      .eyebrow { margin: 0; color: var(--mb-muted); font-size: .8125rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+      .memory { display: flex; flex-direction: column; align-items: center; gap: .625rem; width: 100%; margin: 0; }
+      .memory-photo { flex: 0 1 auto; min-height: 0; gap: .5rem; }
+      .frame { width: min(100%, 20rem, 46vh); aspect-ratio: 4 / 5; overflow: hidden; border-radius: 1rem; background: var(--mb-surface); flex: none; }
+      .frame-slot { display: flex; flex: 0 1 25rem; align-items: center; justify-content: center; width: 100%; min-height: 6rem; container-type: size; }
+      .frame-slot .frame { width: auto; height: min(100cqh, 125cqw, 25rem); }
+      .photo { display: block; width: 100%; height: 100%; object-fit: cover; }
+      .text-card { display: flex; align-items: center; justify-content: center; padding: 1.25rem; border: 2px solid var(--mb-muted); overflow: visible; }
+      .text-card-caption { margin: 0; font-size: 1.125rem; line-height: 1.4; font-weight: 700; }
+      .caption { max-width: 30rem; color: var(--mb-muted); font-size: 1rem; line-height: 1.45; }
+      .letter-title { margin: 0; font-size: 1.25rem; }
+      .letter { width: 100%; max-height: 58vh; overflow-y: auto; padding: 1rem 1.125rem; border-radius: 1rem; background: var(--mb-surface); text-align: left; user-select: text; -webkit-user-select: text; flex: 0 1 auto; min-height: 6rem; }
+      .letter:focus-visible, .closing:focus-visible { outline: 3px solid var(--mb-focus); outline-offset: 3px; }
+      .letter p { margin: 0 0 .875rem; white-space: pre-line; }
+      .letter p:last-child { margin-bottom: 0; }
+      .closing { margin: 0; font-size: 1.375rem; line-height: 1.3; }
+      .closing-note { margin: 0; color: var(--mb-muted); }
+      .scene-finale { position: relative; overflow: hidden; }
+      .particles { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+      .particle { position: absolute; left: var(--x); bottom: -2rem; color: var(--mb-accent); font-size: 1.25rem; opacity: 0; animation: mb-rise 1.2s cubic-bezier(.2,.8,.2,1) var(--d) both; }
+      .next {
+        min-width: 6rem; min-height: 2.75rem; padding: .625rem 1.5rem; border: 0; border-radius: 999px;
+        background: var(--mb-accent); color: var(--mb-on-accent); font: inherit; font-weight: 800; cursor: pointer;
+      }
+      .next:focus-visible { outline: 3px solid var(--mb-focus); outline-offset: 3px; }
+      .next:disabled { cursor: default; opacity: .6; }
+      .fallback { width: 100%; text-align: left; }
+      .fallback .title { font-size: 1.5rem; }
+      .fallback .captions { padding-left: 1.25rem; color: var(--mb-muted); }
+      .fallback p { white-space: pre-line; }
+      body[data-motion="full"][data-state="cover"] .box { animation: mb-breathe 2.4s ease-in-out infinite; }
+      body[data-motion="full"] .box.open { transform: scale(1.04); }
+      body[data-motion="full"] .box.open .lid { transform: translateY(-18px) rotate(-6deg); }
+      body[data-motion="full"] .scene:not(.scene-cover) { animation: mb-enter .5s cubic-bezier(.2,.8,.2,1) both; }
+      body[data-motion="full"] .letter p { animation: mb-enter .6s cubic-bezier(.2,.8,.2,1) both; animation-delay: calc(var(--i) * 350ms); }
+      body[data-motion="reduced"] .box.open .lid { opacity: .35; }
+      body[data-motion="reduced"] .scene:not(.scene-cover) { animation: mb-fade .2s ease-out both; }
+      body[data-motion="reduced"] .particles { display: none; }
+      body[data-paused] *, body[data-paused] *::before, body[data-paused] *::after { animation-play-state: paused !important; }
+      body[data-state="failed"] *, body[data-state="failed"] *::before, body[data-state="failed"] *::after { animation: none !important; transition: none !important; }
+      @keyframes mb-breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+      @keyframes mb-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+      @keyframes mb-fade { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes mb-rise { 0% { opacity: 0; transform: translateY(0); } 30% { opacity: 1; } 100% { opacity: 0; transform: translateY(-70vh); } }
+    </style>
+  </head>
+  <body data-motion="full" data-state="loading">
+    <main id="app"><p class="loading" role="status">Đang mở món quà…</p></main>
+    <script type="module" src="runtime.mjs"></script>
+  </body>
+</html>
+`;

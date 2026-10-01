@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const sessionMocks = vi.hoisted(() => ({ getCurrentUser: vi.fn() }));
 const rateLimitMocks = vi.hoisted(() => ({ consume: vi.fn() }));
@@ -9,7 +9,7 @@ vi.mock("@/modules/auth/infrastructure/auth-environment", () => ({
 }));
 vi.mock("@/modules/gifts/infrastructure/mongo-gift-rate-limiter", async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  consumeGiftMutationRateLimit: rateLimitMocks.consume,
+  consumeApiRateLimit: rateLimitMocks.consume,
 }));
 
 import {
@@ -29,6 +29,12 @@ describe("gift route helpers", () => {
     sessionMocks.getCurrentUser.mockReset();
     rateLimitMocks.consume.mockReset();
     sessionMocks.getCurrentUser.mockResolvedValue(null);
+    // The forwarding header is trusted only on Vercel.
+    vi.stubEnv("VERCEL", "1");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("builds anonymous and authenticated accessors from server-controlled credentials", async () => {
@@ -95,6 +101,46 @@ describe("gift route helpers", () => {
 
     expect(response.status).toBe(status);
     await expect(response.json()).resolves.toHaveProperty("error.requestId", "request-1");
+  });
+
+  it("refuses edits to a non-editable template version with 409 CONFLICT", async () => {
+    const response = giftServiceErrorResponse({ code: "INVALID_STATE" }, "request-1");
+
+    expect(response.status).toBe(409);
+    const body = (await response.json()) as { error: { code: string; details?: unknown } };
+    expect(body.error.code).toBe("CONFLICT");
+    expect(body.error.details).toBeUndefined();
+  });
+
+  it("tells a revision conflict apart by details.actualRevision", async () => {
+    const response = giftServiceErrorResponse(
+      { actualRevision: 2, code: "REVISION_CONFLICT", expectedRevision: 1 },
+      "request-1",
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "CONFLICT", details: { actualRevision: 2, expectedRevision: 1 } },
+    });
+  });
+
+  it("maps the publish refusals to 403 and to 409 with a reason", async () => {
+    const forbidden = giftServiceErrorResponse({ code: "FORBIDDEN" }, "request-1");
+    expect(forbidden.status).toBe(403);
+    await expect(forbidden.json()).resolves.toMatchObject({
+      error: { code: "FORBIDDEN", message: "Publishing is not enabled for this account." },
+    });
+
+    for (const [code, reason] of [
+      ["ACCESS_POLICY_UNSUPPORTED", "ACCESS_POLICY_UNSUPPORTED"],
+      ["TEMPLATE_NOT_EDITABLE", "TEMPLATE_VERSION_NOT_EDITABLE"],
+      ["TEMPLATE_UNPUBLISHABLE", "TEMPLATE_VERSION_UNPUBLISHABLE"],
+    ] as const) {
+      const response = giftServiceErrorResponse({ code }, "request-1");
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "CONFLICT", details: { reason } },
+      });
+    }
   });
 
   it("wraps draft DTOs in the common success envelope", async () => {

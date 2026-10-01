@@ -68,4 +68,14 @@ describe("media job scheduler", () => {
     expect(mediaWorkerMode({ NODE_ENV: "production" })).toBe("trigger");
     expect(() => mediaWorkerMode({ MEDIA_WORKER_MODE: "unknown" })).toThrow();
   });
+
+  it("refuses the local storage driver with Trigger.dev workers", () => {
+    const trigger = { MEDIA_WORKER_MODE: "trigger", TRIGGER_SECRET_KEY: "tr_dev_example" };
+    expect(() => assertMediaRuntimeReady(trigger, "local")).toThrow("MEDIA_WORKER_MODE=inline");
+    expect(() =>
+      assertMediaRuntimeReady({ NODE_ENV: "production", TRIGGER_SECRET_KEY: "tr" }, "local"),
+    ).toThrow("MEDIA_WORKER_MODE=inline");
+    expect(assertMediaRuntimeReady(trigger, "vercel-blob")).toBe("trigger");
+    expect(assertMediaRuntimeReady({ MEDIA_WORKER_MODE: "inline" }, "local")).toBe("inline");
+  });
 });

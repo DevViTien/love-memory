@@ -5,7 +5,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { getPublishedTemplateById } from "@/composition/templates";
-import { toTemplateCardViewModel } from "@/modules/templates/presentation/template-card-view-model";
+import {
+  COMING_SOON_LABEL,
+  toTemplateCardViewModel,
+} from "@/modules/templates/presentation/template-card-view-model";
 
 type TemplateDetailPageProps = Readonly<{
   params: Promise<{ templateId: string }>;
@@ -76,12 +79,21 @@ export default async function TemplateDetailPage({ params }: TemplateDetailPageP
                 <dd className="mt-1 font-bold text-stone-900">{viewModel.photoRequirement}</dd>
               </div>
             </dl>
-            <Link
-              className={buttonVariants({ size: "lg" })}
-              href={`${ROUTES.studioNew}?template=${template.id}`}
-            >
-              Dùng template này
-            </Link>
+            {viewModel.comingSoon ? (
+              <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5">
+                <p className="font-black text-amber-900">{COMING_SOON_LABEL}</p>
+                <p className="mt-1 text-sm leading-6 text-amber-900">
+                  Mẫu quà này đang được hoàn thiện, bạn chưa thể tạo quà từ mẫu này.
+                </p>
+              </div>
+            ) : (
+              <Link
+                className={buttonVariants({ size: "lg" })}
+                href={`${ROUTES.studioNew}?template=${template.id}`}
+              >
+                Dùng template này
+              </Link>
+            )}
           </div>
         </div>
       </Container>

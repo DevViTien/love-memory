@@ -13,12 +13,13 @@ specified by `template-artifact-delivery`; how the catalog uses manifests is spe
 
 ### Requirement: Manifest identity, version and status
 
-The system SHALL accept a template manifest only when it is an object with exactly the keys `id`,
-`version`, `engineVersion`, `status`, `entry`, `previewFixture`, `meta`, `fields`, `capabilities`
-and `budgets`; unknown keys MUST be rejected. `id` MUST be a lowercase kebab-case identifier of 1 to
-80 characters. `version` and `engineVersion` MUST be valid Semantic Versioning 2.0.0 strings
-without leading zeroes in numeric identifiers. `status` MUST be one of `draft`, `published` or
-`retired`. The SDK SHALL expose the current engine version as `TEMPLATE_ENGINE_VERSION` = `1.0.0`.
+The system SHALL accept a template manifest only when it is an object with exactly the required keys
+`id`, `version`, `engineVersion`, `status`, `entry`, `previewFixture`, `meta`, `fields`,
+`capabilities` and `budgets`, plus the optional key `steps`; unknown keys MUST be rejected. `id`
+MUST be a lowercase kebab-case identifier of 1 to 80 characters. `version` and `engineVersion` MUST
+be valid Semantic Versioning 2.0.0 strings without leading zeroes in numeric identifiers. `status`
+MUST be one of `draft`, `published` or `retired`. The SDK SHALL expose the current engine version
+as `TEMPLATE_ENGINE_VERSION` = `1.0.0`.
 
 #### Scenario: Valid manifest
 
@@ -35,6 +36,11 @@ without leading zeroes in numeric identifiers. `status` MUST be one of `draft`, 
 
 - **WHEN** a manifest contains a key that is not part of the contract
 - **THEN** parsing fails
+
+#### Scenario: Optional steps key
+
+- **WHEN** an otherwise valid manifest contains a valid `steps` list
+- **THEN** parsing succeeds and the returned manifest keeps `steps`
 
 ### Requirement: Safe artifact paths
 
@@ -84,6 +90,8 @@ constraints SHALL be:
 - `date`: no additional properties.
 - `imageList`: `aspectRatio` as `width:height` with positive integers, `maxItems` integer from 1 to
   30, `minItems` non-negative integer not greater than `maxItems`.
+- `captionedImageList`: the same `aspectRatio`, `maxItems` and `minItems` constraints as
+  `imageList`, plus `captionMaxLength` integer from 1 to 200.
 - `theme`: `options` of 1 to 12 unique kebab-case identifiers.
 - `audio`: `source` equal to `licensedLibrary`.
 
@@ -96,7 +104,19 @@ Any other `type` MUST be rejected.
 
 #### Scenario: Invalid image list constraints
 
-- **WHEN** an `imageList` field has `aspectRatio` `0:0`, or `minItems` greater than `maxItems`
+- **WHEN** an `imageList` or `captionedImageList` field has `aspectRatio` `0:0`, or `minItems`
+  greater than `maxItems`
+- **THEN** parsing fails
+
+#### Scenario: Captioned image list definition
+
+- **WHEN** a `captionedImageList` field has `aspectRatio` `4:5`, `minItems` 3, `maxItems` 8 and
+  `captionMaxLength` 140
+- **THEN** the field is accepted
+
+#### Scenario: Invalid caption limit
+
+- **WHEN** a `captionedImageList` field has no `captionMaxLength`, or `captionMaxLength` is 0 or 201
 - **THEN** parsing fails
 
 #### Scenario: Unsupported field type
@@ -131,11 +151,21 @@ field with `required` `true` and allows other fields to be omitted. Supplied val
   `maxLength` characters.
 - `date`: an ISO calendar date (`YYYY-MM-DD`).
 - `imageList`: an array of unique UUID asset references with `minItems` to `maxItems` entries.
+- `captionedImageList`: an array of `minItems` to `maxItems` items, each an object with exactly a
+  UUID `assetId` and an optional `caption`, with no two items sharing an `assetId`. A supplied
+  `caption` is trimmed of surrounding whitespace and MUST then have 1 to `captionMaxLength`
+  characters.
 - `theme`: one of the field's `options`.
-- `audio`: a string of 1 to 160 characters.
+- `audio`: a track id, a lowercase kebab-case identifier of 1 to 80 characters. Whether the id names
+  a selectable track is checked by the gift capabilities against `licensed-audio-catalog`, not by
+  payload validation.
 
 A draft variant SHALL treat every field as optional while still validating each supplied value and
-rejecting undeclared keys.
+rejecting undeclared keys. The draft variant SHALL NOT enforce `minItems` for `imageList` and
+`captionedImageList` values: it accepts 0 to `maxItems` entries, so that a creator's images can be
+saved one at a time. Every other rule, including `maxItems`, uniqueness and the caption rules,
+applies unchanged. Each validation issue SHALL be reported with a path whose first segment is the
+field `id` it concerns, followed by item indexes and keys when the issue concerns a list item.
 
 #### Scenario: Valid complete payload
 
@@ -148,11 +178,43 @@ rejecting undeclared keys.
   a duplicated asset id, or an image reference that is not a UUID (such as a `data:` URL)
 - **THEN** validation fails
 
+#### Scenario: Captioned images normalized
+
+- **WHEN** a `captionedImageList` value is `[{ "assetId": "<uuid-1>", "caption": "  Đà Lạt 2023 🌲 " },
+{ "assetId": "<uuid-2>" }]` for a field with `minItems` 2
+- **THEN** validation succeeds, the first caption becomes `Đà Lạt 2023 🌲`, and the second item has
+  no caption
+
+#### Scenario: Rejected captioned images
+
+- **WHEN** a `captionedImageList` item has an unknown key such as `url`, an empty or whitespace-only
+  `caption`, a `caption` longer than `captionMaxLength`, or an `assetId` repeated in another item
+- **THEN** validation fails
+
+#### Scenario: Audio track id format
+
+- **WHEN** an `audio` value is `acoustic-morning`
+- **THEN** payload validation succeeds
+- **AND** the values `Acoustic Morning`, `https://example.com/song.mp3` and an empty string fail
+
 #### Scenario: Incomplete draft
 
 - **WHEN** a draft payload is `{}`
 - **THEN** draft validation succeeds
 - **AND** a draft payload with a supplied empty `shortText` value still fails
+
+#### Scenario: Draft with fewer images than the minimum
+
+- **WHEN** a draft payload sets a `captionedImageList` field with `minItems` 3 and `maxItems` 8 to
+  one valid item, or an `imageList` field with `minItems` 2 to an empty array
+- **THEN** draft validation succeeds
+- **AND** full payload validation of the same values fails
+
+#### Scenario: Draft still enforces the maximum and uniqueness
+
+- **WHEN** a draft payload sets an `imageList` field with `maxItems` 5 to six UUIDs, or to two
+  equal UUIDs
+- **THEN** draft validation fails with an issue whose path starts with that field's `id`
 
 ### Requirement: Build budget enforcement
 
@@ -179,8 +241,9 @@ The system SHALL, in the test suite run by CI, discover every directory under `t
 unless each one provides `template.manifest.json`, `dist/build-metrics.json`, `dist/artifact.json`
 and `dist/manifest.json`. For each template the gate MUST verify that the manifest is valid, its
 `id` equals the directory name, its `entry` and `previewFixture` files exist in `dist/`, the preview
-fixture passes full payload validation, the measured metrics are within budget, `artifact.json`
-has a 64-character lowercase hexadecimal `contentHash` and the manifest's `id` and `version`, and
+fixture passes full payload validation, every `audio` value in the preview fixture names a track in
+the licensed audio catalog, the measured metrics are within budget, `artifact.json` has a
+64-character lowercase hexadecimal `contentHash` and the manifest's `id` and `version`, and
 `dist/manifest.json` equals the source manifest. Templates SHALL be built before this gate runs.
 
 #### Scenario: Conforming template
@@ -194,7 +257,55 @@ has a 64-character lowercase hexadecimal `contentHash` and the manifest's `id` a
   fails validation, or its manifest `id` differs from its directory name
 - **THEN** the CI test run fails
 
+#### Scenario: Fixture references an unknown track
+
+- **WHEN** a template's preview fixture sets its `audio` field to an id that is not in the licensed
+  audio catalog
+- **THEN** the CI test run fails naming the template and the unknown track id
+
 #### Scenario: Missing build output
 
 - **WHEN** a template directory lacks `dist/build-metrics.json` or `dist/artifact.json`
 - **THEN** the CI test run fails naming the missing file
+
+### Requirement: Studio steps
+
+The system SHALL accept an optional top-level `steps` list that groups the manifest's fields into
+ordered Studio steps. When present, `steps` MUST contain 1 to 8 entries, each an object with exactly
+`id` (kebab-case, 1 to 80 characters, unique among steps), `label` (1 to 40 characters) and
+`fieldIds` (1 to 40 field ids). A step `id` MUST NOT be `preview` or `publish`, which the Studio
+reserves for its own steps. Every id in `fieldIds` MUST name a field declared in `fields`, and
+every declared field MUST appear in exactly one step. Unknown step keys MUST be rejected. The
+order of `steps`, and the order of `fieldIds` inside a step, SHALL be the order in which the
+Studio presents them. When `steps` is absent, the SDK SHALL resolve the manifest to a single
+step with `id` `content`, `label` `Nội dung` and every field id in declaration order.
+
+#### Scenario: Fields grouped into steps
+
+- **WHEN** a manifest declares fields `receiver-name`, `memories` and `final-letter`, and `steps`
+  `[{ id: "recipient", label: "Người nhận", fieldIds: ["receiver-name"] }, { id: "story", label:
+"Câu chuyện", fieldIds: ["memories", "final-letter"] }]`
+- **THEN** parsing succeeds and the resolved steps are `recipient` followed by `story`, with
+  `memories` before `final-letter`
+
+#### Scenario: Manifest without steps
+
+- **WHEN** a manifest with fields `headline`, `photos` and `final-message` has no `steps` key
+- **THEN** the resolved steps are one step `content` labelled `Nội dung` containing `headline`,
+  `photos` and `final-message` in that order
+
+#### Scenario: Unassigned, duplicated or unknown field id
+
+- **WHEN** `steps` omits a declared field, lists the same field id in two steps, or lists a field
+  id that `fields` does not declare
+- **THEN** parsing fails
+
+#### Scenario: Duplicate step id or too many steps
+
+- **WHEN** two steps share an `id`, or `steps` has 9 entries
+- **THEN** parsing fails
+
+#### Scenario: Reserved step id
+
+- **WHEN** a manifest declares a step with `id` `preview` or `publish`
+- **THEN** parsing fails

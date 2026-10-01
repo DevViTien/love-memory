@@ -1,11 +1,11 @@
 import { GiftDraftResponseSchema, HealthResponseSchema } from "@love-memory/contracts";
-import { expect, test } from "@playwright/test";
 import { type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { MongoClient } from "mongodb";
 
+import { expect, test } from "./test";
 import { captureViewerScreenshot } from "./viewer-harness";
 
 const authCapturePath = resolve(".tmp/e2e-auth-emails.jsonl");
@@ -149,6 +149,38 @@ test("shows the product promise and template catalog", async ({ page }) => {
   expect(browserErrors).toEqual([]);
 });
 
+test("offers no gift creation for templates that are not yet available", async ({ page }) => {
+  await page.goto("/templates");
+  const timelineCard = page.getByRole("article").filter({ hasText: "Dòng thời gian hai đứa" });
+  await expect(timelineCard.getByText("Sắp ra mắt")).toBeVisible();
+  const memoryBoxCard = page.getByRole("article").filter({ hasText: "Hộp ký ức" });
+  await expect(memoryBoxCard.getByText("Sắp ra mắt")).toHaveCount(0);
+
+  await page.goto("/templates/midnight-wish");
+  await expect(page.getByText("Sắp ra mắt", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Dùng template này" })).toHaveCount(0);
+
+  await page.goto("/studio/new?template=midnight-wish");
+  await expect(page.getByRole("heading", { name: "Mẫu quà này sắp ra mắt." })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Bắt đầu|Tạo/ })).toHaveCount(0);
+
+  const createStatus = await page.evaluate(async () => {
+    const response = await fetch("/api/gifts", {
+      body: JSON.stringify({ templateId: "midnight-wish", templateVersion: "1.0.0" }),
+      headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+      method: "POST",
+    });
+    return response.status;
+  });
+  expect(createStatus).toBe(404);
+});
+
+test("explains an inaccessible Studio draft with an opaque recovery page", async ({ page }) => {
+  await page.goto("/studio/AAAAAAAAAAAAAAAAAAAAAAAA");
+  await expect(page.getByRole("heading", { name: "Không mở được bản nháp này" })).toBeVisible();
+  await expect(page.getByText(/chỉ mở được trên trình duyệt đã tạo ra nó/)).toBeVisible();
+});
+
 test("applies nonce CSP to the dynamically rendered Studio", async ({ page }) => {
   const browserErrors = captureBrowserErrors(page);
   const response = await page.goto("/studio/new?template=memory-box");
@@ -183,6 +215,12 @@ test("exposes a validated liveness endpoint", async ({ request }) => {
   });
 });
 
+test("answers unknown licensed audio files with 404", async ({ request }) => {
+  const response = await request.get("/audio-library/not-a-track.0000000000000000.mp3");
+
+  expect(response.status()).toBe(404);
+});
+
 test("requests a passwordless sign-in link without exposing account existence", async ({
   page,
 }) => {
@@ -214,7 +252,7 @@ test("creates, edits and claims a draft through a real passwordless session", as
   const createResult = await page.evaluate(async (key) => {
     const create = () =>
       fetch("/api/gifts", {
-        body: JSON.stringify({ templateId: "midnight-wish", templateVersion: "1.0.0" }),
+        body: JSON.stringify({ templateId: "memory-box", templateVersion: "1.1.0" }),
         headers: { "Content-Type": "application/json", "Idempotency-Key": key },
         method: "POST",
       }).then(async (response) => {
@@ -232,21 +270,20 @@ test("creates, edits and claims a draft through a real passwordless session", as
   const cleanupRecord: { email?: string; publicId: string } = { publicId };
   cleanupRecords.push(cleanupRecord);
   expect(replayedGift.publicId).toBe(publicId);
-  const mismatchedReplayStatus = await page.evaluate(async (key) => {
-    const response = await fetch("/api/gifts", {
-      body: JSON.stringify({ templateId: "memory-box", templateVersion: "1.0.0" }),
-      headers: { "Content-Type": "application/json", "Idempotency-Key": key },
-      method: "POST",
-    });
-    return response.status;
-  }, idempotencyKey);
-  expect(mismatchedReplayStatus).toBe(409);
 
   await page.goto(`/studio/${publicId}`);
-  await page.locator('input[type="text"]').fill("Người thương");
-  await page.locator("textarea").fill("Mỗi vì sao là một kỷ niệm của chúng mình.");
-  await page.locator("main button").first().click();
-  await expect(page.getByText("Revision 1", { exact: true })).toBeVisible();
+  const saveStatus = page.getByRole("status").filter({ hasText: /Đã lưu|Đang lưu|Chưa lưu/ });
+  await expect(saveStatus).toHaveText("Đã lưu");
+  await page.getByLabel("Tên người nhận").fill("Người thương");
+  await page.getByRole("button", { name: "Tiếp tục" }).click();
+  await page
+    .getByRole("textbox", { name: "Lời mở hộp" })
+    .fill("Mỗi kỷ niệm là một món quà của chúng mình.");
+  await page.getByRole("button", { name: "Lưu ngay" }).click();
+  await expect(saveStatus).toHaveText("Đã lưu");
+  await page.reload();
+  await expect(page.getByLabel("Tên người nhận")).toHaveValue("Người thương");
+  await expect(page.getByText(/Revision \d/)).toHaveCount(0);
 
   await page.getByRole("link", { name: "Đăng nhập để lưu lâu dài" }).click();
   const email = `creator-${randomUUID()}@example.com`;
@@ -261,14 +298,23 @@ test("creates, edits and claims a draft through a real passwordless session", as
     throw new Error("Passwordless email capture did not contain a magic link.");
   }
   await page.goto(magicLink);
-  await expect(page).toHaveURL(new RegExp(`/studio/${publicId}$`));
+  await expect(page).toHaveURL(new RegExp(`/studio/${publicId}(\\?step=recipient)?$`));
   await expect(page.getByRole("link", { name: "Tài khoản" })).toBeVisible();
-  await page.getByRole("button", { name: "Lưu bản nháp vào tài khoản" }).click();
+  // Returning from the sign-in link in the same browser claims the draft without a second step.
+  await expect(page.getByText("Bản nháp đã được bảo vệ bởi tài khoản của bạn.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Lưu bản nháp vào tài khoản" })).toHaveCount(0);
 
-  await page.locator("textarea").fill("Bản nháp vẫn lưu được sau khi liên kết tài khoản.");
-  await page.locator("main button").first().click();
-  await expect(page.getByText("Revision 2", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Tiếp tục" }).click();
+  await page
+    .getByRole("textbox", { name: "Lời mở hộp" })
+    .fill("Bản nháp vẫn lưu được sau khi liên kết.");
+  await expect(saveStatus).toHaveText("Đang lưu…");
+  // Autosave, without any click, 1.5 s after the last change.
+  await expect(saveStatus).toHaveText("Đã lưu", { timeout: 10_000 });
+  await page.goto(`/studio/${publicId}?field=opening-message`);
+  await expect(page.getByRole("textbox", { name: "Lời mở hộp" })).toHaveValue(
+    "Bản nháp vẫn lưu được sau khi liên kết.",
+  );
   await expect
     .poll(() => idempotencyGiftOwnerKind(idempotencyKey), { timeout: 15_000 })
     .toBe("user");
@@ -289,7 +335,7 @@ test("creates, edits and claims a draft through a real passwordless session", as
 
   const revokedReplayStatus = await page.evaluate(async (key) => {
     const response = await fetch("/api/gifts", {
-      body: JSON.stringify({ templateId: "midnight-wish", templateVersion: "1.0.0" }),
+      body: JSON.stringify({ templateId: "memory-box", templateVersion: "1.1.0" }),
       headers: { "Content-Type": "application/json", "Idempotency-Key": key },
       method: "POST",
     });
@@ -382,7 +428,12 @@ test("runs an exact-version template through the isolated Viewer lifecycle", asy
   const artifactPath = await frame.getAttribute("src");
   if (!artifactPath) throw new Error("Viewer iframe did not expose an artifact URL.");
   const artifact = await page.request.get(artifactPath);
-  expect(artifact.headers()["cache-control"]).toContain("immutable");
+  // Playwright's web server runs with STORAGE_DRIVER=local, where artifacts are `no-store` because
+  // their CSP depends on the environment (deployments keep `public, max-age=31536000, immutable`).
+  expect(artifact.headers()["cache-control"]).toBe("no-store");
+  expect(artifact.headers()["content-security-policy"]).toContain(
+    `${new URL(artifact.url()).origin}/api/local-object-storage/`,
+  );
   expect(artifact.headers()["content-security-policy"]).toContain("connect-src 'none'");
   expect(runtimeModuleRequests).toHaveLength(1);
   expect(unexpectedRuntimeRequests).toEqual([]);

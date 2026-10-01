@@ -29,3 +29,9 @@ apps/web/next-env.d.ts
 *.log
 npm-debug.log*
 pnpm-debug.log*
+
+# Interrupted template release runs (scripts/release-files.mjs stages here)
+templates/*/releases/.staging-*
+
+# Claude Code subagent worktrees
+.claude/worktrees/

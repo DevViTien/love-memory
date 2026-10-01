@@ -1,3 +1,4 @@
+import { type StorageDriver } from "@love-memory/storage";
 import { idempotencyKeys, tasks } from "@trigger.dev/sdk";
 
 export type MediaJobSource = "retry" | "upload-complete";
@@ -14,10 +15,15 @@ export function mediaWorkerMode(
 
 export function assertMediaRuntimeReady(
   environment: Readonly<Record<string, string | undefined>>,
+  storageDriver: StorageDriver = "vercel-blob",
 ): MediaWorkerMode {
   const mode = mediaWorkerMode(environment);
   if (mode === "trigger" && !environment["TRIGGER_SECRET_KEY"]) {
     throw new Error("TRIGGER_SECRET_KEY is required when MEDIA_WORKER_MODE=trigger.");
+  }
+  if (mode === "trigger" && storageDriver === "local") {
+    // Trigger.dev workers run elsewhere and cannot read the developer's local object directory.
+    throw new Error("The local storage driver requires MEDIA_WORKER_MODE=inline.");
   }
   return mode;
 }

@@ -28,8 +28,13 @@ const fallbackVisual = {
   icon: "💝",
 } as const;
 
+/** The badge of a template whose current version has no registered artifact yet. */
+export const COMING_SOON_LABEL = "Sắp ra mắt";
+
 export type TemplateCardViewModel = TemplateSummary &
   Readonly<{
+    /** No registered artifact: shown with `Sắp ra mắt`, and no gift can be created from it. */
+    comingSoon: boolean;
     durationLabel: string;
     gradient: string;
     icon: string;
@@ -46,6 +51,7 @@ export function toTemplateCardViewModel(template: TemplateSummary): TemplateCard
 
   return {
     ...template,
+    comingSoon: !template.available,
     durationLabel: `Khoảng ${template.estimatedDurationSec} giây`,
     moodLabel,
     photoRequirement,

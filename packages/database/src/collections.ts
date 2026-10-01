@@ -11,6 +11,7 @@ export const COLLECTIONS = {
   jobOutbox: "jobOutbox",
   orders: "orders",
   paymentAttempts: "paymentAttempts",
+  previewTokens: "previewTokens",
   reactions: "reactions",
   sessions: "sessions",
   templateVersions: "templateVersions",
@@ -18,6 +19,8 @@ export const COLLECTIONS = {
   technicalSpikes: "technicalSpikes",
   users: "users",
   verifications: "verifications",
+  giftPublications: "giftPublications",
+  analyticsEvents: "analyticsEvents",
 } as const;
 
 export type CollectionName = (typeof COLLECTIONS)[keyof typeof COLLECTIONS];

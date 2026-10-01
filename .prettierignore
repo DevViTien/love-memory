@@ -5,5 +5,7 @@ node_modules
 playwright-report
 pnpm-lock.yaml
 test-results
+templates/*/releases/**
 .claude/commands/opsx
 .claude/skills/openspec-*
+.claude/worktrees

@@ -1,6 +1,10 @@
+import { SlugSchema } from "@love-memory/shared";
 import { z } from "zod";
 
 export const TEMPLATE_MESSAGE_PROTOCOL_VERSION = 1;
+
+/** Content a template could not show; an `ISSUE` never carries gift content. */
+export const TEMPLATE_ISSUE_CODES = ["ASSET_UNAVAILABLE", "CONTENT_MISSING"] as const;
 
 const TemplatePayloadSchema = z.record(z.string(), z.json());
 
@@ -39,10 +43,21 @@ export const TemplateEventSchema = z.discriminatedUnion("type", [
       type: z.literal("ERROR"),
     })
     .strict(),
+  z
+    .object({
+      code: z.enum(TEMPLATE_ISSUE_CODES),
+      fieldId: SlugSchema,
+      // Image fields declare at most 30 items, so item indexes stop at 29.
+      itemIndex: z.int().min(0).max(29).optional(),
+      protocolVersion: z.literal(TEMPLATE_MESSAGE_PROTOCOL_VERSION),
+      type: z.literal("ISSUE"),
+    })
+    .strict(),
 ]);
 
 export type TemplateEvent = z.infer<typeof TemplateEventSchema>;
 export type TemplateHostMessage = z.infer<typeof TemplateHostMessageSchema>;
+export type TemplateIssueEvent = Extract<TemplateEvent, { type: "ISSUE" }>;
 export type TemplateMessagePayload = z.input<typeof TemplatePayloadSchema>;
 
 export function readTrustedTemplateEvent(

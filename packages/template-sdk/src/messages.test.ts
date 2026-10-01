@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createTemplateBridge,
   readTrustedTemplateEvent,
+  TEMPLATE_ISSUE_CODES,
   TEMPLATE_MESSAGE_PROTOCOL_VERSION,
   TemplateEventSchema,
   TemplateHostMessageSchema,
@@ -75,5 +76,60 @@ describe("template message protocol", () => {
       }),
     );
     expect(unsubscribe).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("template ISSUE event", () => {
+  const issue = {
+    code: "ASSET_UNAVAILABLE",
+    fieldId: "memories",
+    itemIndex: 1,
+    protocolVersion: TEMPLATE_MESSAGE_PROTOCOL_VERSION,
+    type: "ISSUE",
+  } as const;
+
+  it("accepts a valid issue with and without an item index", () => {
+    expect(TemplateEventSchema.parse(issue)).toEqual(issue);
+    expect(
+      TemplateEventSchema.safeParse({
+        code: "CONTENT_MISSING",
+        fieldId: "final-letter",
+        protocolVersion: TEMPLATE_MESSAGE_PROTOCOL_VERSION,
+        type: "ISSUE",
+      }).success,
+    ).toBe(true);
+    expect(TEMPLATE_ISSUE_CODES).toEqual(["ASSET_UNAVAILABLE", "CONTENT_MISSING"]);
+  });
+
+  it.each([
+    ["an unknown code", { ...issue, code: "BROKEN" }],
+    ["a negative item index", { ...issue, itemIndex: -1 }],
+    ["a fractional item index", { ...issue, itemIndex: 1.5 }],
+    ["an item index above 29", { ...issue, itemIndex: 30 }],
+    ["an uppercase field id", { ...issue, fieldId: "Memories" }],
+    ["an empty field id", { ...issue, fieldId: "" }],
+    ["a field id longer than 80 characters", { ...issue, fieldId: "a".repeat(81) }],
+    ["a missing protocol version", { code: issue.code, fieldId: issue.fieldId, type: "ISSUE" }],
+    ["a wrong protocol version", { ...issue, protocolVersion: 2 }],
+    ["an extra property", { ...issue, caption: "Đà Lạt" }],
+  ])("rejects an issue with %s", (_case, data) => {
+    expect(TemplateEventSchema.safeParse(data).success).toBe(false);
+  });
+
+  it("ignores an issue from another window", () => {
+    const expectedSource = {} as MessageEventSource;
+
+    expect(
+      readTrustedTemplateEvent(
+        { data: issue, source: expectedSource } as MessageEvent<unknown>,
+        expectedSource,
+      ),
+    ).toEqual(issue);
+    expect(
+      readTrustedTemplateEvent(
+        { data: issue, source: {} as MessageEventSource } as MessageEvent<unknown>,
+        expectedSource,
+      ),
+    ).toBeUndefined();
   });
 });

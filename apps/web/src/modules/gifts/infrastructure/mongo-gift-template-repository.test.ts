@@ -1,7 +1,7 @@
 import type * as DatabaseModule from "@love-memory/database";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { seedTemplateManifests } from "../../templates/infrastructure/seed-template-catalog";
+import { seedTemplateVersionManifests } from "../../templates/infrastructure/seed-template-catalog";
 
 const databaseMocks = vi.hoisted(() => ({ getDatabase: vi.fn() }));
 
@@ -18,7 +18,7 @@ describe("Mongo gift template repository", () => {
     databaseMocks.getDatabase.mockResolvedValue({
       collection: () => ({
         findOne: (filter: Readonly<{ templateId: string; version: string }>) => {
-          const manifest = seedTemplateManifests.find(
+          const manifest = seedTemplateVersionManifests.find(
             (candidate) =>
               candidate.id === filter.templateId && candidate.version === filter.version,
           );
@@ -50,5 +50,19 @@ describe("Mongo gift template repository", () => {
     await expect(
       mongoGiftTemplateRepository.findEditableManifest("memory-box", "1.0.0"),
     ).resolves.toMatchObject({ id: "memory-box", version: "1.0.0" });
+  });
+
+  it("never resolves a draft-status version for editing", async () => {
+    const findOne = vi.fn(() => Promise.resolve(null));
+    databaseMocks.getDatabase.mockResolvedValue({ collection: () => ({ findOne }) });
+
+    await expect(
+      mongoGiftTemplateRepository.findEditableManifest("memory-box", "1.1.0"),
+    ).resolves.toBeNull();
+    expect(findOne).toHaveBeenCalledWith({
+      status: { $in: ["published", "retired"] },
+      templateId: "memory-box",
+      version: "1.1.0",
+    });
   });
 });

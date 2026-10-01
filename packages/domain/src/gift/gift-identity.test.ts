@@ -4,6 +4,7 @@ import {
   GiftTemplateIdSchema,
   GiftTemplateVersionSchema,
   PublicGiftIdSchema,
+  ShareIdSchema,
 } from "./gift-identity";
 
 describe("gift identity schemas", () => {
@@ -19,4 +20,15 @@ describe("gift identity schemas", () => {
     expect(GiftTemplateIdSchema.parse("memory-box")).toBe("memory-box");
     expect(GiftTemplateVersionSchema.parse("1.2.0-beta.1")).toBe("1.2.0-beta.1");
   });
+
+  it("accepts a share id of exactly 22 base64url characters", () => {
+    expect(ShareIdSchema.parse("Ab0_-cdefghijklmnopqrs")).toBe("Ab0_-cdefghijklmnopqrs");
+  });
+
+  it.each(["a".repeat(21), "a".repeat(23), "+".repeat(22), "a".repeat(21) + "="])(
+    "rejects share id %s",
+    (shareId) => {
+      expect(ShareIdSchema.safeParse(shareId).success).toBe(false);
+    },
+  );
 });

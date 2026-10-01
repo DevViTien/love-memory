@@ -1,7 +1,7 @@
 import type * as DatabaseModule from "@love-memory/database";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { seedTemplateManifests } from "./seed-template-catalog";
+import { seedTemplateCurrentManifests } from "./seed-template-catalog";
 
 const databaseMocks = vi.hoisted(() => ({ getDatabase: vi.fn() }));
 
@@ -13,7 +13,7 @@ vi.mock("@love-memory/database", async (importOriginal) => ({
 import { mongoTemplateCatalog } from "./mongo-template-catalog";
 
 describe("Mongo template catalog", () => {
-  const documents = seedTemplateManifests.map((manifest) => ({
+  const documents = seedTemplateCurrentManifests.map((manifest) => ({
     manifest,
     status: "published" as const,
     templateId: manifest.id,
@@ -109,5 +109,43 @@ describe("Mongo template catalog", () => {
     await expect(mongoTemplateCatalog.findPublishedById("memory-box")).resolves.toMatchObject({
       version: "2.0.0",
     });
+  });
+
+  function mockSingleTemplate(manifest: (typeof documents)[number]["manifest"]) {
+    const template = { _id: manifest.id, currentVersion: manifest.version, sortOrder: 0 };
+    const version = {
+      manifest,
+      status: "published",
+      templateId: manifest.id,
+      version: manifest.version,
+    };
+    databaseMocks.getDatabase.mockResolvedValue({
+      collection: (name: string) =>
+        name === "templates"
+          ? { findOne: () => Promise.resolve({ ...template, status: "published" }) }
+          : { findOne: () => Promise.resolve(version) },
+    });
+  }
+
+  it("derives the photo requirement from a captioned image field", async () => {
+    // memory-box 1.1.0 declares its photos as the captionedImageList field `memories`.
+    const memoryBox = documents[0]!.manifest;
+    expect(memoryBox.fields.find((field) => field.id === "memories")?.type).toBe(
+      "captionedImageList",
+    );
+    mockSingleTemplate(memoryBox);
+
+    await expect(mongoTemplateCatalog.findPublishedById("memory-box")).resolves.toMatchObject({
+      imageRequirement: { maxItems: 8, minItems: 3 },
+    });
+  });
+
+  it("omits the photo requirement when no image field is declared", async () => {
+    mockSingleTemplate(documents[2]!.manifest);
+
+    const summary = await mongoTemplateCatalog.findPublishedById("midnight-wish");
+
+    expect(summary?.id).toBe("midnight-wish");
+    expect(summary).not.toHaveProperty("imageRequirement");
   });
 });

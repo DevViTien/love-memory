@@ -1,8 +1,12 @@
+import { LOCAL_OBJECT_ROUTE_PATH } from "@love-memory/storage";
+
 export type ContentSecurityPolicyMode = "nonce" | "static" | "template";
 
 export type ContentSecurityPolicyOptions = Readonly<{
   assetOrigin?: string;
   isDevelopment: boolean;
+  /** The local object storage origin; set only while the `local` storage driver is active. */
+  localStorageOrigin?: string | undefined;
   mode: ContentSecurityPolicyMode;
   nonce?: string;
 }>;
@@ -23,15 +27,22 @@ export function getContentSecurityPolicyMode(pathname: string): ContentSecurityP
   return pathname === "/studio" ||
     pathname.startsWith("/studio/") ||
     pathname.startsWith("/viewer/") ||
+    pathname === "/preview" ||
+    pathname.startsWith("/preview/") ||
     pathname === "/g" ||
     pathname.startsWith("/g/")
     ? "nonce"
     : "static";
 }
 
+function uniqueSources(sources: ReadonlyArray<string | undefined>): string {
+  return [...new Set(sources.filter((source): source is string => Boolean(source)))].join(" ");
+}
+
 export function createContentSecurityPolicy({
   assetOrigin,
   isDevelopment,
+  localStorageOrigin,
   mode,
   nonce,
 }: ContentSecurityPolicyOptions): string {
@@ -40,6 +51,10 @@ export function createContentSecurityPolicy({
   }
 
   if (mode === "template") {
+    // Templates may load only signed local object URLs, not every route of the application origin.
+    const localObjectSource = localStorageOrigin
+      ? `${localStorageOrigin}${LOCAL_OBJECT_ROUTE_PATH}`
+      : undefined;
     return [
       "default-src 'none'",
       "base-uri 'none'",
@@ -47,7 +62,7 @@ export function createContentSecurityPolicy({
       "font-src 'none'",
       "form-action 'none'",
       "frame-ancestors 'self'",
-      `img-src data: ${[VERCEL_PRIVATE_BLOB_ORIGIN, assetOrigin].filter(Boolean).join(" ")}`,
+      `img-src data: ${uniqueSources([VERCEL_PRIVATE_BLOB_ORIGIN, assetOrigin, localObjectSource])}`,
       "media-src 'none'",
       "object-src 'none'",
       "script-src 'self'",
@@ -56,9 +71,13 @@ export function createContentSecurityPolicy({
     ].join("; ");
   }
 
-  const assetSources = ["'self'", "blob:", VERCEL_PRIVATE_BLOB_ORIGIN, assetOrigin]
-    .filter(Boolean)
-    .join(" ");
+  const assetSources = uniqueSources([
+    "'self'",
+    "blob:",
+    VERCEL_PRIVATE_BLOB_ORIGIN,
+    assetOrigin,
+    localStorageOrigin,
+  ]);
   const connectSources = [
     assetSources,
     VERCEL_BLOB_CONTROL_ORIGIN,

@@ -82,7 +82,7 @@ export function serializeAnonymousDraftCookie(identity: AnonymousDraftIdentity):
   return `${ANONYMOUS_DRAFT_COOKIE}=${identity.anonymousDraftId}.${identity.claimToken}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax${secure}`;
 }
 
-export function readCookie(request: Request, name: string): string | undefined {
+export function readCookie(request: Pick<Request, "headers">, name: string): string | undefined {
   const cookieHeader = request.headers.get("cookie");
   if (!cookieHeader) {
     return undefined;

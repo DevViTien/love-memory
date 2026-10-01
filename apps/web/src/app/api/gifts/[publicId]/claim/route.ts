@@ -11,6 +11,7 @@ import {
   readJsonBody,
   validateJsonMutationRequest,
 } from "@/http/api-response";
+import { reportOperationalFailure } from "@/observability/operational-errors";
 import {
   enforceGiftMutationRateLimit,
   getGiftRequestContext,
@@ -56,8 +57,8 @@ export async function POST(request: Request, routeContext: ClaimRouteContext): P
     return result.ok
       ? giftDraftResponse(result.data, id)
       : giftServiceErrorResponse(result.error, id);
-  } catch {
-    console.error(JSON.stringify({ event: "gift_draft_claim_failed", requestId: id }));
+  } catch (error) {
+    reportOperationalFailure("gift_draft_claim", error, id);
     return createApiErrorResponse({
       code: API_ERROR_CODES.internal,
       message: "The gift draft could not be claimed.",

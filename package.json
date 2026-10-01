@@ -12,7 +12,7 @@
   },
   "scripts": {
     "build": "turbo run build",
-    "build:templates": "pnpm --filter @love-memory/template-memory-box-spike build",
+    "build:templates": "pnpm --filter \"./templates/*\" build",
     "db:migrate": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local --conditions=react-server --import tsx scripts/database.ts migrate",
     "db:seed": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local --conditions=react-server --import tsx scripts/database.ts seed",
     "db:verify": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local --conditions=react-server --import tsx scripts/database.ts verify",
@@ -30,8 +30,9 @@
     "start": "pnpm --filter @love-memory/web start",
     "test": "pnpm build:templates && vitest run",
     "test:coverage": "pnpm build:templates && vitest run --coverage",
-    "test:e2e": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local node_modules/@playwright/test/cli.js test --project=chromium --project=mobile-chromium",
-    "test:e2e:chrome": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local node_modules/@playwright/test/cli.js test --project=installed-chrome --workers=1",
+    "test:e2e": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local node_modules/@playwright/test/cli.js test --project=chromium --project=mobile-chromium --grep-invert @perf",
+    "test:e2e:chrome": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local node_modules/@playwright/test/cli.js test --project=installed-chrome --workers=1 --grep-invert @perf",
+    "test:e2e:perf": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local node_modules/@playwright/test/cli.js test --grep @perf --project=mobile-chromium --workers=1",
     "test:secrets": "node scripts/check-secrets.mjs",
     "test:spikes": "node scripts/verify-live-spikes.mjs",
     "test:watch": "vitest",
@@ -47,6 +48,7 @@
     }
   },
   "devDependencies": {
+    "@love-memory/domain": "workspace:*",
     "@love-memory/template-sdk": "workspace:*",
     "@playwright/test": "catalog:",
     "@testing-library/dom": "catalog:",

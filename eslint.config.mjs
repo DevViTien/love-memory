@@ -93,6 +93,35 @@ export default defineConfig([
     },
   },
   {
+    files: ["apps/*/src/modules/*/presentation/**/*.{ts,tsx}"],
+    ignores: [
+      "**/*.test.{ts,tsx}",
+      "**/test/**",
+      // Known exceptions, moved behind composition in Sprint 4 (docs/sprints/sprint-3-review.md,
+      // A19): the generic rate limiter still lives in gifts/infrastructure. Do not add entries.
+      "apps/web/src/modules/gifts/presentation/gift-route-helpers.ts",
+      "apps/web/src/modules/public-gifts/presentation/public-gift-route-handler.ts",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "../infrastructure/*",
+                "../../infrastructure/*",
+                "@/modules/*/infrastructure/*",
+              ],
+              message:
+                "Presentation code depends on application services and ports; wire infrastructure in apps/web/src/composition.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ["**/*.test.{ts,tsx}", "**/test/**/*.{ts,tsx}"],
     rules: {
       "@typescript-eslint/no-non-null-assertion": "off",
@@ -107,5 +136,9 @@ export default defineConfig([
     "**/playwright-report/**",
     "**/test-results/**",
     "**/next-env.d.ts",
+    // Committed template releases are immutable bytes; tools never rewrite them.
+    "templates/*/releases/**",
+    // Claude Code subagent worktrees are separate checkouts with their own tooling runs.
+    ".claude/worktrees/**",
   ]),
 ]);

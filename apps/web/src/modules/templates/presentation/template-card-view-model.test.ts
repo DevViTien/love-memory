@@ -11,10 +11,12 @@ describe("template card view model", () => {
       imageRequirement: { maxItems: 8, minItems: 3 },
       moods: ["warm", "playful"],
       name: "Memory Box",
+      available: true,
       version: "1.0.0",
     });
 
     expect(viewModel).toMatchObject({
+      comingSoon: false,
       durationLabel: "Khoảng 75 giây",
       icon: "🎁",
       moodLabel: "Ấm áp · Bất ngờ",
@@ -29,6 +31,7 @@ describe("template card view model", () => {
       id: "new-template",
       moods: ["new-mood"],
       name: "New",
+      available: true,
       version: "1.0.0",
     });
 
@@ -37,5 +40,19 @@ describe("template card view model", () => {
       moodLabel: "new-mood",
       photoRequirement: "Không bắt buộc",
     });
+  });
+
+  it("marks a template without a registered artifact as coming soon", () => {
+    const viewModel = toTemplateCardViewModel({
+      available: false,
+      description: "Story",
+      estimatedDurationSec: 90,
+      id: "midnight-wish",
+      moods: ["dreamy"],
+      name: "Bầu trời lời nhắn",
+      version: "1.0.0",
+    });
+
+    expect(viewModel).toMatchObject({ comingSoon: true, icon: "✨" });
   });
 });

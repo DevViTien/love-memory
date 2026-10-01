@@ -66,6 +66,10 @@ export class ObjectNotFoundError extends Error {
   override readonly name = "ObjectNotFoundError";
 }
 
+export class ObjectAlreadyExistsError extends Error {
+  override readonly name = "ObjectAlreadyExistsError";
+}
+
 export class StoredObjectTooLargeError extends Error {
   override readonly name = "StoredObjectTooLargeError";
 }

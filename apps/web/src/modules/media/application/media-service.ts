@@ -5,7 +5,7 @@ import {
   type MediaAssetDerivative,
 } from "@love-memory/domain";
 import { ObjectNotFoundError, type ObjectStorage } from "@love-memory/storage";
-import { type TemplateManifest } from "@love-memory/template-sdk";
+import { isImageField, type TemplateManifest } from "@love-memory/template-sdk";
 
 import { type GiftAccessor } from "@/modules/gifts/application/gift-service";
 
@@ -32,8 +32,14 @@ export interface MediaAssetRepository {
   releaseInitiated: (assetId: string, now: Date) => Promise<boolean>;
   findById: (assetId: string) => Promise<MediaAsset | null>;
   listByGiftId: (giftId: string) => Promise<readonly MediaAsset[]>;
+  /** Exactly these assets of the gift (a publication snapshot), filtered by the gift id. */
+  listByIdsForGift: (giftId: string, assetIds: readonly string[]) => Promise<readonly MediaAsset[]>;
   markDeleted: (assetId: string, now: Date) => Promise<boolean>;
-  markDeleting: (assetId: string, now: Date) => Promise<MediaAsset | null>;
+  /**
+   * Moves an asset to `deleting` in one transaction with the check that its gift is still a
+   * `draft`, so a deletion can never interleave with a publish of that gift.
+   */
+  markDeleting: (assetId: string, giftId: string, now: Date) => Promise<MarkDeletingResult>;
   markFailed: (
     assetId: string,
     failureCode: NonNullable<MediaAsset["failureCode"]>,
@@ -42,6 +48,11 @@ export interface MediaAssetRepository {
   markUploadedAndEnqueue: (assetId: string, now: Date) => Promise<MediaAsset | null>;
   requeue: (assetId: string, now: Date) => Promise<MediaAsset | null>;
 }
+
+export type MarkDeletingResult =
+  | Readonly<{ asset: MediaAsset; kind: "deleting" }>
+  | Readonly<{ kind: "asset-unavailable" }>
+  | Readonly<{ kind: "gift-not-draft" }>;
 
 export type MediaAssetDto = Readonly<{
   assetId: string;
@@ -70,7 +81,9 @@ function failure(error: MediaServiceError): MediaServiceResult<never> {
 }
 
 function isAuthorizedAsset(asset: MediaAsset, gift: Gift): boolean {
-  return asset.giftId === gift.id && asset.status !== "deleted";
+  // Every media operation ends when the gift leaves `draft`: a published gift's assets stay as
+  // they are, and their URLs are signed only by the public Viewer.
+  return gift.status === "draft" && asset.giftId === gift.id && asset.status !== "deleted";
 }
 
 export function createMediaService({
@@ -175,8 +188,11 @@ export function createMediaService({
         input.accessors,
       );
       if (!authorized) return failure({ code: "NOT_FOUND" });
-      const deleting = await assets.markDeleting(input.assetId, clock());
-      if (!deleting) return failure({ code: "INVALID_STATE" });
+      const marked = await assets.markDeleting(input.assetId, authorized.gift.id, clock());
+      // Published between the check above and the write: the same opaque 404, never a 409.
+      if (marked.kind === "gift-not-draft") return failure({ code: "NOT_FOUND" });
+      if (marked.kind === "asset-unavailable") return failure({ code: "INVALID_STATE" });
+      const deleting = marked.asset;
 
       const cleanup = await Promise.allSettled([
         storage.deleteObject(deleting.sourceKey),
@@ -233,7 +249,7 @@ export function createMediaService({
       if (!gift || gift.status !== "draft") return failure({ code: "NOT_FOUND" });
       const manifest = await findManifest(gift.content.templateId, gift.content.templateVersion);
       const field = manifest?.fields.find((candidate) => candidate.id === input.fieldId);
-      if (!field || field.type !== "imageList") return failure({ code: "INVALID_FIELD" });
+      if (!field || !isImageField(field)) return failure({ code: "INVALID_FIELD" });
 
       const id = createId();
       const now = clock();
@@ -303,7 +319,7 @@ export function createMediaService({
       }>,
     ): Promise<MediaServiceResult<readonly MediaAssetDto[]>> {
       const gift = await authorizeGift(input.giftPublicId, input.accessors);
-      if (!gift) return failure({ code: "NOT_FOUND" });
+      if (gift?.status !== "draft") return failure({ code: "NOT_FOUND" });
       return success(
         await Promise.all(
           (await assets.listByGiftId(gift.id)).map((asset) =>

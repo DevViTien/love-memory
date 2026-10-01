@@ -17,6 +17,7 @@
     "@love-memory/media": "workspace:*",
     "@love-memory/shared": "workspace:*",
     "@love-memory/storage": "workspace:*",
+    "@love-memory/template-memory-box": "workspace:*",
     "@love-memory/template-memory-box-spike": "workspace:*",
     "@love-memory/template-sdk": "workspace:*",
     "@love-memory/ui": "workspace:*",
@@ -28,7 +29,8 @@
     "react-dom": "catalog:",
     "resend": "catalog:",
     "server-only": "catalog:",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "zustand": "catalog:"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "catalog:",

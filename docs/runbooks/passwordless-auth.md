@@ -33,8 +33,18 @@ pnpm db:verify-gifts
 ```
 
 `db:seed` is idempotent. It applies collection validators and named indexes, then upserts the three
-published template manifests and their validated preview fixtures. Run it with migration credentials;
-the web runtime credential only needs application read/write permissions.
+published templates with their validated preview fixtures: `memory-box` at `1.1.0` (the committed
+release in `templates/memory-box/releases/1.1.0/`), `our-timeline` and `midnight-wish` at `1.0.0`.
+It keeps `memory-box@1.0.0` stored unchanged with status `retired`, so existing drafts pinned to it
+stay editable while new drafts use `1.1.0`. Run it with migration credentials; the web runtime
+credential only needs application read/write permissions.
+
+Stored template releases are immutable. When a stored `templateVersions` manifest differs in content
+(key order is ignored) from the seed, `db:seed` fails with
+`Template release <id>@<version> is immutable and differs from the seed` and writes nothing for that
+template. On a shared, staging or production database this is an incident: ship a new template
+version instead. On a local development database only (for example one seeded from an uncommitted
+experiment), delete that single `templateVersions` document and run `db:seed` again.
 
 `db:verify-gifts` creates a uniquely named temporary draft, verifies owner isolation, optimistic
 concurrency and claim behavior against real MongoDB, then removes the draft and its revisions in a

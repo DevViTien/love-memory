@@ -11,6 +11,7 @@ import {
   readJsonBody,
   validateJsonMutationRequest,
 } from "@/http/api-response";
+import { reportOperationalFailure } from "@/observability/operational-errors";
 import {
   enforceGiftMutationRateLimit,
   getGiftRequestContext,
@@ -20,6 +21,9 @@ import {
 } from "@/modules/gifts/presentation/gift-route-helpers";
 
 type GiftRouteContext = Readonly<{ params: Promise<{ publicId: string }> }>;
+
+/** About eight times the largest `memory-box@1.1.0` content; a larger body is refused unread. */
+const DRAFT_SAVE_BODY_MAX_BYTES = 64 * 1024;
 
 async function parsePublicId(context: GiftRouteContext, id: string): Promise<string | Response> {
   const result = PublicGiftIdSchema.safeParse((await context.params).publicId);
@@ -51,8 +55,8 @@ export async function GET(request: Request, routeContext: GiftRouteContext): Pro
     return result.ok
       ? giftDraftResponse(result.data, id)
       : giftServiceErrorResponse(result.error, id);
-  } catch {
-    console.error(JSON.stringify({ event: "gift_draft_read_failed", requestId: id }));
+  } catch (error) {
+    reportOperationalFailure("gift_draft_read", error, id);
     return createApiErrorResponse({
       code: API_ERROR_CODES.internal,
       message: "The gift draft could not be loaded.",
@@ -82,7 +86,9 @@ export async function PATCH(request: Request, routeContext: GiftRouteContext): P
       return rateLimited;
     }
 
-    const body = await readJsonBody(request, UpdateGiftDraftRequestSchema);
+    const body = await readJsonBody(request, UpdateGiftDraftRequestSchema, {
+      maxBytes: DRAFT_SAVE_BODY_MAX_BYTES,
+    });
     if (!body.ok) {
       return createInvalidBodyResponse(body.error, id);
     }
@@ -102,8 +108,8 @@ export async function PATCH(request: Request, routeContext: GiftRouteContext): P
     return result.ok
       ? giftDraftResponse(result.data, id)
       : giftServiceErrorResponse(result.error, id);
-  } catch {
-    console.error(JSON.stringify({ event: "gift_draft_update_failed", requestId: id }));
+  } catch (error) {
+    reportOperationalFailure("gift_draft_update", error, id);
     return createApiErrorResponse({
       code: API_ERROR_CODES.internal,
       message: "The gift draft could not be saved.",

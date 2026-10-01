@@ -1,8 +1,23 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
-import { COLLECTIONS, getDatabase, getMongoClient } from "../packages/database/src/index";
-import { createGiftDraft, updateGiftDraft } from "../packages/domain/src/index";
+import {
+  COLLECTIONS,
+  connectDiagnosticMongoClient,
+  getDatabase,
+  getMongoClient,
+  parseMongoEnvironment,
+} from "../packages/database/src/index";
+import {
+  createGiftDraft,
+  createGiftPublication,
+  type Gift,
+  type MediaAsset,
+  publishGiftDraft,
+  updateGiftDraft,
+} from "../packages/domain/src/index";
+import { type GiftPublishInput } from "../apps/web/src/modules/gifts/application/gift-service";
 import { mongoGiftRepository } from "../apps/web/src/modules/gifts/infrastructure/mongo-gift-repository";
+import { mongoMediaAssetRepository } from "../apps/web/src/modules/media/infrastructure/mongo-media-repository";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -27,7 +42,7 @@ const draft = createGiftDraft({
     data: {},
     schemaVersion: 1,
     templateId: "memory-box",
-    templateVersion: "1.0.0",
+    templateVersion: "1.1.0",
   },
   id: giftId,
   now: new Date(),
@@ -42,6 +57,120 @@ const idempotency = {
   requestFingerprint: JSON.stringify([draft.content.templateId, draft.content.templateVersion]),
   scope: "gift-create" as const,
 };
+
+const verificationUserId = "verification-user";
+const assetId = randomUUID();
+// A second, owned draft for the publish-versus-delete race.
+const raceGiftId = randomUUID();
+const racePublicId = `verify_${randomBytes(12).toString("base64url")}`;
+const raceAssetId = randomUUID();
+// A third, owned draft that isolates the publish revision compare-and-set.
+const casGiftId = randomUUID();
+const casPublicId = `verify_${randomBytes(12).toString("base64url")}`;
+const casAssetId = randomUUID();
+
+function readyAsset(id: string, owningGiftId: string): MediaAsset & { _id: string } {
+  const now = new Date();
+  return {
+    _id: id,
+    anonymousDraftId: null,
+    attempts: 1,
+    checksumSha256: "c".repeat(64),
+    createdAt: now,
+    declaredContentType: "image/jpeg",
+    declaredSizeBytes: 3,
+    derivatives: [
+      {
+        contentType: "image/webp",
+        height: 960,
+        key: `private/verification/${id}/w768.webp`,
+        width: 768,
+      },
+    ],
+    expiresAt: null,
+    failureCode: null,
+    fieldId: "memories",
+    fieldSlot: null,
+    giftId: owningGiftId,
+    giftSlot: null,
+    id,
+    ownerId: verificationUserId,
+    placeholderDataUrl: null,
+    sourceKey: `private/verification/${id}/source`,
+    status: "ready",
+    updatedAt: now,
+  };
+}
+
+/** A publish of `gift` referencing one asset, with a freshly generated share id and record id. */
+function publishInputFor(gift: Gift, referencedAssetId: string, key: string): GiftPublishInput {
+  const published = publishGiftDraft(gift, {
+    expectedRevision: gift.revision,
+    now: new Date(),
+    shareId: randomBytes(16).toString("base64url"),
+  });
+  assert(published.ok, "Domain publish failed.");
+  return {
+    assetRefs: [{ assetIds: [referencedAssetId], fieldId: "memories" }],
+    expectedRevision: gift.revision,
+    gift: published.data,
+    idempotency: {
+      actorKey: `user:${verificationUserId}`,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      key,
+      requestFingerprint: JSON.stringify(["publish", gift.publicId, gift.revision]),
+      scope: "gift-publish",
+    },
+    ownerId: verificationUserId,
+    publication: createGiftPublication({
+      artifactContentHash: "f".repeat(64),
+      assetIds: [referencedAssetId],
+      audioTrackId: null,
+      gift: published.data,
+      id: randomUUID(),
+    }),
+  };
+}
+
+type Plan = Readonly<{
+  indexName?: string;
+  inputStage?: Plan;
+  inputStages?: Plan[];
+  stage?: string;
+}>;
+
+function usesIndex(plan: Plan | undefined, indexName: string): boolean {
+  if (!plan) return false;
+  if (plan.stage === "IXSCAN" && plan.indexName === indexName) return true;
+  return (
+    usesIndex(plan.inputStage, indexName) ||
+    (plan.inputStages ?? []).some((stage) => usesIndex(stage, indexName))
+  );
+}
+
+/**
+ * `explain` is not part of Stable API V1, which the application client enforces strictly, so the
+ * query plan is read through a short-lived diagnostic client without it.
+ */
+async function explainShareIdLookup(shareId: string): Promise<Plan | undefined> {
+  const environment = parseMongoEnvironment(process.env);
+  const explainClient = await connectDiagnosticMongoClient(environment);
+  try {
+    const explanation = (await explainClient
+      .db(environment.databaseName)
+      .collection(COLLECTIONS.gifts)
+      // The exact filter of `findPublishedByShareId`.
+      .find({
+        "access.mode": "unlisted",
+        shareId: { $eq: shareId, $type: "string" },
+        status: "published",
+      })
+      .explain("queryPlanner")) as { queryPlanner?: { winningPlan?: Plan } };
+    return explanation.queryPlanner?.winningPlan;
+  } finally {
+    await explainClient.close();
+  }
+}
 
 const database = await getDatabase();
 
@@ -87,14 +216,192 @@ try {
     "Anonymous idempotency replay remained valid after claim.",
   );
 
+  // Publish the claimed draft with one referenced `ready` asset: two concurrent requests with the
+  // same key (a double click), each with its own generated share id, yield one publication.
+  await database
+    .collection<MediaAsset & { _id: string }>(COLLECTIONS.assets)
+    .insertOne(readyAsset(assetId, giftId));
+  const publishKey = randomUUID();
+  const firstInput = publishInputFor(claimed, assetId, publishKey);
+  const secondInput = publishInputFor(claimed, assetId, publishKey);
+  const concurrent = await Promise.all([
+    mongoGiftRepository.publishDraft(firstInput),
+    mongoGiftRepository.publishDraft(secondInput),
+  ]);
+  const shares = concurrent.map((result) =>
+    result.status === "published" || result.status === "replayed"
+      ? result.publication.shareId
+      : null,
+  );
+  const [shareId, otherShareId] = shares;
+  assert(
+    typeof shareId === "string" && shareId === otherShareId,
+    `Concurrent publishes with one key did not return one share id: ${concurrent
+      .map((result) => result.status)
+      .join(", ")}.`,
+  );
+  assert(
+    concurrent.filter((result) => result.status === "published").length === 1,
+    "Exactly one of two concurrent publishes with one key must write.",
+  );
+  const publishInput = concurrent[0]?.status === "published" ? firstInput : secondInput;
+  const publishIdempotency = publishInput.idempotency;
+  const publicationCount = await database
+    .collection<{ giftId: string }>(COLLECTIONS.giftPublications)
+    .countDocuments({ giftId });
+  assert(publicationCount === 1, "Publishing did not store exactly one publication record.");
+  const publishedGift = await mongoGiftRepository.findPublishedByShareId(shareId);
+  assert(
+    publishedGift?.id === giftId && publishedGift.status === "published",
+    "The published gift was not found by its share id.",
+  );
+
+  const publishReplay = await mongoGiftRepository.publishDraft(publishInput);
+  assert(
+    publishReplay.status === "replayed" && publishReplay.publication.shareId === shareId,
+    "Replaying the publish key did not return the same publication.",
+  );
+
+  const stalePublish = await mongoGiftRepository.publishDraft({
+    ...publishInput,
+    expectedRevision: 0,
+    idempotency: {
+      ...publishIdempotency,
+      key: randomUUID(),
+      requestFingerprint: JSON.stringify(["publish", publicId, 0]),
+    },
+  });
+  assert(stalePublish.status === "stale", "A publish at a stale revision was not rejected.");
+
+  const plan = await explainShareIdLookup(shareId);
+  assert(
+    usesIndex(plan, "gifts_share_id_unique"),
+    "The share id lookup is not answered by an index scan of gifts_share_id_unique.",
+  );
+
+  const deletion = await mongoMediaAssetRepository.markDeleting(assetId, giftId, new Date());
+  assert(
+    deletion.kind === "gift-not-draft",
+    "An asset of the published gift could still be moved to deleting.",
+  );
+  const assetAfter = await mongoMediaAssetRepository.findById(assetId);
+  assert(assetAfter?.status === "ready", "The published gift's asset left ready.");
+
+  // A publish and a deletion of its only photo race on a fresh draft: exactly one of them wins.
+  const raceDraft = createGiftDraft({
+    anonymousDraftId: null,
+    claimTokenHash: null,
+    content: { data: {}, schemaVersion: 1, templateId: "memory-box", templateVersion: "1.1.0" },
+    id: raceGiftId,
+    now: new Date(),
+    ownerId: verificationUserId,
+    publicId: racePublicId,
+  });
+  await mongoGiftRepository.createDraft(raceDraft, {
+    accessor: { kind: "user", userId: verificationUserId },
+    actorKey: `user:${verificationUserId}`,
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    key: randomUUID(),
+    requestFingerprint: JSON.stringify(["memory-box", "1.1.0"]),
+    scope: "gift-create",
+  });
+  await database
+    .collection<MediaAsset & { _id: string }>(COLLECTIONS.assets)
+    .insertOne(readyAsset(raceAssetId, raceGiftId));
+  const [racePublish, raceDeletion] = await Promise.all([
+    mongoGiftRepository.publishDraft(publishInputFor(raceDraft, raceAssetId, randomUUID())),
+    mongoMediaAssetRepository.markDeleting(raceAssetId, raceGiftId, new Date()),
+  ]);
+  const raceGift = await database
+    .collection<{ _id: string; status: string }>(COLLECTIONS.gifts)
+    .findOne({ _id: raceGiftId });
+  const raceAsset = await mongoMediaAssetRepository.findById(raceAssetId);
+  const publishWon =
+    racePublish.status === "published" &&
+    raceDeletion.kind === "gift-not-draft" &&
+    raceGift?.status === "published" &&
+    raceAsset?.status === "ready";
+  const deletionWon =
+    racePublish.status === "assets-changed" &&
+    raceDeletion.kind === "deleting" &&
+    raceGift?.status === "draft" &&
+    raceAsset?.status === "deleting";
+  assert(
+    publishWon !== deletionWon,
+    `A publish and a deletion interleaved: publish ${racePublish.status}, deletion ${raceDeletion.kind}, gift ${raceGift?.status}, asset ${raceAsset?.status}.`,
+  );
+  process.stdout.write(
+    `Publish/delete race: ${publishWon ? "the publish" : "the deletion"} won, the other refused.\n`,
+  );
+
+  // The revision compare-and-set alone: a fresh draft that is still a `draft` and whose referenced
+  // asset is `ready`, saved to revision 1, then published against revision 0. Only the revision
+  // differs, so `stale` proves the revision filter (the earlier stale check ran on a published
+  // gift, where the status filter alone already refuses).
+  const casDraft = createGiftDraft({
+    anonymousDraftId: null,
+    claimTokenHash: null,
+    content: { data: {}, schemaVersion: 1, templateId: "memory-box", templateVersion: "1.1.0" },
+    id: casGiftId,
+    now: new Date(),
+    ownerId: verificationUserId,
+    publicId: casPublicId,
+  });
+  await mongoGiftRepository.createDraft(casDraft, {
+    accessor: { kind: "user", userId: verificationUserId },
+    actorKey: `user:${verificationUserId}`,
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    key: randomUUID(),
+    requestFingerprint: JSON.stringify(["memory-box", "1.1.0"]),
+    scope: "gift-create",
+  });
+  await database
+    .collection<MediaAsset & { _id: string }>(COLLECTIONS.assets)
+    .insertOne(readyAsset(casAssetId, casGiftId));
+  const ownerAccessor = { kind: "user" as const, userId: verificationUserId };
+  const casSaved = updateGiftDraft(casDraft, {
+    content: { ...casDraft.content, data: { headline: "Saved after the publish began" } },
+    expectedRevision: 0,
+    now: new Date(),
+  });
+  assert(casSaved.ok, "Domain update of the compare-and-set draft failed.");
+  const casPersisted = await mongoGiftRepository.updateDraft(casSaved.data, 0, [ownerAccessor]);
+  assert(casPersisted?.revision === 1, "The compare-and-set draft did not reach revision 1.");
+  const casKey = randomUUID();
+  const casPublish = await mongoGiftRepository.publishDraft(
+    publishInputFor(casDraft, casAssetId, casKey),
+  );
+  assert(
+    casPublish.status === "stale",
+    `A publish at revision 0 of a draft at revision 1 was not stale: ${casPublish.status}.`,
+  );
+  const casPublications = await database
+    .collection<{ giftId: string }>(COLLECTIONS.giftPublications)
+    .countDocuments({ giftId: casGiftId });
+  const casKeys = await database
+    .collection<{ key: string }>(COLLECTIONS.idempotencyKeys)
+    .countDocuments({ key: casKey });
+  const casGift = await database
+    .collection<{ _id: string; revision: number; status: string }>(COLLECTIONS.gifts)
+    .findOne({ _id: casGiftId });
+  assert(
+    casPublications === 0 && casKeys === 0 && casGift?.status === "draft" && casGift.revision === 1,
+    "A stale publish wrote a publication, an idempotency key or the gift.",
+  );
+
   process.stdout.write("Gift persistence verification completed successfully.\n");
 } finally {
+  const giftIds = [giftId, raceGiftId, casGiftId];
   await Promise.all([
-    database.collection<{ _id: string }>(COLLECTIONS.gifts).deleteOne({ _id: giftId }),
-    database
-      .collection<{ _id: string; giftId: string }>(COLLECTIONS.giftRevisions)
-      .deleteMany({ giftId }),
-    database.collection<{ giftId: string }>(COLLECTIONS.idempotencyKeys).deleteMany({ giftId }),
+    database.collection<{ _id: string }>(COLLECTIONS.gifts).deleteMany({ _id: { $in: giftIds } }),
+    ...[
+      COLLECTIONS.giftRevisions,
+      COLLECTIONS.idempotencyKeys,
+      COLLECTIONS.giftPublications,
+      COLLECTIONS.assets,
+    ].map((name) =>
+      database.collection<{ giftId: string }>(name).deleteMany({ giftId: { $in: giftIds } }),
+    ),
   ]);
   const client = await getMongoClient().catch(() => undefined);
   await client?.close();

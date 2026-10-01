@@ -23,3 +23,10 @@ export const GiftTemplateIdSchema = SlugSchema.min(GIFT_LIMITS.templateIdMinLeng
 export const GiftTemplateVersionSchema = SemanticVersionSchema;
 
 export type PublicGiftId = z.infer<typeof PublicGiftIdSchema>;
+
+/** A share link credential: 16 random bytes as unpadded base64url. */
+export const ShareIdSchema = z.string().regex(/^[A-Za-z0-9_-]{22}$/, {
+  message: "Share id must be 22 base64url characters.",
+});
+
+export type ShareId = z.infer<typeof ShareIdSchema>;

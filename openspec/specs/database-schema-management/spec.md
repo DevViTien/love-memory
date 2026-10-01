@@ -81,29 +81,55 @@ one.
 ### Requirement: Collection registry
 
 The system SHALL use these stable, unique collection names: `accounts`, `abuseReports`,
-`apiRateLimits`, `assets`, `authRateLimits`, `databaseMigrations`, `giftRevisions`, `gifts`,
-`idempotencyKeys`, `jobOutbox`, `orders`, `paymentAttempts`, `reactions`, `sessions`,
-`templateVersions`, `templates`, `technicalSpikes`, `users`, `verifications`. The migration SHALL
-manage these collections: `users`, `sessions`, `accounts`, `verifications`, `authRateLimits`,
-`apiRateLimits`, `templates`, `templateVersions`, `gifts`, `giftRevisions`, `assets`,
-`idempotencyKeys`, `jobOutbox`; `databaseMigrations` SHALL hold the migration ledger. The names
-`abuseReports`, `orders`, `paymentAttempts`, `reactions` and `technicalSpikes` are reserved and are
-not created or verified by the migration.
+`analyticsEvents`, `apiRateLimits`, `assets`, `authRateLimits`, `databaseMigrations`,
+`giftPublications`, `giftRevisions`, `gifts`, `idempotencyKeys`, `jobOutbox`, `orders`,
+`paymentAttempts`, `previewTokens`, `reactions`, `sessions`, `templateVersions`, `templates`,
+`technicalSpikes`, `users`, `verifications`. The migration SHALL manage these collections: `users`,
+`sessions`, `accounts`, `verifications`, `authRateLimits`, `apiRateLimits`, `templates`,
+`templateVersions`, `gifts`, `giftRevisions`, `assets`, `idempotencyKeys`, `jobOutbox`,
+`previewTokens`, `giftPublications`, `analyticsEvents`; `databaseMigrations` SHALL hold the
+migration ledger. The names `abuseReports`, `orders`, `paymentAttempts`, `reactions` and
+`technicalSpikes` are reserved and are not created or verified by the migration.
 
 #### Scenario: Migration creates managed collections
 
 - **WHEN** migrations run against an empty database
-- **THEN** every managed collection exists afterwards
+- **THEN** every managed collection exists afterwards, including `previewTokens`,
+  `giftPublications` and `analyticsEvents`
+
+#### Scenario: Upgrading a version 6 database
+
+- **WHEN** migrations run against a database whose ledger records version `6`, as when an
+  environment skips the version `7` and `8` deployments
+- **THEN** `previewTokens`, `giftPublications` and `analyticsEvents` are created with their
+  validators and indexes, the `gifts` and `apiRateLimits` validators and the `gifts` indexes are
+  updated, the ledger records version `9`, and no document of any collection is changed
+
+#### Scenario: Upgrading a version 7 database
+
+- **WHEN** migrations run against a database whose ledger records version `7`
+- **THEN** `giftPublications` and `analyticsEvents` are created with their validators and indexes,
+  the `gifts` and `apiRateLimits` validators and the `gifts` indexes are updated, the ledger records
+  version `9`, and no document of any collection is changed
+
+#### Scenario: Upgrading a version 8 database
+
+- **WHEN** migrations run against a database whose ledger records version `8`
+- **THEN** `analyticsEvents` is created with its validator and indexes, the `apiRateLimits`
+  validator is updated, the ledger records version `9`, and no document of any collection is
+  changed
 
 ### Requirement: JSON-schema validators
 
 The system SHALL apply a `$jsonSchema` validator (allowing additional properties) to `apiRateLimits`,
-`templates`, `templateVersions`, `gifts`, `giftRevisions`, `assets`, `idempotencyKeys` and
-`jobOutbox`, including at least these constraints:
+`templates`, `templateVersions`, `gifts`, `giftRevisions`, `assets`, `idempotencyKeys`,
+`jobOutbox`, `previewTokens`, `giftPublications` and `analyticsEvents`, including at least these
+constraints:
 
-- `apiRateLimits` requires `_id`, `count` (int >= 1), `scope` (one of `gift-claim`, `gift-create`,
-  `gift-update`, `media-upload`), `subjectHash` (64 lowercase hex characters), `expiresAt`,
-  `createdAt`, `updatedAt`;
+- `apiRateLimits` requires `_id`, `count` (int >= 1), `scope` (one of `analytics-event`,
+  `analytics-event-ip`, `gift-claim`, `gift-create`, `gift-preview`, `gift-publish`, `gift-update`,
+  `media-upload`, `public-gift-read`, `public-gift-read-ip`),
+  `subjectHash` (64 lowercase hex characters), `expiresAt`, `createdAt`, `updatedAt`;
 - `templates` requires `_id`, `currentVersion`, `status` (`draft`, `published`, `retired`),
   `createdAt`, `updatedAt`;
 - `templateVersions` requires `_id`, `templateId`, `version`, `status` (`draft`, `published`,
@@ -112,7 +138,8 @@ The system SHALL apply a `$jsonSchema` validator (allowing additional properties
   `status` (`draft`, `publishing`, `scheduled`, `published`, `paused`, `expired`, `deleting`,
   `deleted`), `createdAt`, `updatedAt`; `ownership` requires `anonymousDraftId`, `claimTokenHash`
   and `ownerId` and MUST be either anonymous (string draft id and claim token hash, null owner) or
-  owned (null draft id and claim token hash, string owner);
+  owned (null draft id and claim token hash, string owner); when present, `shareId` MUST be 22
+  base64url characters and `publishedAt` MUST be a date;
 - `giftRevisions` requires `_id`, `giftId`, `revision` (int >= 0), `content` (object), `createdAt`;
 - `assets` requires `_id`, `giftId`, `fieldId`, `giftSlot`, `fieldSlot`, `ownerId`,
   `anonymousDraftId`, `sourceKey`, `declaredContentType` (`image/jpeg`, `image/png`, `image/webp`),
@@ -124,7 +151,18 @@ The system SHALL apply a `$jsonSchema` validator (allowing additional properties
   `requestFingerprint`;
 - `jobOutbox` requires `_id`, `type`, `payload` (object), `status` (`pending`, `processing`,
   `completed`, `failed`), `attempts` (int >= 0), `availableAt`, `deduplicationKey`, `createdAt`,
-  `updatedAt`.
+  `updatedAt`;
+- `previewTokens` requires `_id` (the token's SHA-256 hash, 64 lowercase hex characters), `giftId`
+  (non-empty string), `expiresAt` (date) and `createdAt` (date);
+- `giftPublications` requires `_id` (non-empty string), `giftId` (non-empty string), `shareId` (22
+  base64url characters), `revision` (int >= 0), `templateId`, `templateVersion`,
+  `artifactContentHash` (64 lowercase hex characters), `content` (object), `assetIds` (array of
+  strings), `audioTrackId` (string or null), `publishedAt` (date) and `createdAt` (date);
+- `analyticsEvents` requires `_id` (non-empty string), `name` (one of `customization_started`,
+  `required_content_completed`, `preview_started`, `publish_clicked`, `gift_published`,
+  `gift_open_interaction`, `scene_completed`, `gift_completed`), `giftRef` (43 base64url
+  characters), `templateId` (non-empty string), `templateVersion` (non-empty string), `sessionId`
+  (string or null), `sceneId` (string or null), `occurredAt` (date) and `expiresAt` (date).
 
 Existing collections SHALL have their validator replaced with the current definition on every
 migration run.
@@ -137,6 +175,42 @@ migration run.
 #### Scenario: Invalid gift ownership rejected by MongoDB
 
 - **WHEN** a document is inserted into `gifts` whose `ownership` has both a string `ownerId` and a string `claimTokenHash`
+- **THEN** MongoDB rejects the write with a document validation error
+
+#### Scenario: Preview rate-limit scope accepted
+
+- **WHEN** a rate-limit counter with `scope` `gift-preview` is written to `apiRateLimits`
+- **THEN** MongoDB accepts it
+
+#### Scenario: Raw preview token rejected
+
+- **WHEN** a document whose `_id` is a 43-character base64url token instead of a 64-character hex
+  hash is inserted into `previewTokens`
+- **THEN** MongoDB rejects the write with a document validation error
+
+#### Scenario: Publish rate-limit scopes accepted
+
+- **WHEN** rate-limit counters with `scope` `gift-publish`, `public-gift-read` and
+  `public-gift-read-ip` are written to
+  `apiRateLimits`
+- **THEN** MongoDB accepts them
+
+#### Scenario: Malformed share id rejected
+
+- **WHEN** a `gifts` document with a `shareId` of 21 characters, or a `giftPublications` document
+  without `artifactContentHash`, is written
+- **THEN** MongoDB rejects the write with a document validation error
+
+#### Scenario: Analytics rate-limit scopes accepted
+
+- **WHEN** rate-limit counters with `scope` `analytics-event` and `analytics-event-ip` are written
+  to `apiRateLimits`
+- **THEN** MongoDB accepts them
+
+#### Scenario: Malformed analytics event rejected
+
+- **WHEN** an `analyticsEvents` document with the `name` `gift_viewed`, or without `expiresAt`, or
+  with a 64-character hex `giftRef`, is written
 - **THEN** MongoDB rejects the write with a document validation error
 
 ### Requirement: Named indexes
@@ -153,7 +227,8 @@ The system SHALL maintain these named indexes and MUST keep every index name uni
 - `templateVersions`: `template_versions_identity_unique` (unique `templateId` + `version`),
   `template_versions_status`;
 - `gifts`: `gifts_public_id_unique` (unique `publicId`), `gifts_owner_updated`,
-  `gifts_status_unlock`, `gifts_status_expiry`;
+  `gifts_status_unlock`, `gifts_status_expiry`, `gifts_share_id_unique` (unique `shareId` where it
+  is a string);
 - `giftRevisions`: `gift_revisions_identity_unique` (unique `giftId` + `revision`),
   `gift_revisions_history`;
 - `assets`: `assets_source_key_unique` (unique `sourceKey` where it is a string),
@@ -163,13 +238,20 @@ The system SHALL maintain these named indexes and MUST keep every index name uni
   slots in a non-deleted status), `assets_status_expiry`;
 - `idempotencyKeys`: `idempotency_scope_key_unique` (unique `scope` + `key`),
   `idempotency_expiry_ttl`;
-- `jobOutbox`: `job_outbox_available`, `job_outbox_deduplication` (unique `deduplicationKey`).
+- `jobOutbox`: `job_outbox_available`, `job_outbox_deduplication` (unique `deduplicationKey`);
+- `previewTokens`: `preview_tokens_expiry_ttl`;
+- `giftPublications`: `gift_publications_share_id_unique` (unique `shareId`),
+  `gift_publications_gift_revision_unique` (unique `giftId` + `revision`);
+- `analyticsEvents`: `analytics_events_expiry_ttl`, `analytics_events_name_occurred` (`name` +
+  `occurredAt`).
 
-The indexes `sessions_expiry_ttl`, `verifications_expiry_ttl`, `api_rate_limits_expiry_ttl` and
-`idempotency_expiry_ttl` SHALL be TTL indexes on `expiresAt` with `expireAfterSeconds` `0`, so
-MongoDB deletes documents once `expiresAt` has passed. An existing index with an expected name but a
-different key, uniqueness, sparseness, TTL, partial filter or collation SHALL be dropped and
-recreated. The legacy index `assets_storage_key_unique` SHALL be dropped when present.
+The indexes `sessions_expiry_ttl`, `verifications_expiry_ttl`, `api_rate_limits_expiry_ttl`,
+`idempotency_expiry_ttl`, `preview_tokens_expiry_ttl` and `analytics_events_expiry_ttl` SHALL be
+TTL indexes on `expiresAt` with
+`expireAfterSeconds` `0`, so MongoDB deletes documents once `expiresAt` has passed. An existing
+index with an expected name but a different key, uniqueness, sparseness, TTL, partial filter or
+collation SHALL be dropped and recreated. The legacy index `assets_storage_key_unique` SHALL be
+dropped when present.
 
 #### Scenario: Drifted index is rebuilt
 
@@ -186,12 +268,33 @@ recreated. The legacy index `assets_storage_key_unique` SHALL be dropped when pr
 - **WHEN** an `idempotencyKeys` document's `expiresAt` is in the past
 - **THEN** MongoDB's TTL monitor deletes it without application action
 
+#### Scenario: Expired preview token removed
+
+- **WHEN** a `previewTokens` document's `expiresAt` is in the past
+- **THEN** MongoDB's TTL monitor deletes it without application action
+
+#### Scenario: Drafts share no share id
+
+- **WHEN** many `gifts` documents have no `shareId`
+- **THEN** `gifts_share_id_unique` accepts them, and a second document with an existing string
+  `shareId` is rejected with a duplicate-key error
+
+#### Scenario: Expired analytics event removed
+
+- **WHEN** an `analyticsEvents` document's `expiresAt` is in the past
+- **THEN** MongoDB's TTL monitor deletes it without application action
+
+#### Scenario: Drifted analytics TTL index is rebuilt
+
+- **WHEN** `analytics_events_expiry_ttl` exists without `expireAfterSeconds` and migrations run
+- **THEN** the index is dropped and recreated as a TTL index with `expireAfterSeconds` `0`
+
 ### Requirement: Idempotent migration with ledger
 
 The system SHALL provide `db:migrate`, which converges the database to the current schema (creating
 missing collections with validators, updating validators, reconciling indexes) and then upserts the
 ledger document `_id: "core"` in `databaseMigrations` with `version` equal to the current schema
-version `6`, `appliedAt` set to now, and `createdAt` set only on first insert. Running it repeatedly
+version `9`, `appliedAt` set to now, and `createdAt` set only on first insert. Running it repeatedly
 SHALL produce the same schema without errors. It SHALL print one JSON line per collection and phase,
 `{"collection":<name>,"event":"database_migration","phase":"start"|"complete"}`, and SHALL verify the
 schema after migrating.
@@ -205,7 +308,7 @@ and always close the MongoDB client before exiting. An unrecognized command MUST
 #### Scenario: Re-running migrations is safe
 
 - **WHEN** `db:migrate` is run twice against the same database
-- **THEN** both runs succeed, the schema verifies, and the ledger `version` is `6`
+- **THEN** both runs succeed, the schema verifies, and the ledger `version` is `9`
 
 #### Scenario: Command failure exits non-zero
 
@@ -218,12 +321,36 @@ The system SHALL provide `db:verify`, which fails without modifying the database
 collection is missing (`Missing MongoDB collection`), a validator differs from its definition
 (`MongoDB validator mismatch`), a legacy index remains (`Legacy MongoDB index remains`), an expected
 index is missing (`Missing MongoDB index`) or differs in key or options (`MongoDB index mismatch`),
-or the ledger version differs from `6` or is missing (`MongoDB schema version mismatch`).
+or the ledger version differs from `9` or is missing (`MongoDB schema version mismatch`).
 
 #### Scenario: Schema drift detected
 
 - **WHEN** the ledger document records `version` `1`
-- **THEN** `db:verify` fails with `MongoDB schema version mismatch: expected 6, received 1.`
+- **THEN** `db:verify` fails with `MongoDB schema version mismatch: expected 9, received 1.`
+
+#### Scenario: Database not yet migrated to version 7
+
+- **WHEN** the ledger document records `version` `6`, without `previewTokens`
+- **THEN** `db:verify` fails without modifying the database, for example with
+  `MongoDB validator mismatch` for `apiRateLimits` or `gifts`, or `Missing MongoDB collection` for
+  `previewTokens`, `giftPublications` or `analyticsEvents`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `9`
+
+#### Scenario: Database not yet migrated to version 8
+
+- **WHEN** the ledger document records `version` `7`
+- **THEN** `db:verify` fails without modifying the database, for example with
+  `MongoDB validator mismatch` for `apiRateLimits` or `gifts`, or `Missing MongoDB collection` for
+  `giftPublications` or `analyticsEvents`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `9`
+
+#### Scenario: Database not yet migrated to version 9
+
+- **WHEN** the ledger document records `version` `8`
+- **THEN** `db:verify` fails without modifying the database, for example with
+  `MongoDB validator mismatch` for `apiRateLimits`, or `Missing MongoDB collection` for
+  `analyticsEvents`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `9`
 
 #### Scenario: Empty database fails verification
 
@@ -233,19 +360,49 @@ or the ledger version differs from `6` or is missing (`MongoDB schema version mi
 ### Requirement: Template catalog seed
 
 The system SHALL provide `db:seed`, which runs migrations, then idempotently upserts the built-in
-templates `memory-box`, `our-timeline` and `midnight-wish` (each version `1.0.0`, status
+templates (`memory-box` at current version `1.1.0`, with its earlier version `1.0.0` kept as
+`retired`; `our-timeline` and `midnight-wish` each at version `1.0.0`; each template with status
 `published`, `sortOrder` `0`, `1`, `2` respectively), then verifies the schema. Each `templates`
 document SHALL be keyed by the template id with `currentVersion`, `sortOrder`, `status` and
 timestamps; each `templateVersions` document SHALL be keyed `<templateId>@<version>` with
 `templateId`, `version`, `status`, `manifest`, `previewFixture`, `contentHash` (SHA-256 hex of the
-serialized manifest) and timestamps. A template's preview fixture MUST validate against its manifest
-before it is written; `createdAt` SHALL be preserved on re-seed.
+serialized manifest) and timestamps. For documents inserted from now on, `manifest` is the manifest
+as authored, and the serialized form is canonical JSON: object keys sorted recursively, no
+whitespace, array order kept.
+
+A template's preview fixture MUST validate against its manifest before it is written. `createdAt`
+SHALL be preserved on re-seed.
+
+When a `templateVersions` document already exists, `db:seed` SHALL compare the canonical JSON of
+its stored `manifest` with the canonical JSON of the seed's manifest; key order MUST NOT matter.
+When they differ, `db:seed` MUST fail with an error naming `<templateId>@<version>` and MUST NOT
+modify that document. An existing document's `manifest`, `previewFixture` and `contentHash` MUST
+stay exactly as first stored; re-seeding only updates its `status` and `updatedAt`.
 
 #### Scenario: Seeding twice keeps one document per template
 
 - **WHEN** `db:seed` is run twice
 - **THEN** `templates` contains exactly one document each for `memory-box`, `our-timeline` and `midnight-wish`
-- **AND** `templateVersions` contains `memory-box@1.0.0`, `our-timeline@1.0.0` and `midnight-wish@1.0.0`
+- **AND** `templateVersions` contains `memory-box@1.0.0`, `memory-box@1.1.0`, `our-timeline@1.0.0`
+  and `midnight-wish@1.0.0`
+
+#### Scenario: Retiring the first Memory Box release
+
+- **WHEN** `db:seed` runs against a database seeded before this change
+- **THEN** `memory-box@1.0.0` has status `retired` and the same `contentHash` as before
+- **AND** the `memory-box` document has `currentVersion` `1.1.0`
+
+#### Scenario: Stored manifest with a different key order
+
+- **WHEN** `db:seed` finds `memory-box@1.0.0` stored with the same manifest content in a different
+  key order
+- **THEN** seeding succeeds and the stored `manifest` and `contentHash` are unchanged
+
+#### Scenario: Conflicting stored release
+
+- **WHEN** `db:seed` finds `memory-box@1.1.0` stored with a manifest whose content differs from the
+  seed's
+- **THEN** the command fails naming `memory-box@1.1.0` and that document is unchanged
 
 ### Requirement: Gift persistence verification
 
@@ -253,15 +410,34 @@ The system SHALL provide `db:verify-gifts`, which exercises gift persistence aga
 database and fails with a non-zero exit status unless all of the following hold: an anonymous draft
 created with a `gift-create` idempotency key is returned to its anonymous accessor; a different user
 is denied access; an update at expected revision `0` persists revision `1`; a second update at the
-stale revision `0` is rejected; the draft can be claimed by a user; and replaying the original
-anonymous idempotency key after the claim yields a conflict. It SHALL delete the gift, its revisions
-and its idempotency keys whether or not verification succeeds, and print
-`Gift persistence verification completed successfully.` on success.
+stale revision `0` is rejected; the draft can be claimed by a user; replaying the original
+anonymous idempotency key after the claim yields a conflict; publishing the claimed draft at its
+current revision with a `gift-publish` idempotency key, sent as two concurrent requests that each
+generate their own share id, stores exactly one `giftPublications` record, returns the same
+`shareId` to both, and sets the gift's status to `published` with that `shareId`; replaying that publish key
+returns the same publication; a publish at a stale revision is rejected; the lookup of a published
+gift by share id is answered by an index scan of `gifts_share_id_unique` (checked with `explain`);
+a `ready` asset of
+the published gift can no longer be moved to `deleting`; and, on a second draft, a publish and a
+concurrent deletion of its only `ready` asset never both succeed: either the gift is published with
+the asset still `ready`, or the asset is `deleting` with the gift still a `draft`. It SHALL delete
+the gifts, their revisions,
+publications, assets and idempotency keys whether or not verification succeeds, and
+print `Gift persistence verification completed successfully.` on success.
 
 #### Scenario: Verification leaves no residue
 
 - **WHEN** `db:verify-gifts` completes, successfully or not
-- **THEN** no `gifts`, `giftRevisions` or `idempotencyKeys` documents for the verification gift remain
+- **THEN** no `gifts`, `giftRevisions`, `giftPublications`, `assets` or `idempotencyKeys` documents
+  for the verification gift remain
+
+#### Scenario: Publish transaction verified on a real replica set
+
+- **WHEN** `db:verify-gifts` runs against a MongoDB replica set with the current schema
+- **THEN** the publish, its replay, the stale-revision rejection, the indexed share-id lookup and the refused
+  asset deletion
+  behave as specified, and the command prints
+  `Gift persistence verification completed successfully.`
 
 ### Requirement: Media persistence verification
 

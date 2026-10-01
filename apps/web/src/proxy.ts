@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { getLocalObjectStorageOrigin } from "@love-memory/storage";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { getWebEnvironment } from "@/config/environment";
@@ -13,9 +14,11 @@ export function proxy(request: NextRequest) {
   const mode = getContentSecurityPolicyMode(request.nextUrl.pathname);
   const nonce = mode === "nonce" ? Buffer.from(randomUUID()).toString("base64") : undefined;
   const { assetOrigin } = getWebEnvironment();
+  const localStorageOrigin = getLocalObjectStorageOrigin(process.env);
   const contentSecurityPolicy = createContentSecurityPolicy({
     ...(assetOrigin ? { assetOrigin } : {}),
     isDevelopment: process.env["NODE_ENV"] !== "production",
+    ...(localStorageOrigin ? { localStorageOrigin } : {}),
     mode,
     ...(nonce ? { nonce } : {}),
   });

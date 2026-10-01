@@ -1,0 +1,101 @@
+{
+  "budgets": {
+    "initialJsKbGzip": 60,
+    "initialMediaKb": 0,
+    "maxTextureMb": 1
+  },
+  "capabilities": ["audio", "dom"],
+  "engineVersion": "1.0.0",
+  "entry": "index.html",
+  "fields": [
+    {
+      "id": "receiver-name",
+      "label": "Tên người nhận",
+      "maxLength": 40,
+      "required": true,
+      "type": "shortText"
+    },
+    {
+      "id": "anniversary-date",
+      "label": "Ngày kỷ niệm",
+      "required": false,
+      "type": "date"
+    },
+    {
+      "id": "opening-message",
+      "label": "Lời mở hộp",
+      "maxLength": 120,
+      "required": true,
+      "type": "shortText"
+    },
+    {
+      "aspectRatio": "4:5",
+      "captionMaxLength": 140,
+      "id": "memories",
+      "label": "Ảnh kỷ niệm",
+      "maxItems": 8,
+      "minItems": 3,
+      "required": true,
+      "type": "captionedImageList"
+    },
+    {
+      "id": "final-letter",
+      "label": "Lá thư cuối",
+      "maxLength": 1200,
+      "required": true,
+      "type": "longText"
+    },
+    {
+      "id": "theme",
+      "label": "Giao diện",
+      "options": ["rose-night", "warm-paper"],
+      "required": false,
+      "type": "theme"
+    },
+    {
+      "id": "audio",
+      "label": "Nhạc nền có bản quyền",
+      "required": false,
+      "source": "licensedLibrary",
+      "type": "audio"
+    }
+  ],
+  "id": "memory-box",
+  "meta": {
+    "description": "Mở chiếc hộp, xem từng tấm ảnh kỷ niệm kèm lời chú thích và kết thúc bằng một lá thư.",
+    "estimatedDurationSec": 60,
+    "moods": ["warm", "playful"],
+    "name": "Hộp ký ức",
+    "occasions": ["anniversary", "birthday"]
+  },
+  "previewFixture": "preview.fixture.json",
+  "status": "published",
+  "steps": [
+    {
+      "fieldIds": ["receiver-name", "anniversary-date"],
+      "id": "recipient",
+      "label": "Người nhận"
+    },
+    {
+      "fieldIds": ["opening-message"],
+      "id": "opening",
+      "label": "Lời mở hộp"
+    },
+    {
+      "fieldIds": ["memories"],
+      "id": "memories",
+      "label": "Kỷ niệm"
+    },
+    {
+      "fieldIds": ["final-letter"],
+      "id": "letter",
+      "label": "Lá thư"
+    },
+    {
+      "fieldIds": ["theme", "audio"],
+      "id": "style",
+      "label": "Giao diện & nhạc"
+    }
+  ],
+  "version": "1.1.0"
+}

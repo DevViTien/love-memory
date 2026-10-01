@@ -1,4 +1,4 @@
-import { type Gift, type MediaAsset } from "@love-memory/domain";
+import { type Gift, type MediaAsset, MEDIA_ASSET_LIMITS } from "@love-memory/domain";
 import { ObjectNotFoundError, type ObjectStorage } from "@love-memory/storage";
 import { parseTemplateManifest } from "@love-memory/template-sdk";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -32,6 +32,16 @@ const manifest = parseTemplateManifest({
       required: true,
       type: "imageList",
     },
+    {
+      aspectRatio: "4:5",
+      captionMaxLength: 140,
+      id: "memories",
+      label: "Memories",
+      maxItems: 3,
+      minItems: 1,
+      type: "captionedImageList",
+    },
+    { id: "headline", label: "Headline", maxLength: 20, type: "shortText" },
   ],
   id: "memory-box",
   meta: {
@@ -84,6 +94,7 @@ describe("media service", () => {
       }),
       findById: vi.fn(() => Promise.resolve(current)),
       listByGiftId: vi.fn(() => Promise.resolve(current ? [current] : [])),
+      listByIdsForGift: vi.fn(() => Promise.resolve(current ? [current] : [])),
       releaseInitiated: vi.fn<MediaAssetRepository["releaseInitiated"]>((id) => {
         if (current?.id !== id || current.status !== "initiated") return Promise.resolve(false);
         current = { ...current, expiresAt: null, status: "deleted" };
@@ -91,7 +102,11 @@ describe("media service", () => {
       }),
       markDeleted: vi.fn(() => Promise.resolve(true)),
       markDeleting: vi.fn<MediaAssetRepository["markDeleting"]>(() =>
-        Promise.resolve(current ? { ...current, status: "deleting" as const } : null),
+        Promise.resolve(
+          current
+            ? { asset: { ...current, status: "deleting" as const }, kind: "deleting" as const }
+            : { kind: "asset-unavailable" as const },
+        ),
       ),
       markFailed: vi.fn<MediaAssetRepository["markFailed"]>((id, failureCode) => {
         if (current?.id !== id || current.status !== "initiated") return Promise.resolve(false);
@@ -126,10 +141,10 @@ describe("media service", () => {
     };
   });
 
-  function service(authorize = true) {
+  function service(authorize = true, authorizedGift: Gift = gift) {
     return createMediaService({
       assets: repository,
-      authorizeGift: () => Promise.resolve(authorize ? gift : null),
+      authorizeGift: () => Promise.resolve(authorize ? authorizedGift : null),
       clock: () => now,
       createId: () => "550e8400-e29b-41d4-a716-446655440000",
       findManifest: () => Promise.resolve(manifest),
@@ -192,6 +207,33 @@ describe("media service", () => {
         sizeBytes: 3,
       }),
     ).resolves.toEqual({ error: { code: "QUOTA_EXCEEDED" }, ok: false });
+  });
+
+  it("accepts captioned image fields with their own quota and rejects other fields", async () => {
+    await expect(
+      service().initializeUpload({
+        accessors: [],
+        contentType: "image/jpeg",
+        fieldId: "memories",
+        giftPublicId: gift.publicId,
+        sizeBytes: 3,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(current).toMatchObject({ fieldId: "memories" });
+    expect(vi.mocked(repository.createWithinQuota).mock.calls[0]?.slice(1)).toEqual([
+      MEDIA_ASSET_LIMITS.maximumAssetsPerGift,
+      3,
+    ]);
+
+    await expect(
+      service().initializeUpload({
+        accessors: [],
+        contentType: "image/jpeg",
+        fieldId: "headline",
+        giftPublicId: gift.publicId,
+        sizeBytes: 3,
+      }),
+    ).resolves.toEqual({ error: { code: "INVALID_FIELD" }, ok: false });
   });
 
   it("verifies object metadata before atomically enqueueing processing", async () => {
@@ -311,5 +353,89 @@ describe("media service", () => {
     await expect(
       service().deleteAsset({ accessors: [], assetId: current.id, giftPublicId: gift.publicId }),
     ).resolves.toEqual({ error: { code: "INVALID_STATE" }, ok: false });
+  });
+
+  it("passes the gift id to the transactional move to deleting", async () => {
+    current = asset("ready");
+
+    await service().deleteAsset({
+      accessors: [],
+      assetId: current.id,
+      giftPublicId: gift.publicId,
+    });
+
+    expect(repository.markDeleting).toHaveBeenCalledWith(current.id, gift.id, now);
+  });
+
+  it("answers 404 when the gift is published before the delete reaches the asset", async () => {
+    current = asset("ready");
+    vi.mocked(repository.markDeleting).mockResolvedValueOnce({ kind: "gift-not-draft" });
+
+    await expect(
+      service().deleteAsset({ accessors: [], assetId: current.id, giftPublicId: gift.publicId }),
+    ).resolves.toEqual({ error: { code: "NOT_FOUND" }, ok: false });
+    expect(storage.deleteObject).not.toHaveBeenCalled();
+    expect(repository.markDeleted).not.toHaveBeenCalled();
+  });
+
+  it("keeps a lost move to deleting as a 409 conflict", async () => {
+    current = asset("ready");
+    vi.mocked(repository.markDeleting).mockResolvedValueOnce({ kind: "asset-unavailable" });
+
+    await expect(
+      service().deleteAsset({ accessors: [], assetId: current.id, giftPublicId: gift.publicId }),
+    ).resolves.toEqual({ error: { code: "INVALID_STATE" }, ok: false });
+    expect(storage.deleteObject).not.toHaveBeenCalled();
+  });
+
+  describe("assets of a published gift", () => {
+    const published: Gift = {
+      ...gift,
+      publishedAt: now,
+      shareId: "Ab0_-cdefghijklmnopqrs",
+      status: "published",
+    };
+
+    beforeEach(() => {
+      current = {
+        ...asset("ready"),
+        derivatives: [
+          { contentType: "image/webp", height: 240, key: "private/derivative.webp", width: 320 },
+        ],
+      };
+    });
+
+    it("answers 404 to list, read, delete, retry and completion without signing a URL", async () => {
+      const media = service(true, published);
+      const single = { accessors: [], assetId: current!.id, giftPublicId: gift.publicId };
+      const notFound = { error: { code: "NOT_FOUND" }, ok: false };
+
+      await expect(
+        media.listAssets({ accessors: [], giftPublicId: gift.publicId }),
+      ).resolves.toEqual(notFound);
+      await expect(media.getAsset(single)).resolves.toEqual(notFound);
+      await expect(media.deleteAsset(single)).resolves.toEqual(notFound);
+      current = { ...asset("failed"), attempts: 1 };
+      await expect(media.retryAsset(single)).resolves.toEqual(notFound);
+      current = asset("initiated");
+      await expect(media.completeUpload(single)).resolves.toEqual(notFound);
+
+      expect(storage.createDownloadUrl).not.toHaveBeenCalled();
+      expect(repository.markDeleting).not.toHaveBeenCalled();
+      expect(repository.requeue).not.toHaveBeenCalled();
+      expect(repository.markUploadedAndEnqueue).not.toHaveBeenCalled();
+    });
+
+    it("answers 404 to a new upload", async () => {
+      await expect(
+        service(true, published).initializeUpload({
+          accessors: [],
+          contentType: "image/jpeg",
+          fieldId: "photos",
+          giftPublicId: gift.publicId,
+          sizeBytes: 3,
+        }),
+      ).resolves.toEqual({ error: { code: "NOT_FOUND" }, ok: false });
+    });
   });
 });

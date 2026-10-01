@@ -10,7 +10,7 @@ import {
 
 import { COLLECTIONS, type CollectionName } from "./collections";
 
-export const DATABASE_SCHEMA_VERSION = 6;
+export const DATABASE_SCHEMA_VERSION = 9;
 
 type DatabaseMigrationDocument = Readonly<{
   _id: string;
@@ -39,6 +39,9 @@ type ExistingIndex = Readonly<{
   sparse?: boolean;
   unique?: boolean;
 }>;
+
+/** A share id: 16 random bytes as unpadded base64url. */
+const SHARE_ID_PATTERN = "^[A-Za-z0-9_-]{22}$";
 
 const timestampsValidator = {
   createdAt: { bsonType: "date" },
@@ -105,7 +108,20 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
           _id: { bsonType: "string" },
           count: { bsonType: "int", minimum: 1 },
           expiresAt: { bsonType: "date" },
-          scope: { enum: ["gift-claim", "gift-create", "gift-update", "media-upload"] },
+          scope: {
+            enum: [
+              "analytics-event",
+              "analytics-event-ip",
+              "gift-claim",
+              "gift-create",
+              "gift-preview",
+              "gift-publish",
+              "gift-update",
+              "media-upload",
+              "public-gift-read",
+              "public-gift-read-ip",
+            ],
+          },
           subjectHash: { bsonType: "string", pattern: "^[a-f0-9]{64}$" },
           ...timestampsValidator,
         },
@@ -164,6 +180,16 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
       },
       { key: { status: 1, "access.unlockAt": 1 }, options: { name: "gifts_status_unlock" } },
       { key: { status: 1, expiresAt: 1 }, options: { name: "gifts_status_expiry" } },
+      {
+        // Partial rather than sparse: drafts have no `shareId` key, and drift detection compares
+        // partial filters. Share-id lookups repeat `$type: "string"` so this index is eligible.
+        key: { shareId: 1 },
+        options: {
+          name: "gifts_share_id_unique",
+          partialFilterExpression: { shareId: { $type: "string" } },
+          unique: true,
+        },
+      },
     ],
     name: COLLECTIONS.gifts,
     validator: {
@@ -194,7 +220,9 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
             required: ["anonymousDraftId", "claimTokenHash", "ownerId"],
           },
           publicId: { bsonType: "string" },
+          publishedAt: { bsonType: "date" },
           revision: { bsonType: "int", minimum: 0 },
+          shareId: { bsonType: "string", pattern: SHARE_ID_PATTERN },
           status: {
             enum: [
               "draft",
@@ -417,6 +445,127 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
           "deduplicationKey",
           "createdAt",
           "updatedAt",
+        ],
+      },
+    },
+  },
+  {
+    indexes: [
+      {
+        key: { expiresAt: 1 },
+        options: { expireAfterSeconds: 0, name: "preview_tokens_expiry_ttl" },
+      },
+    ],
+    name: COLLECTIONS.previewTokens,
+    validator: {
+      $jsonSchema: {
+        additionalProperties: true,
+        bsonType: "object",
+        properties: {
+          // The SHA-256 hash of the preview token; the token itself is never stored.
+          _id: { bsonType: "string", pattern: "^[a-f0-9]{64}$" },
+          createdAt: { bsonType: "date" },
+          expiresAt: { bsonType: "date" },
+          giftId: { bsonType: "string", minLength: 1 },
+        },
+        required: ["_id", "giftId", "expiresAt", "createdAt"],
+      },
+    },
+  },
+  {
+    indexes: [
+      {
+        key: { shareId: 1 },
+        options: { name: "gift_publications_share_id_unique", unique: true },
+      },
+      {
+        key: { giftId: 1, revision: 1 },
+        options: { name: "gift_publications_gift_revision_unique", unique: true },
+      },
+    ],
+    name: COLLECTIONS.giftPublications,
+    validator: {
+      $jsonSchema: {
+        additionalProperties: true,
+        bsonType: "object",
+        properties: {
+          _id: { bsonType: "string", minLength: 1 },
+          artifactContentHash: { bsonType: "string", pattern: "^[a-f0-9]{64}$" },
+          assetIds: { bsonType: "array", items: { bsonType: "string" } },
+          audioTrackId: { bsonType: ["string", "null"] },
+          content: { bsonType: "object" },
+          createdAt: { bsonType: "date" },
+          giftId: { bsonType: "string", minLength: 1 },
+          publishedAt: { bsonType: "date" },
+          revision: { bsonType: "int", minimum: 0 },
+          shareId: { bsonType: "string", pattern: SHARE_ID_PATTERN },
+          templateId: { bsonType: "string" },
+          templateVersion: { bsonType: "string" },
+        },
+        required: [
+          "_id",
+          "giftId",
+          "shareId",
+          "revision",
+          "templateId",
+          "templateVersion",
+          "artifactContentHash",
+          "content",
+          "assetIds",
+          "audioTrackId",
+          "publishedAt",
+          "createdAt",
+        ],
+      },
+    },
+  },
+  {
+    indexes: [
+      {
+        key: { expiresAt: 1 },
+        options: { expireAfterSeconds: 0, name: "analytics_events_expiry_ttl" },
+      },
+      // Time-bounded counts per funnel step: the only query shape left for ad-hoc analysis.
+      { key: { name: 1, occurredAt: 1 }, options: { name: "analytics_events_name_occurred" } },
+    ],
+    name: COLLECTIONS.analyticsEvents,
+    validator: {
+      $jsonSchema: {
+        additionalProperties: true,
+        bsonType: "object",
+        properties: {
+          _id: { bsonType: "string", minLength: 1 },
+          expiresAt: { bsonType: "date" },
+          // The keyed HMAC of the internal gift id, never a public id or share id.
+          giftRef: { bsonType: "string", pattern: "^[A-Za-z0-9_-]{43}$" },
+          name: {
+            enum: [
+              "customization_started",
+              "required_content_completed",
+              "preview_started",
+              "publish_clicked",
+              "gift_published",
+              "gift_open_interaction",
+              "scene_completed",
+              "gift_completed",
+            ],
+          },
+          occurredAt: { bsonType: "date" },
+          sceneId: { bsonType: ["string", "null"] },
+          sessionId: { bsonType: ["string", "null"] },
+          templateId: { bsonType: "string", minLength: 1 },
+          templateVersion: { bsonType: "string", minLength: 1 },
+        },
+        required: [
+          "_id",
+          "name",
+          "giftRef",
+          "templateId",
+          "templateVersion",
+          "sessionId",
+          "sceneId",
+          "occurredAt",
+          "expiresAt",
         ],
       },
     },

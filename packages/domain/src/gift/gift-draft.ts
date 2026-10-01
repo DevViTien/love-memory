@@ -6,6 +6,7 @@ export type GiftDraftError = Readonly<
   | { code: "GIFT_NOT_DRAFT" }
   | { actualRevision: number; code: "GIFT_REVISION_CONFLICT"; expectedRevision: number }
   | { code: "GIFT_ALREADY_CLAIMED" }
+  | { code: "GIFT_NOT_OWNED" }
 >;
 
 export function createGiftDraft(

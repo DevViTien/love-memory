@@ -65,8 +65,13 @@ describe("Mongo media repositories", () => {
     insertOne: vi.fn(() => Promise.resolve({ acknowledged: true })),
     updateOne: vi.fn(() => Promise.resolve({ matchedCount: 0, modifiedCount: 0 })),
   };
+  const gifts = {
+    findOne: vi.fn(() => Promise.resolve({ _id: baseAsset.giftId } as { _id: string } | null)),
+  };
   const database = {
-    collection: vi.fn((name: string) => (name === "assets" ? assets : jobs)),
+    collection: vi.fn((name: string) =>
+      name === "assets" ? assets : name === "gifts" ? gifts : jobs,
+    ),
   };
   const session = {
     withTransaction: vi.fn(async (callback: () => Promise<void>) => callback()),
@@ -101,6 +106,20 @@ describe("Mongo media repositories", () => {
       id: baseAsset.id,
     });
     await expect(mongoMediaAssetRepository.listByGiftId(baseAsset.giftId)).resolves.toHaveLength(1);
+    assets.find.mockReturnValueOnce({
+      sort: () => ({ toArray: () => Promise.resolve([]) }),
+      toArray: () => Promise.resolve([document()]),
+    });
+    await expect(
+      mongoMediaAssetRepository.listByIdsForGift(baseAsset.giftId, [baseAsset.id]),
+    ).resolves.toHaveLength(1);
+    expect(assets.find).toHaveBeenLastCalledWith({
+      _id: { $in: [baseAsset.id] },
+      giftId: baseAsset.giftId,
+    });
+    await expect(mongoMediaAssetRepository.listByIdsForGift(baseAsset.giftId, [])).resolves.toEqual(
+      [],
+    );
     await expect(mongoMediaAssetRepository.releaseInitiated(baseAsset.id, now)).resolves.toBe(true);
     await expect(mongoMediaAssetRepository.markDeleted(baseAsset.id, now)).resolves.toBe(true);
     await expect(
@@ -195,11 +214,12 @@ describe("Mongo media repositories", () => {
     await expect(mongoMediaAssetRepository.requeue(baseAsset.id, now)).resolves.toMatchObject({
       status: "uploaded",
     });
-    await expect(mongoMediaAssetRepository.markDeleting(baseAsset.id, now)).resolves.toMatchObject({
-      status: "deleting",
-    });
+    await expect(
+      mongoMediaAssetRepository.markDeleting(baseAsset.id, baseAsset.giftId, now),
+    ).resolves.toMatchObject({ asset: { status: "deleting" }, kind: "deleting" });
     expect(jobs.insertOne).toHaveBeenCalledTimes(2);
-    expect(session.withTransaction).toHaveBeenCalledTimes(2);
+    // Enqueue, retry and the move to deleting (with its draft check) each run in a transaction.
+    expect(session.withTransaction).toHaveBeenCalledTimes(3);
   });
 
   it("claims, completes, retries and cleans durable worker jobs", async () => {
@@ -310,5 +330,52 @@ describe("Mongo media repositories", () => {
       { $set: { failureCode: "PROCESSING_FAILED", status: "failed", updatedAt: now } },
       { returnDocument: "after", session },
     );
+  });
+
+  describe("markDeleting", () => {
+    it("reads the draft gift and moves the asset in one session", async () => {
+      assets.findOneAndUpdate.mockResolvedValueOnce(document("deleting"));
+
+      await expect(
+        mongoMediaAssetRepository.markDeleting(baseAsset.id, baseAsset.giftId, now),
+      ).resolves.toMatchObject({
+        asset: { id: baseAsset.id, status: "deleting" },
+        kind: "deleting",
+      });
+
+      expect(session.withTransaction).toHaveBeenCalledOnce();
+      expect(gifts.findOne).toHaveBeenCalledWith(
+        { _id: baseAsset.giftId, status: "draft" },
+        { projection: { _id: 1 }, session },
+      );
+      expect(assets.findOneAndUpdate).toHaveBeenCalledWith(
+        { _id: baseAsset.id, giftId: baseAsset.giftId, status: { $ne: "deleted" } },
+        {
+          $set: {
+            expiresAt: new Date(now.getTime() + 60_000),
+            status: "deleting",
+            updatedAt: now,
+          },
+        },
+        { returnDocument: "after", session },
+      );
+    });
+
+    it("answers gift-not-draft without touching the asset of a published gift", async () => {
+      gifts.findOne.mockResolvedValueOnce(null);
+
+      await expect(
+        mongoMediaAssetRepository.markDeleting(baseAsset.id, baseAsset.giftId, now),
+      ).resolves.toEqual({ kind: "gift-not-draft" });
+      expect(assets.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("answers asset-unavailable when the asset is already deleted", async () => {
+      assets.findOneAndUpdate.mockResolvedValueOnce(null);
+
+      await expect(
+        mongoMediaAssetRepository.markDeleting(baseAsset.id, baseAsset.giftId, now),
+      ).resolves.toEqual({ kind: "asset-unavailable" });
+    });
   });
 });

@@ -18,6 +18,16 @@ type Props = Readonly<{
 
 const EMPTY_ASSET_URLS: Readonly<Record<string, string>> = {};
 
+type IssueScope = Readonly<{
+  assets: Readonly<Record<string, string>>;
+  payload: Props["payload"];
+  reducedMotion: boolean;
+}>;
+
+function issueKey(event: Extract<TemplateEvent, { type: "ISSUE" }>): string {
+  return `${event.code}|${event.fieldId}|${event.itemIndex ?? ""}`;
+}
+
 export function ViewerShell({ artifactUrl, assetUrls, audioUrl, payload }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -25,10 +35,13 @@ export function ViewerShell({ artifactUrl, assetUrls, audioUrl, payload }: Props
   const handshakeTimerRef = useRef<number | null>(null);
   const startedAt = useRef(0);
   const playStartedAt = useRef<number | null>(null);
+  const issueScopeRef = useRef<IssueScope | null>(null);
+  const issueKeysRef = useRef(new Set<string>());
   const [events, setEvents] = useState<readonly TemplateEvent[]>([]);
   const [status, setStatus] = useState("Đang tải artifact…");
   const [viewport, setViewport] = useState<"mobile" | "desktop">("desktop");
   const [forceReducedMotion, setForceReducedMotion] = useState(false);
+  const [issueCount, setIssueCount] = useState(0);
   const [performanceCounters, setPerformanceCounters] = useState<{
     completeMs?: number;
     readyMs?: number;
@@ -46,10 +59,29 @@ export function ViewerShell({ artifactUrl, assetUrls, audioUrl, payload }: Props
     }
   }, []);
 
+  /**
+   * Distinct issues are counted per payload and context. Handshake retries and iframe `load`
+   * resend the same INIT, so they keep the count.
+   */
+  const scopeIssues = useCallback((scope: IssueScope) => {
+    const current = issueScopeRef.current;
+    if (
+      current?.payload === scope.payload &&
+      current.assets === scope.assets &&
+      current.reducedMotion === scope.reducedMotion
+    ) {
+      return;
+    }
+    issueScopeRef.current = scope;
+    issueKeysRef.current = new Set();
+    setIssueCount(0);
+  }, []);
+
   const connect = useCallback(() => {
     const target = iframeRef.current?.contentWindow;
     if (!target) return;
     stopHandshake();
+    scopeIssues({ assets: resolvedAssetUrls, payload, reducedMotion: forceReducedMotion });
     bridgeRef.current?.disconnect();
     const bridge = createTemplateBridge({
       onEvent: (event) => {
@@ -68,6 +100,11 @@ export function ViewerShell({ artifactUrl, assetUrls, audioUrl, payload }: Props
           }));
         }
         setEvents((current) => [...current.slice(-19), event]);
+        if (event.type === "ISSUE") {
+          issueKeysRef.current.add(issueKey(event));
+          setIssueCount(issueKeysRef.current.size);
+          return;
+        }
         setStatus(event.type === "ERROR" ? `Runtime error: ${event.code}` : event.type);
       },
       postMessage: (message) => target.postMessage(message, "*"),
@@ -102,7 +139,7 @@ export function ViewerShell({ artifactUrl, assetUrls, audioUrl, payload }: Props
         resolvedAssetUrls,
       );
     }, 250);
-  }, [forceReducedMotion, payload, resolvedAssetUrls, stopHandshake]);
+  }, [forceReducedMotion, payload, resolvedAssetUrls, scopeIssues, stopHandshake]);
 
   useEffect(() => {
     const timer = window.setTimeout(connect, 0);
@@ -148,6 +185,7 @@ export function ViewerShell({ artifactUrl, assetUrls, audioUrl, payload }: Props
   function toggleReducedMotion() {
     const next = !forceReducedMotion;
     setForceReducedMotion(next);
+    scopeIssues({ assets: resolvedAssetUrls, payload, reducedMotion: next });
     bridgeRef.current?.initialize(payload, next, resolvedAssetUrls);
   }
 
@@ -173,7 +211,7 @@ export function ViewerShell({ artifactUrl, assetUrls, audioUrl, payload }: Props
       </div>
       <div className={viewport === "mobile" ? "mx-auto max-w-sm" : "w-full"}>
         <iframe
-          className="aspect-[4/3] w-full rounded-3xl border border-rose-200 bg-stone-950"
+          className={`${viewport === "mobile" ? "aspect-[9/16]" : "aspect-[4/3]"} w-full rounded-3xl border border-rose-200 bg-stone-950`}
           onLoad={connect}
           ref={iframeRef}
           sandbox="allow-scripts"
@@ -188,6 +226,9 @@ export function ViewerShell({ artifactUrl, assetUrls, audioUrl, payload }: Props
         </p>
         <p>
           <strong>Sự kiện hợp lệ:</strong> {events.length}
+        </p>
+        <p>
+          <strong>Vấn đề nội dung:</strong> {issueCount}
         </p>
         <p>
           <strong>READY:</strong> {performanceCounters.readyMs ?? "—"} ms

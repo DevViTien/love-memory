@@ -37,6 +37,15 @@ separate public delivery store may be evaluated later; it must not weaken the pr
 - Signed URLs are credentials and must be redacted from telemetry.
 - A real Vercel Preview is required to verify OIDC, region latency and direct browser upload.
 
+## Development and test storage
+
+Local development and Playwright may select a filesystem adapter with `STORAGE_DRIVER=local`
+(OpenSpec capability `local-object-storage`). It implements the same `ObjectStorage` port behind the
+same boundary, issues HMAC-signed, expiring, method-, key-, type- and size-bound same-origin URLs
+with the Blob TTLs, and stores bytes under `.tmp/object-storage/`, never in MongoDB. It is refused
+whenever `VERCEL_ENV` is set to anything but `development`, so every deployment keeps private
+Vercel Blob; this decision is unchanged.
+
 ## Revisit when
 
 - Media delivery cost or volume requires a dedicated public derivative strategy.

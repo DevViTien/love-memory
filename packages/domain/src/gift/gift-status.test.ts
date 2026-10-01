@@ -26,4 +26,16 @@ describe("gift lifecycle", () => {
       ok: true,
     });
   });
+
+  it.each([
+    ["draft", "published"],
+    ["published", "publishing"],
+    ["publishing", "publishing"],
+    ["deleted", "publishing"],
+  ] as const)("refuses %s -> %s", (from, to) => {
+    expect(transitionGift(from, to)).toEqual({
+      error: { code: "INVALID_GIFT_TRANSITION", from, to },
+      ok: false,
+    });
+  });
 });

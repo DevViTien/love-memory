@@ -1,7 +1,9 @@
 # Memory Box v1 storyboard and motion specification
 
-- Status: engineering baseline, ready for Product Owner/design review
+- Status: implemented as `memory-box@1.1.0` (`templates/memory-box`, committed release
+  `releases/1.1.0/`); Product Owner and design visual review of the Viewer harness captures pending
 - Template ID: `memory-box`
+- Release: `memory-box@1.1.0` replaces `memory-box@1.0.0`, which is retired and never edited
 - Spike artifact: `memory-box-spike@0.1.0`
 - Target duration: 45–70 seconds, receiver-controlled
 
@@ -13,24 +15,29 @@ the story or require precise gestures.
 
 ## Input contract
 
-| Field             | Type           | Requirement                                   |
-| ----------------- | -------------- | --------------------------------------------- |
-| `receiverName`    | short text     | Required, 1–40 characters                     |
-| `openingMessage`  | long text      | Required, maximum 400 characters              |
-| `anniversaryDate` | date           | Optional                                      |
-| `photos`          | image list     | Required, 3–12, normalized to 4:3 derivatives |
-| `theme`           | theme          | `rose-night` or `warm-paper`                  |
-| `audio`           | licensed audio | Optional; starts only after user gesture      |
+The manifest groups the fields into Studio steps in this order. Field ids are the manifest ids.
+
+| Step (`id`, label)        | Field id           | Type                 | Requirement                                               |
+| ------------------------- | ------------------ | -------------------- | --------------------------------------------------------- |
+| `recipient`, Người nhận   | `receiver-name`    | `shortText`          | Required, 1–40 characters                                 |
+| `recipient`, Người nhận   | `anniversary-date` | `date`               | Optional                                                  |
+| `opening`, Lời mở hộp     | `opening-message`  | `shortText`          | Required, 1–120 characters                                |
+| `memories`, Kỷ niệm       | `memories`         | `captionedImageList` | Required, 3–8 photos at 4:5, optional caption ≤ 140 each  |
+| `letter`, Lá thư          | `final-letter`     | `longText`           | Required, 1–1200 characters                               |
+| `style`, Giao diện & nhạc | `theme`            | `theme`              | `rose-night` or `warm-paper`; optional, defaults to first |
+| `style`, Giao diện & nhạc | `audio`            | `audio`              | Optional licensed catalog track; starts after a gesture   |
+
+`audio` stays optional so an empty licensed audio catalog never blocks a gift.
 
 ## Scene sequence
 
-| Scene        | Trigger and duration                   | Visual/motion                                                     | Runtime events and fallback                               |
-| ------------ | -------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------- |
-| Cover        | Viewer ready; waits indefinitely       | Box centered, subtle 2 px breathing over 2.4 s                    | No audio/autoplay; CTA remains readable                   |
-| Opening      | Receiver taps; 0.8 s                   | Lid lifts 18 px, box scales 1 → 1.04, warm radial glow            | `SCENE opening`; reduced motion uses instant state change |
-| Memory cards | Continue/timer; 4–8 s per image        | One image at a time, opacity and 8 px translate; user can advance | `SCENE memory-n`; broken image becomes text card          |
-| Letter       | After final image; receiver-controlled | Message reveals by paragraph, not character typing                | `SCENE letter`; plain text always selectable/readable     |
-| Finale       | Continue; 1.2 s                        | Small hearts/particles within budget, then stable closing card    | `COMPLETE`; reduced motion removes particles              |
+| Scene        | Trigger and duration                   | Visual/motion                                                                            | Runtime events and fallback                                            |
+| ------------ | -------------------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Cover        | Viewer ready; waits indefinitely       | Box centered, subtle 2 px breathing over 2.4 s                                           | No audio/autoplay; CTA remains readable                                |
+| Opening      | Receiver taps; 0.8 s                   | Lid lifts 18 px, box scales 1 → 1.04, warm radial glow                                   | `SCENE opening`; reduced motion uses instant state change              |
+| Memory cards | Continue/timer; 4–8 s per image        | One image at a time with its caption below; opacity and 8 px translate; user can advance | `SCENE memory-n`; broken image becomes a text card showing its caption |
+| Letter       | After final image; receiver-controlled | Message reveals by paragraph, not character typing                                       | `SCENE letter`; plain text always selectable/readable                  |
+| Finale       | Continue; 1.2 s                        | Small hearts/particles within budget, then stable closing card                           | `COMPLETE`; reduced motion removes particles                           |
 
 ## Motion tokens
 
@@ -60,6 +67,7 @@ the story or require precise gestures.
 
 ## Acceptance fixture
 
-Use Vietnamese diacritics, emoji, maximum-length text, portrait/landscape photos and one broken image.
+Use Vietnamese diacritics, emoji, maximum-length text and captions, photos with and without captions,
+portrait/landscape photos and one broken image.
 Capture normal, reduced-motion, no-audio and play-rejected states. Production implementation begins
 only after Product Owner/design accepts the narrative and input contract above.

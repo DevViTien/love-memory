@@ -1,7 +1,10 @@
 import { API_ERROR_CODES } from "@love-memory/contracts";
-import { randomUUID } from "node:crypto";
 
-import { createApiErrorResponse, createApiSuccessResponse } from "@/http/api-response";
+import {
+  createApiErrorResponse,
+  createApiSuccessResponse,
+  createRateLimitedResponse,
+} from "@/http/api-response";
 import { getCurrentUser } from "@/composition/session";
 import { getAuthEnvironment } from "@/modules/auth/infrastructure/auth-environment";
 import { type GiftAccessor, type GiftServiceError } from "@/modules/gifts/application/gift-service";
@@ -11,21 +14,26 @@ import {
   readCookie,
 } from "@/modules/gifts/infrastructure/anonymous-draft-identity";
 import {
-  consumeGiftMutationRateLimit,
+  consumeApiRateLimit,
   giftRateLimitSubjects,
-  type GiftMutationScope,
+  type ApiRateLimitScope,
 } from "@/modules/gifts/infrastructure/mongo-gift-rate-limiter";
 
-export async function getGiftRequestContext(request: Request): Promise<
-  Readonly<{
-    accessors: readonly GiftAccessor[];
-    anonymousIdentity: ReturnType<typeof parseAnonymousDraftIdentity>;
-    userId: string | null;
-  }>
-> {
+export { requestId } from "@/http/api-response";
+
+export type GiftRequestContext = Readonly<{
+  accessors: readonly GiftAccessor[];
+  anonymousIdentity: ReturnType<typeof parseAnonymousDraftIdentity>;
+  userId: string | null;
+}>;
+
+/** The draft credentials a page request presents: its session and its anonymous draft cookie. */
+export async function getGiftRequestContextFromHeaders(
+  headers: Headers,
+): Promise<GiftRequestContext> {
   const [user, anonymousIdentity] = await Promise.all([
-    getCurrentUser(request.headers),
-    Promise.resolve(parseAnonymousDraftIdentity(readCookie(request, ANONYMOUS_DRAFT_COOKIE))),
+    getCurrentUser(headers),
+    Promise.resolve(parseAnonymousDraftIdentity(readCookie({ headers }, ANONYMOUS_DRAFT_COOKIE))),
   ]);
 
   const accessors: GiftAccessor[] = [];
@@ -48,15 +56,14 @@ export async function getGiftRequestContext(request: Request): Promise<
   };
 }
 
-export function requestId(request: Request): string {
-  const supplied = request.headers.get("x-request-id");
-  return supplied && supplied.length <= 128 ? supplied : randomUUID();
+export function getGiftRequestContext(request: Request): Promise<GiftRequestContext> {
+  return getGiftRequestContextFromHeaders(request.headers);
 }
 
 export async function enforceGiftMutationRateLimit(
   request: Request,
-  context: Awaited<ReturnType<typeof getGiftRequestContext>>,
-  scope: GiftMutationScope,
+  context: GiftRequestContext,
+  scope: ApiRateLimitScope,
   id: string,
 ): Promise<Response | null> {
   const subjects = giftRateLimitSubjects(request, {
@@ -65,24 +72,15 @@ export async function enforceGiftMutationRateLimit(
       : {}),
     ...(context.userId ? { userId: context.userId } : {}),
   });
-  let result: Awaited<ReturnType<typeof consumeGiftMutationRateLimit>> | null = null;
+  let result: Awaited<ReturnType<typeof consumeApiRateLimit>> | null = null;
   for (const subject of subjects) {
-    result = await consumeGiftMutationRateLimit(scope, subject, getAuthEnvironment().secret);
+    result = await consumeApiRateLimit(scope, subject, getAuthEnvironment().secret);
     if (!result.allowed) break;
   }
   if (!result || result.allowed) {
     return null;
   }
-
-  const response = createApiErrorResponse({
-    code: API_ERROR_CODES.rateLimited,
-    details: { retryAfterSeconds: result.retryAfterSeconds },
-    message: "Too many requests. Please try again later.",
-    requestId: id,
-    status: 429,
-  });
-  response.headers.set("Retry-After", String(result.retryAfterSeconds));
-  return response;
+  return createRateLimitedResponse(result.retryAfterSeconds, id);
 }
 
 export function giftServiceErrorResponse(error: GiftServiceError, id: string): Response {
@@ -126,6 +124,37 @@ function mapGiftServiceError(error: GiftServiceError, id: string): Response {
         message: "Gift draft was not found.",
         requestId: id,
         status: 404,
+      });
+    case "FORBIDDEN":
+      return createApiErrorResponse({
+        code: API_ERROR_CODES.forbidden,
+        message: "Publishing is not enabled for this account.",
+        requestId: id,
+        status: 403,
+      });
+    case "ACCESS_POLICY_UNSUPPORTED":
+      return createApiErrorResponse({
+        code: API_ERROR_CODES.conflict,
+        details: { reason: "ACCESS_POLICY_UNSUPPORTED" },
+        message: "This gift's access policy cannot be published yet.",
+        requestId: id,
+        status: 409,
+      });
+    case "TEMPLATE_NOT_EDITABLE":
+      return createApiErrorResponse({
+        code: API_ERROR_CODES.conflict,
+        details: { reason: "TEMPLATE_VERSION_NOT_EDITABLE" },
+        message: "This template version is no longer editable.",
+        requestId: id,
+        status: 409,
+      });
+    case "TEMPLATE_UNPUBLISHABLE":
+      return createApiErrorResponse({
+        code: API_ERROR_CODES.conflict,
+        details: { reason: "TEMPLATE_VERSION_UNPUBLISHABLE" },
+        message: "This template version cannot be published.",
+        requestId: id,
+        status: 409,
       });
     case "REVISION_CONFLICT":
       return createApiErrorResponse({

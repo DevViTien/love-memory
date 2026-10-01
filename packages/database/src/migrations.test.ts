@@ -97,7 +97,7 @@ describe("database schema migration", () => {
       CORE_COLLECTION_DEFINITIONS.map((definition) => [definition.name, definition]),
     );
 
-    expect(DATABASE_SCHEMA_VERSION).toBe(6);
+    expect(DATABASE_SCHEMA_VERSION).toBe(9);
     expect(definitions.has(COLLECTIONS.users)).toBe(true);
     expect(definitions.has(COLLECTIONS.apiRateLimits)).toBe(true);
     expect(definitions.has(COLLECTIONS.templates)).toBe(true);
@@ -107,6 +107,8 @@ describe("database schema migration", () => {
     expect(definitions.has(COLLECTIONS.assets)).toBe(true);
     expect(definitions.has(COLLECTIONS.idempotencyKeys)).toBe(true);
     expect(definitions.has(COLLECTIONS.jobOutbox)).toBe(true);
+    expect(definitions.has(COLLECTIONS.giftPublications)).toBe(true);
+    expect(definitions.has(COLLECTIONS.analyticsEvents)).toBe(true);
 
     const idempotencyValidator = definitions.get(COLLECTIONS.idempotencyKeys)?.validator as
       { $jsonSchema?: { required?: string[] } } | undefined;
@@ -121,6 +123,390 @@ describe("database schema migration", () => {
     expect(new Set(names).size).toBe(names.length);
     expect(names).toEqual(
       expect.arrayContaining(["assets_active_gift_slot_unique", "assets_active_field_slot_unique"]),
+    );
+  });
+
+  it("stores preview tokens only as hashes and expires them with a TTL index", () => {
+    const previewTokens = CORE_COLLECTION_DEFINITIONS.find(
+      (definition) => definition.name === COLLECTIONS.previewTokens,
+    );
+    const schema = (
+      previewTokens?.validator as
+        | {
+            $jsonSchema: {
+              properties: Record<string, Record<string, unknown>>;
+              required: string[];
+            };
+          }
+        | undefined
+    )?.$jsonSchema;
+
+    expect(schema?.required).toEqual(["_id", "giftId", "expiresAt", "createdAt"]);
+    expect(schema?.properties["_id"]).toEqual({ bsonType: "string", pattern: "^[a-f0-9]{64}$" });
+    expect(schema?.properties["giftId"]).toEqual({ bsonType: "string", minLength: 1 });
+    expect(previewTokens?.indexes).toEqual([
+      {
+        key: { expiresAt: 1 },
+        options: { expireAfterSeconds: 0, name: "preview_tokens_expiry_ttl" },
+      },
+    ]);
+
+    const hashPattern = new RegExp(String(schema?.properties["_id"]?.["pattern"]));
+    expect(hashPattern.test("a".repeat(64))).toBe(true);
+    expect(hashPattern.test("A-_b".repeat(10) + "xyz")).toBe(false);
+  });
+
+  it("accepts the preview, publish, public read and analytics rate-limit scopes", () => {
+    const apiRateLimits = CORE_COLLECTION_DEFINITIONS.find(
+      (definition) => definition.name === COLLECTIONS.apiRateLimits,
+    );
+    const scope = (
+      apiRateLimits?.validator as
+        { $jsonSchema: { properties: { scope: { enum: string[] } } } } | undefined
+    )?.$jsonSchema.properties.scope.enum;
+
+    expect(scope).toEqual([
+      "analytics-event",
+      "analytics-event-ip",
+      "gift-claim",
+      "gift-create",
+      "gift-preview",
+      "gift-publish",
+      "gift-update",
+      "media-upload",
+      "public-gift-read",
+      "public-gift-read-ip",
+    ]);
+  });
+
+  it("defines the gift share fields and the partial unique share-id index", () => {
+    const gifts = CORE_COLLECTION_DEFINITIONS.find(
+      (definition) => definition.name === COLLECTIONS.gifts,
+    );
+    const schema = (
+      gifts?.validator as
+        | {
+            $jsonSchema: {
+              properties: Record<string, Record<string, unknown>>;
+              required: string[];
+            };
+          }
+        | undefined
+    )?.$jsonSchema;
+
+    expect(schema?.properties["shareId"]).toEqual({
+      bsonType: "string",
+      pattern: "^[A-Za-z0-9_-]{22}$",
+    });
+    expect(schema?.properties["publishedAt"]).toEqual({ bsonType: "date" });
+    expect(schema?.required).not.toContain("shareId");
+    expect(schema?.required).not.toContain("publishedAt");
+    expect(gifts?.indexes).toContainEqual({
+      key: { shareId: 1 },
+      options: {
+        name: "gifts_share_id_unique",
+        partialFilterExpression: { shareId: { $type: "string" } },
+        unique: true,
+      },
+    });
+
+    const sharePattern = new RegExp(String(schema?.properties["shareId"]?.["pattern"]));
+    expect(sharePattern.test("a".repeat(22))).toBe(true);
+    expect(sharePattern.test("a".repeat(21))).toBe(false);
+  });
+
+  it("defines the immutable publication record with unique share and revision indexes", () => {
+    const publications = CORE_COLLECTION_DEFINITIONS.find(
+      (definition) => definition.name === COLLECTIONS.giftPublications,
+    );
+    const schema = (
+      publications?.validator as
+        | {
+            $jsonSchema: {
+              additionalProperties: boolean;
+              properties: Record<string, Record<string, unknown>>;
+              required: string[];
+            };
+          }
+        | undefined
+    )?.$jsonSchema;
+
+    expect(schema?.additionalProperties).toBe(true);
+    expect(schema?.required).toEqual([
+      "_id",
+      "giftId",
+      "shareId",
+      "revision",
+      "templateId",
+      "templateVersion",
+      "artifactContentHash",
+      "content",
+      "assetIds",
+      "audioTrackId",
+      "publishedAt",
+      "createdAt",
+    ]);
+    expect(schema?.properties["artifactContentHash"]).toEqual({
+      bsonType: "string",
+      pattern: "^[a-f0-9]{64}$",
+    });
+    expect(schema?.properties["audioTrackId"]).toEqual({ bsonType: ["string", "null"] });
+    expect(publications?.indexes).toEqual([
+      {
+        key: { shareId: 1 },
+        options: { name: "gift_publications_share_id_unique", unique: true },
+      },
+      {
+        key: { giftId: 1, revision: 1 },
+        options: { name: "gift_publications_gift_revision_unique", unique: true },
+      },
+    ]);
+  });
+
+  function rateLimitValidatorWithScopes(scopes: readonly string[]): unknown {
+    const apiRateLimits = CORE_COLLECTION_DEFINITIONS.find(
+      (definition) => definition.name === COLLECTIONS.apiRateLimits,
+    );
+    const validator = structuredClone(apiRateLimits?.validator) as {
+      $jsonSchema: { properties: { scope: { enum: string[] } } };
+    };
+    validator.$jsonSchema.properties.scope.enum = [...scopes];
+    return validator;
+  }
+
+  function giftsWithoutShareFields(fake: FakeDatabase): void {
+    const gifts = CORE_COLLECTION_DEFINITIONS.find(
+      (definition) => definition.name === COLLECTIONS.gifts,
+    );
+    const validator = structuredClone(gifts?.validator) as {
+      $jsonSchema: { properties: Record<string, unknown> };
+    };
+    delete validator.$jsonSchema.properties["shareId"];
+    delete validator.$jsonSchema.properties["publishedAt"];
+    fake.validators.set(COLLECTIONS.gifts, validator);
+    const indexes = fake.collection(COLLECTIONS.gifts).indexDefinitions;
+    indexes.splice(
+      indexes.findIndex((index) => index["name"] === "gifts_share_id_unique"),
+      1,
+    );
+  }
+
+  it("upgrades a version 6 database to version 9 in one run", async () => {
+    const fake = new FakeDatabase();
+    const database = fake as unknown as Db;
+    await runDatabaseMigrations(database);
+    // The version 6 schema: no preview tokens, no publications, the old scopes and gift fields.
+    fake.collections.delete(COLLECTIONS.previewTokens);
+    fake.collections.delete(COLLECTIONS.giftPublications);
+    fake.collections.delete(COLLECTIONS.analyticsEvents);
+    fake.validators.set(
+      COLLECTIONS.apiRateLimits,
+      rateLimitValidatorWithScopes(["gift-claim", "gift-create", "gift-update", "media-upload"]),
+    );
+    giftsWithoutShareFields(fake);
+    fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 6;
+
+    await expect(verifyDatabaseSchema(database)).rejects.toThrow(
+      "MongoDB validator mismatch: apiRateLimits",
+    );
+
+    await runDatabaseMigrations(database);
+    expect(fake.collections.has(COLLECTIONS.previewTokens)).toBe(true);
+    expect(fake.collections.has(COLLECTIONS.giftPublications)).toBe(true);
+    expect(
+      fake.collection(COLLECTIONS.previewTokens).indexDefinitions.map((index) => index["name"]),
+    ).toContain("preview_tokens_expiry_ttl");
+    expect(
+      fake.collection(COLLECTIONS.gifts).indexDefinitions.map((index) => index["name"]),
+    ).toContain("gifts_share_id_unique");
+    expect(fake.collections.has(COLLECTIONS.analyticsEvents)).toBe(true);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(9);
+    await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
+  });
+
+  it("upgrades a version 7 database by adding publications and share fields", async () => {
+    const fake = new FakeDatabase();
+    const database = fake as unknown as Db;
+    await runDatabaseMigrations(database);
+    fake.collections.delete(COLLECTIONS.giftPublications);
+    fake.collections.delete(COLLECTIONS.analyticsEvents);
+    fake.validators.set(
+      COLLECTIONS.apiRateLimits,
+      rateLimitValidatorWithScopes([
+        "gift-claim",
+        "gift-create",
+        "gift-preview",
+        "gift-update",
+        "media-upload",
+      ]),
+    );
+    giftsWithoutShareFields(fake);
+    fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 7;
+
+    await expect(verifyDatabaseSchema(database)).rejects.toThrow("MongoDB validator mismatch");
+
+    await runDatabaseMigrations(database);
+    expect(
+      fake.collection(COLLECTIONS.giftPublications).indexDefinitions.map((index) => index["name"]),
+    ).toEqual(
+      expect.arrayContaining([
+        "gift_publications_share_id_unique",
+        "gift_publications_gift_revision_unique",
+      ]),
+    );
+    expect(fake.collections.has(COLLECTIONS.analyticsEvents)).toBe(true);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(9);
+    await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
+  });
+
+  it("defines the analytics event record with a TTL index and a per-step time index", () => {
+    const analyticsEvents = CORE_COLLECTION_DEFINITIONS.find(
+      (definition) => definition.name === COLLECTIONS.analyticsEvents,
+    );
+    const schema = (
+      analyticsEvents?.validator as
+        | {
+            $jsonSchema: {
+              properties: Record<string, { bsonType?: unknown; enum?: string[]; pattern?: string }>;
+              required: string[];
+            };
+          }
+        | undefined
+    )?.$jsonSchema;
+
+    expect(schema?.required).toEqual([
+      "_id",
+      "name",
+      "giftRef",
+      "templateId",
+      "templateVersion",
+      "sessionId",
+      "sceneId",
+      "occurredAt",
+      "expiresAt",
+    ]);
+    expect(schema?.properties["name"]?.enum).toEqual([
+      "customization_started",
+      "required_content_completed",
+      "preview_started",
+      "publish_clicked",
+      "gift_published",
+      "gift_open_interaction",
+      "scene_completed",
+      "gift_completed",
+    ]);
+    expect(schema?.properties["sessionId"]?.bsonType).toEqual(["string", "null"]);
+    expect(schema?.properties["sceneId"]?.bsonType).toEqual(["string", "null"]);
+    const giftRefPattern = new RegExp(schema?.properties["giftRef"]?.pattern ?? "^$");
+    expect(giftRefPattern.test("A".repeat(42) + "_")).toBe(true);
+    // A raw SHA-256 hex digest is not a gift reference.
+    expect(giftRefPattern.test("a".repeat(64))).toBe(false);
+    expect(analyticsEvents?.indexes).toEqual([
+      {
+        key: { expiresAt: 1 },
+        options: { expireAfterSeconds: 0, name: "analytics_events_expiry_ttl" },
+      },
+      { key: { name: 1, occurredAt: 1 }, options: { name: "analytics_events_name_occurred" } },
+    ]);
+  });
+
+  it("upgrades a version 8 database by adding analytics events and the analytics scopes", async () => {
+    const fake = new FakeDatabase();
+    const database = fake as unknown as Db;
+    await runDatabaseMigrations(database);
+    fake.collections.delete(COLLECTIONS.analyticsEvents);
+    fake.validators.set(
+      COLLECTIONS.apiRateLimits,
+      rateLimitValidatorWithScopes([
+        "gift-claim",
+        "gift-create",
+        "gift-preview",
+        "gift-publish",
+        "gift-update",
+        "media-upload",
+        "public-gift-read",
+        "public-gift-read-ip",
+      ]),
+    );
+    fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 8;
+    const publications = fake.collection(COLLECTIONS.giftPublications);
+    const indexesBefore = JSON.stringify(publications.indexDefinitions);
+
+    await expect(verifyDatabaseSchema(database)).rejects.toThrow(
+      "MongoDB validator mismatch: apiRateLimits",
+    );
+
+    await runDatabaseMigrations(database);
+    expect(
+      fake.collection(COLLECTIONS.analyticsEvents).indexDefinitions.map((index) => index["name"]),
+    ).toEqual(
+      expect.arrayContaining(["analytics_events_expiry_ttl", "analytics_events_name_occurred"]),
+    );
+    expect(JSON.stringify(publications.indexDefinitions)).toBe(indexesBefore);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(9);
+    await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
+  });
+
+  it("detects drift in the analytics validator and TTL index", async () => {
+    const fake = new FakeDatabase();
+    const database = fake as unknown as Db;
+    await runDatabaseMigrations(database);
+
+    fake.validators.set(COLLECTIONS.analyticsEvents, { wrong: true });
+    await expect(verifyDatabaseSchema(database)).rejects.toThrow(
+      "MongoDB validator mismatch: analyticsEvents",
+    );
+
+    await runDatabaseMigrations(database);
+    const indexes = fake.collection(COLLECTIONS.analyticsEvents).indexDefinitions;
+    const ttl = indexes.findIndex((index) => index["name"] === "analytics_events_expiry_ttl");
+    const { expireAfterSeconds: _ttl, ...withoutTtl } = indexes[ttl] ?? {};
+    indexes.splice(ttl, 1, withoutTtl);
+    await expect(verifyDatabaseSchema(database)).rejects.toThrow(
+      "MongoDB index mismatch: analyticsEvents.analytics_events_expiry_ttl",
+    );
+
+    await runDatabaseMigrations(database);
+    expect(
+      fake
+        .collection(COLLECTIONS.analyticsEvents)
+        .indexDefinitions.find((index) => index["name"] === "analytics_events_expiry_ttl"),
+    ).toEqual(expect.objectContaining({ expireAfterSeconds: 0 }));
+    await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
+  });
+
+  it("detects drift in the publication validator and indexes", async () => {
+    const fake = new FakeDatabase();
+    const database = fake as unknown as Db;
+    await runDatabaseMigrations(database);
+
+    fake.validators.set(COLLECTIONS.giftPublications, { wrong: true });
+    await expect(verifyDatabaseSchema(database)).rejects.toThrow(
+      "MongoDB validator mismatch: giftPublications",
+    );
+
+    await runDatabaseMigrations(database);
+    const indexes = fake.collection(COLLECTIONS.giftPublications).indexDefinitions;
+    const shareIndex = indexes.findIndex(
+      (index) => index["name"] === "gift_publications_share_id_unique",
+    );
+    indexes.splice(shareIndex, 1, { ...indexes[shareIndex], unique: false });
+    await expect(verifyDatabaseSchema(database)).rejects.toThrow(
+      "MongoDB index mismatch: giftPublications.gift_publications_share_id_unique",
+    );
+
+    await runDatabaseMigrations(database);
+    const giftIndexes = fake.collection(COLLECTIONS.gifts).indexDefinitions;
+    const giftShareIndex = giftIndexes.findIndex(
+      (index) => index["name"] === "gifts_share_id_unique",
+    );
+    giftIndexes.splice(giftShareIndex, 1, {
+      ...giftIndexes[giftShareIndex],
+      partialFilterExpression: undefined,
+      sparse: true,
+    });
+    await expect(verifyDatabaseSchema(database)).rejects.toThrow(
+      "MongoDB index mismatch: gifts.gifts_share_id_unique",
     );
   });
 
@@ -202,7 +588,9 @@ describe("database schema migration", () => {
 
     await runDatabaseMigrations(database);
     fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 1;
-    await expect(verifyDatabaseSchema(database)).rejects.toThrow("schema version mismatch");
+    await expect(verifyDatabaseSchema(database)).rejects.toThrow(
+      "MongoDB schema version mismatch: expected 9, received 1.",
+    );
 
     await runDatabaseMigrations(database);
     fake.collection(COLLECTIONS.assets).indexDefinitions.push({

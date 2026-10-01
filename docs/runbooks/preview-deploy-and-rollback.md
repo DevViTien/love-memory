@@ -51,18 +51,70 @@ GitHub checks but does not create a Vercel deployment.
 
 Configure shared Preview secrets once and override environment identity per branch:
 
-| Variable             | `dev` Preview branch                                      | `stg` Preview branch                                  | Production                  |
-| -------------------- | --------------------------------------------------------- | ----------------------------------------------------- | --------------------------- |
-| `APP_URL`            | Development stable URL                                    | Staging stable URL                                    | Production stable URL       |
-| `BETTER_AUTH_URL`    | Development stable URL                                    | Staging stable URL                                    | Production stable URL       |
-| `MONGODB_DATABASE`   | `love_memory_development`                                 | `love_memory_staging`                                 | `love_memory_production`    |
-| `MONGODB_URI`        | Shared Preview secret or dedicated development credential | Shared Preview secret or dedicated staging credential | Dedicated Production secret |
-| `BETTER_AUTH_SECRET` | Shared Preview secret or a branch-specific secret         | Shared Preview secret or a branch-specific secret     | Dedicated Production secret |
-| `RESEND_API_KEY`     | Preview secret                                            | Preview secret                                        | Production secret           |
+| Variable                    | `dev` Preview branch                                      | `stg` Preview branch                                  | Production                                       |
+| --------------------------- | --------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------ |
+| `APP_URL`                   | Development stable URL                                    | Staging stable URL                                    | Production stable URL                            |
+| `BETTER_AUTH_URL`           | Development stable URL                                    | Staging stable URL                                    | Production stable URL                            |
+| `MONGODB_DATABASE`          | `love_memory_development`                                 | `love_memory_staging`                                 | `love_memory_production`                         |
+| `MONGODB_URI`               | Shared Preview secret or dedicated development credential | Shared Preview secret or dedicated staging credential | Dedicated Production secret                      |
+| `BETTER_AUTH_SECRET`        | Shared Preview secret or a branch-specific secret         | Shared Preview secret or a branch-specific secret     | Dedicated Production secret                      |
+| `RESEND_API_KEY`            | Preview secret                                            | Preview secret                                        | Production secret                                |
+| `INTERNAL_PUBLISH_ENABLED`  | `true`                                                    | `true`                                                | Absent (forced off anyway)                       |
+| `ANALYTICS_ENABLED`         | `true`                                                    | `true`                                                | Absent (off) until the Product Owner turns it on |
+| `ANALYTICS_GIFT_REF_SECRET` | 48 random bytes, base64url; development only              | 48 random bytes, base64url; staging only              | Its own 48 random bytes, provisioned now         |
 
 `AUTH_EMAIL_FROM` and the Vercel Blob connection may be shared across Preview branches during the
 current stage. Technical-spike endpoints stay disabled unless a time-boxed verification explicitly
 requires them.
+
+`INTERNAL_PUBLISH_ENABLED` is the Sprint 3 stand-in for a publish entitlement. Only the exact value
+`true` enables publishing, and the application forces it off whenever `VERCEL_ENV` is `production`,
+so Production cannot publish until Sprint 4 brings real entitlements. Never set it in Production.
+
+`ANALYTICS_ENABLED` turns on first-party funnel analytics ([ADR-0010](../adr/0010-first-party-funnel-analytics.md)).
+Only the exact value `true` enables it, and only with an `ANALYTICS_GIFT_REF_SECRET` of at least 32
+characters; anything else runs with analytics off and logs `analytics_misconfigured` once (never
+the value). Production stays off by accepted product decision until the Sprint 6 privacy notice and
+consent copy ship; turning it on is this variable alone, no code change. Generate each secret with
+`node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`; it is dedicated
+(never `BETTER_AUTH_SECRET` or `LOCAL_OBJECT_STORAGE_SECRET`) and never shared between environments.
+
+### Rotating the analytics gift-ref secret
+
+`ANALYTICS_GIFT_REF_SECRET` keys `giftRef`, the pseudonym that joins a gift's Studio, server and
+recipient events. Rotate it only when the value may be exposed (a leaked environment, a departing
+member with access to it), not on a schedule:
+
+1. generate a new 48-byte base64url value for that environment only, and replace the variable;
+2. redeploy the branch so new requests read it.
+
+Every gift then gets a new `giftRef`: events recorded before and after the rotation cannot be
+joined, and a funnel that spans the rotation splits in two. Stored events stay valid and expire by
+their 180-day TTL; no data migration is needed. The value is never logged, never shared between
+environments, and never copied into tickets or chat. No key id is stored; if a planned rotation is
+ever needed, a `giftRefKeyVersion` field is a later additive change.
+
+### Share links in platform logs
+
+A published gift is opened at `/g/{shareId}`, and the share id is a bearer secret: anyone with the
+link can open the gift. The application never writes share ids, payloads or signed URLs to its own
+logs, sends `Referrer-Policy: no-referrer` and `Cache-Control: private, no-store` on `/g/`, and the
+development request log ignores `/g/` and `/api/public-gifts/`. The hosting platform still records
+request paths:
+
+- Vercel runtime and request logs keep `/g/{shareId}` and `/api/public-gifts/{shareId}` paths. The
+  application cannot remove them.
+- Who can read them: only members of the Vercel team with access to the `love-memory` project (the
+  Owner and Member roles; Viewer-role members too, where the plan offers that role). Review that
+  membership together with the Production secret owners, and remove members who no longer need it.
+- Retention: how long Vercel keeps runtime logs and request history depends on the project's
+  Vercel plan and on any configured log drain (none is configured). Check the plan's current
+  limits in the Vercel dashboard or documentation before relying on a number, and again whenever
+  the plan changes.
+- No log drain may be configured until it strips `/g/` and `/api/public-gifts/` paths (or the share
+  id segment) before storage.
+- Links cannot be revoked or re-issued until Sprint 4 (plan.md §13.1–13.2). In Sprint 3 only `dev`
+  and `stg` can publish, so only test gifts are exposed.
 
 ## Smoke test
 
@@ -87,6 +139,25 @@ For each deployed tier:
 
 Published template artifacts are immutable. Roll back their registry pointer or activate the
 template kill switch; never overwrite an artifact referenced by an existing gift.
+
+### Rolling back past schema version 8 (published gifts)
+
+Schema version `8` adds `giftPublications` and the optional `shareId` and `publishedAt` fields of
+published gifts. Production cannot publish (the flag is forced off), so a Production rollback is
+clean. On `dev` and `stg`, the previous build parses gift documents strictly and fails on published
+gifts: `/studio/{publicId}` of a published gift and its media routes answer `500` until a roll
+forward, and `/g/` does not exist. In order of preference:
+
+1. roll forward with a fix instead of rolling back;
+2. roll back and accept those `500`s for the few test gifts until the roll forward;
+3. for a clean rollback, first set `INTERNAL_PUBLISH_ENABLED=false`, then move the published test
+   gifts out of the way with a one-off script that is written and reviewed at that time (for
+   example `$unset` `shareId`/`publishedAt` and set `status: "draft"`, keeping `giftPublications`
+   for a later restore). Never run it ad hoc.
+
+The old `db:verify` reports drift after a rollback; running the old `db:migrate` restores the
+version `7` validators and ledger and leaves the extra `gifts_share_id_unique` index harmlessly in
+place. Re-deploying version `8` later restores access without data repair.
 
 ## Escalation
 

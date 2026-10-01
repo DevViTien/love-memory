@@ -16,6 +16,31 @@ export default async function NewStudioPage({ searchParams }: NewStudioPageProps
   const templateId = Array.isArray(rawTemplateId) ? rawTemplateId[0] : rawTemplateId;
   const template = templateId ? await getPublishedTemplateById(templateId) : undefined;
 
+  // A version without a registered artifact can be neither previewed nor published (A1).
+  if (template && !template.available) {
+    return (
+      <main>
+        <Container className="py-16 sm:py-20">
+          <div className="mx-auto max-w-3xl rounded-[2rem] border border-rose-100 bg-white/85 p-7 shadow-xl shadow-rose-100/60 sm:p-10">
+            <Badge>{template.name}</Badge>
+            <h1 className="mt-5 text-4xl font-black tracking-tight text-stone-900">
+              Mẫu quà này sắp ra mắt.
+            </h1>
+            <p className="mt-4 leading-7 text-stone-600">
+              Bạn có thể chọn một mẫu quà khác đang sẵn sàng trong kho template.
+            </p>
+            <Link
+              className={buttonVariants({ className: "mt-8", size: "lg" })}
+              href={ROUTES.templates}
+            >
+              Mở kho template
+            </Link>
+          </div>
+        </Container>
+      </main>
+    );
+  }
+
   return (
     <main>
       <Container className="py-16 sm:py-20">

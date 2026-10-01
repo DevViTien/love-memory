@@ -8,7 +8,7 @@ Lets the creator of a gift draft upload private images for the draft's `imageLis
 
 ### Requirement: Gift-bound asset authorization
 
-The system SHALL resolve the caller's accessors from the signed-in user session and the anonymous draft cookie, and SHALL authorize every media operation against the gift identified by `giftPublicId` using the gift draft access rules. An asset SHALL be visible to an operation only when the gift is accessible to the caller, the asset belongs to that gift, and the asset's status is not `deleted`. An unauthorized gift, a missing asset, an asset of another gift, a `deleted` asset, or a malformed asset ID or `giftPublicId` on the single-asset routes SHALL all respond `404` with code `NOT_FOUND`, so the response does not reveal whether the asset exists. A new asset SHALL inherit the gift's owner: the user ID for a user-owned gift or the anonymous draft ID for an anonymous gift, never both.
+The system SHALL resolve the caller's accessors from the signed-in user session and the anonymous draft cookie, and SHALL authorize every media operation against the gift identified by `giftPublicId` using the gift draft access rules. Every media operation SHALL require the gift's status to be `draft`: upload initialization and completion, listing, reading, deletion and retry. An asset SHALL be visible to an operation only when the gift is accessible to the caller and is a `draft`, the asset belongs to that gift, and the asset's status is not `deleted`. An unauthorized gift, a gift that is not a `draft`, a missing asset, an asset of another gift, a `deleted` asset, or a malformed asset ID or `giftPublicId` on the single-asset routes SHALL all respond `404` with code `NOT_FOUND`, so the response does not reveal whether the asset exists. Signed download URLs of a published gift's assets SHALL be issued only as specified in `public-gift-viewer`. A new asset SHALL inherit the gift's owner: the user ID for a user-owned gift or the anonymous draft ID for an anonymous gift, never both.
 
 #### Scenario: Asset of another gift
 
@@ -25,9 +25,14 @@ The system SHALL resolve the caller's accessors from the signed-in user session 
 - **WHEN** a caller holding a valid anonymous draft cookie initializes an upload for their anonymous draft
 - **THEN** the created asset is owned by that anonymous draft ID and has no user owner
 
+#### Scenario: Assets of a published gift
+
+- **WHEN** the owner of a published gift lists its assets, reads one, deletes one or retries one
+- **THEN** each response is `404` with code `NOT_FOUND`, no download URL is signed, and every asset keeps its status
+
 ### Requirement: Upload initialization
 
-The system SHALL accept `POST /api/media/uploads/init` with a strict JSON body containing only `contentType`, `fieldId` (1 to 80 characters), `fileName` (1 to 180 characters), `giftPublicId` and `sizeBytes` (a positive integer no greater than 10485760 bytes). `contentType` MUST be one of `image/jpeg`, `image/png` or `image/webp`; any other value, including `image/svg+xml`, SHALL be rejected with `400` and code `VALIDATION_ERROR` before any asset or grant is created. Upload initialization SHALL only be allowed for a gift whose status is `draft`; otherwise the response SHALL be `404` with code `NOT_FOUND`. The `fieldId` MUST name a field of type `imageList` in the gift's bound template version; otherwise the response SHALL be `422` with code `VALIDATION_ERROR`. Initialization requests SHALL be rate limited under the `media-upload` scope to 30 requests per 600-second window per subject (the signed-in user, else the anonymous draft, else the client IP), responding `429` with code `RATE_LIMITED` and a `Retry-After` header when exceeded.
+The system SHALL accept `POST /api/media/uploads/init` with a strict JSON body containing only `contentType`, `fieldId` (1 to 80 characters), `fileName` (1 to 180 characters), `giftPublicId` and `sizeBytes` (a positive integer no greater than 10485760 bytes). `contentType` MUST be one of `image/jpeg`, `image/png` or `image/webp`; any other value, including `image/svg+xml`, SHALL be rejected with `400` and code `VALIDATION_ERROR` before any asset or grant is created. Upload initialization SHALL only be allowed for a gift whose status is `draft`; otherwise the response SHALL be `404` with code `NOT_FOUND`. The `fieldId` MUST name a field of type `imageList` or `captionedImageList` in the gift's bound template version; otherwise the response SHALL be `422` with code `VALIDATION_ERROR`. Initialization requests SHALL be rate limited under the `media-upload` scope to 30 requests per 600-second window per subject (the signed-in user, else the anonymous draft, else the client IP), responding `429` with code `RATE_LIMITED` and a `Retry-After` header when exceeded.
 
 #### Scenario: SVG upload rejected
 
@@ -42,8 +47,13 @@ The system SHALL accept `POST /api/media/uploads/init` with a strict JSON body c
 
 #### Scenario: Field that does not accept images
 
-- **WHEN** a caller initializes an upload for a `fieldId` that is not an `imageList` field of the gift's template version
+- **WHEN** a caller initializes an upload for a `fieldId` that is neither an `imageList` nor a `captionedImageList` field of the gift's template version
 - **THEN** the response is `422` with code `VALIDATION_ERROR`
+
+#### Scenario: Captioned image field accepts uploads
+
+- **WHEN** an authorized caller initializes an `image/jpeg` upload for a `captionedImageList` field with free quota
+- **THEN** the response is `201` and the new asset is bound to that field
 
 #### Scenario: Gift that is not a draft
 
@@ -68,11 +78,11 @@ On successful initialization the system SHALL create an asset in status `initiat
 
 ### Requirement: Atomic per-gift and per-field quotas
 
-The system SHALL limit each gift to 30 active assets and each `imageList` field to the field's `maxItems` active assets, where an active asset is any asset whose status is not `deleted` (including `failed` and `deleting` assets). Quota checks and slot reservation SHALL be atomic so that concurrent initialization requests cannot exceed either limit. A request that would exceed either limit SHALL respond `429` with code `RATE_LIMITED`. Deleting an asset SHALL free its slots once it reaches `deleted`.
+The system SHALL limit each gift to 30 active assets and each `imageList` or `captionedImageList` field to the field's `maxItems` active assets, where an active asset is any asset whose status is not `deleted` (including `failed` and `deleting` assets). Quota checks and slot reservation SHALL be atomic so that concurrent initialization requests cannot exceed either limit. A request that would exceed either limit SHALL respond `429` with code `RATE_LIMITED`. Deleting an asset SHALL free its slots once it reaches `deleted`.
 
 #### Scenario: Field quota reached
 
-- **WHEN** an `imageList` field with `maxItems` 3 already has 3 non-deleted assets and the caller initializes another upload for it
+- **WHEN** an `imageList` or `captionedImageList` field with `maxItems` 3 already has 3 non-deleted assets and the caller initializes another upload for it
 - **THEN** the response is `429` with code `RATE_LIMITED`
 - **AND** no asset is created
 
@@ -136,7 +146,7 @@ The system SHALL list a gift's assets through `GET /api/media/assets?giftPublicI
 
 ### Requirement: Asset deletion
 
-The system SHALL delete an asset through `DELETE /api/media/assets/{assetId}` with a strict JSON body containing only `giftPublicId`. Deletion SHALL be allowed from any non-`deleted` status: the asset SHALL first move to `deleting`, then its source object and every derivative object SHALL be removed from storage, and only after all removals succeed SHALL the asset move to `deleted` and the response be `200` with `data` `{ assetId, deleted: true }`. If any storage removal fails, the response SHALL be `500` with code `INTERNAL_ERROR` and the asset SHALL remain `deleting` so that the delete can be repeated or finished by background cleanup. If the final transition to `deleted` loses a race, the response SHALL be `409` with code `CONFLICT`.
+The system SHALL delete an asset through `DELETE /api/media/assets/{assetId}` with a strict JSON body containing only `giftPublicId`. Deletion SHALL be allowed from any non-`deleted` status while the gift is a `draft`: the asset SHALL first move to `deleting`, then its source object and every derivative object SHALL be removed from storage, and only after all removals succeed SHALL the asset move to `deleted` and the response be `200` with `data` `{ assetId, deleted: true }`. The move to `deleting` SHALL be atomic with the gift still being a `draft`, so that it can never interleave with a publish of that gift: either the publish sees the asset leave `ready` and publishes nothing, or the deletion sees the gift published and responds `404` with code `NOT_FOUND` without changing the asset. A deletion refused because the gift is no longer a `draft` SHALL respond `404`, never `409`, whether the gift left `draft` before the request or during it. If any storage removal fails, the response SHALL be `500` with code `INTERNAL_ERROR` and the asset SHALL remain `deleting` so that the delete can be repeated or finished by background cleanup. If the final transition to `deleted` loses a race, the response SHALL be `409` with code `CONFLICT`.
 
 #### Scenario: Delete a ready asset
 
@@ -149,6 +159,16 @@ The system SHALL delete an asset through `DELETE /api/media/assets/{assetId}` wi
 - **WHEN** removing one of the asset's objects fails
 - **THEN** the response is `500` with code `INTERNAL_ERROR`
 - **AND** the asset remains `deleting`
+
+#### Scenario: Deletion races a publish
+
+- **WHEN** the owner deletes a photo of a draft while a publish of that draft is committing
+- **THEN** either the publish fails and the photo is deleted, or the publish succeeds and the deletion responds `404` with the photo still `ready`; never a published gift with a deleted photo
+
+#### Scenario: Gift published before the delete reaches the asset
+
+- **WHEN** the delete request passes authorization while the gift is a draft, and the gift is published before the asset moves to `deleting`
+- **THEN** the response is `404` with code `NOT_FOUND`, not `409`, and the asset stays `ready`
 
 ### Requirement: Manual processing retry
 
@@ -171,7 +191,7 @@ The system SHALL accept `POST /api/media/assets/{assetId}/retry` with a strict J
 
 ### Requirement: Gift content references assets by ID only
 
-Gift content SHALL reference uploaded images only by asset UUID inside `imageList` field values and MUST NOT contain storage URLs, keys or image bytes. An asset SHALL be referenceable from a draft save only when it belongs to the same gift and the same field and its status is `initiated`, `uploaded`, `processing`, `ready` or `failed`; assets in `deleting` or `deleted` SHALL NOT be referenceable. The save-time validation, uniqueness and item-count rules are specified in `gift-drafts`.
+Gift content SHALL reference uploaded images only by asset UUID, either as the items of `imageList` field values or as the `assetId` of `captionedImageList` items, and MUST NOT contain storage URLs, keys or image bytes. An asset SHALL be referenceable from a draft save only when it belongs to the same gift and the same field and its status is `initiated`, `uploaded`, `processing`, `ready` or `failed`; assets in `deleting` or `deleted` SHALL NOT be referenceable. The save-time validation, uniqueness and item-count rules are specified in `gift-drafts`.
 
 #### Scenario: Deleted asset referenced
 
@@ -182,3 +202,8 @@ Gift content SHALL reference uploaded images only by asset UUID inside `imageLis
 
 - **WHEN** a draft save references an asset of the same gift and field whose status is `failed`
 - **THEN** the reference is accepted by media validation
+
+#### Scenario: Captioned item with a storage URL
+
+- **WHEN** a draft save sets a `captionedImageList` item to `{ "assetId": "<uuid>", "url": "https://store.example/photo.jpg" }`
+- **THEN** the save is rejected with `400` and code `VALIDATION_ERROR`

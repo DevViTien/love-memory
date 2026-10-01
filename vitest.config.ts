@@ -14,7 +14,15 @@ export default defineConfig({
   },
   test: {
     coverage: {
-      exclude: ["**/*.config.*", "**/*.d.ts", "**/index.ts", "**/test/**", "**/types.ts"],
+      exclude: [
+        "**/*.config.*",
+        "**/*.d.ts",
+        "**/index.ts",
+        "**/test/**",
+        "**/types.ts",
+        "templates/memory-box/src/document.ts",
+        "templates/memory-box/src/fixtures.ts",
+      ],
       include: [
         "packages/{contracts,database,domain,media,shared,storage,template-sdk}/src/**/*.ts",
         "packages/ui/src/**/*.{ts,tsx}",
@@ -22,6 +30,7 @@ export default defineConfig({
         "apps/web/src/proxy.ts",
         "apps/web/src/modules/**/{application,domain,infrastructure}/**/*.{ts,tsx}",
         "apps/web/src/modules/**/presentation/**/*.ts",
+        "templates/memory-box/src/**/*.ts",
       ],
       provider: "v8",
       reporter: ["text", "html", "json-summary"],
@@ -55,6 +64,13 @@ export default defineConfig({
           include: ["packages/ui/src/**/*.test.tsx", "apps/web/src/**/*.test.{ts,tsx}"],
           name: "web",
           setupFiles: ["./test/setup-dom.ts"],
+        },
+      },
+      {
+        test: {
+          environment: "jsdom",
+          include: ["templates/memory-box/src/**/*.test.ts"],
+          name: "templates",
         },
       },
     ],
