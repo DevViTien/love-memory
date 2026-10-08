@@ -8,6 +8,7 @@ import {
   createMemoryBoxDraft,
   type E2eRecord,
   fillCompleteMemoryBox,
+  findAssetStatus,
   listDraftAssetIds,
   publishTypicalMemoryBox,
   saveStatus,
@@ -191,6 +192,10 @@ test("a photo of the live publication stays with recipients until the update rep
     const after = await recipientPayload(recipient, shareId);
     expect(Object.keys(after.assets)).toContain(replacement);
     expect(Object.keys(after.assets)).not.toContain(removed);
+    // No served publication needs the removed photo any more: the update's cleanup job
+    // (`gift.assets.cleanup.v1`, inline on the E2E server) deleted it for good.
+    await expect.poll(() => findAssetStatus(removed), { timeout: 15_000 }).toBe("deleted");
+    expect(await findAssetStatus(replacement!)).toBe("ready");
   } finally {
     await recipient.close();
   }

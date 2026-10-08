@@ -435,6 +435,7 @@ describe("Mongo gift repository publishing", () => {
     gifts: { findOne: vi.fn(), findOneAndUpdate: vi.fn() },
     giftPublications: { findOne: vi.fn(), insertOne: vi.fn() },
     idempotencyKeys: { findOne: vi.fn(), insertOne: vi.fn() },
+    jobOutbox: { updateOne: vi.fn() },
   };
   const session = { id: "session-1" };
   // Any session object: the transaction's session, whichever the driver passes.
@@ -458,6 +459,7 @@ describe("Mongo gift repository publishing", () => {
     collections.giftPublications.insertOne.mockResolvedValue({ acknowledged: true });
     collections.idempotencyKeys.insertOne.mockResolvedValue({ acknowledged: true });
     collections.giftPublications.findOne.mockResolvedValue(publicationDocument);
+    collections.jobOutbox.updateOne.mockResolvedValue({ upsertedCount: 1 });
   });
 
   it("publishes in one transaction with owner, status, access and revision filters", async () => {
@@ -490,6 +492,8 @@ describe("Mongo gift repository publishing", () => {
     expect(collections.giftPublications.insertOne).toHaveBeenCalledWith(publicationDocument, {
       session: inSession,
     });
+    // A first publish has no detached photos: no cleanup job.
+    expect(collections.jobOutbox.updateOne).not.toHaveBeenCalled();
     expect(collections.idempotencyKeys.insertOne).toHaveBeenCalledWith(
       {
         _id: `gift-publish:${publishIdempotency.key}`,
@@ -651,6 +655,18 @@ describe("Mongo gift repository publishing", () => {
       expect.objectContaining({ returnDocument: "after", session: inSession }),
     );
     expect(update.publication).toMatchObject({ revision: 2, shareId });
+    // The cleanup of photos this revision no longer shows commits with the publication.
+    expect(collections.jobOutbox.updateOne).toHaveBeenCalledWith(
+      { deduplicationKey: `gift.assets.cleanup.v1:${owned.id}:2` },
+      {
+        $setOnInsert: expect.objectContaining({
+          payload: { giftId: owned.id },
+          status: "pending",
+          type: "gift.assets.cleanup.v1",
+        }) as object,
+      },
+      { session: inSession, upsert: true },
+    );
   });
 
   it("updates a legacy published gift that has no pointer yet", async () => {

@@ -415,6 +415,54 @@ Catalog audio is licensed product content, not user media, so it is not stored i
 store described by [ADR-0003](./adr/0003-object-storage-for-media.md). If the catalog outgrows
 source control, move the files to a public store behind the same DTO `url`.
 
+## Background jobs
+
+Retryable work runs after the request that caused it has committed. Behavior is specified in
+`openspec/specs/background-jobs`. Operations are in the
+[background jobs runbook](./runbooks/background-jobs.md).
+
+- **The outbox is the source of truth.** A job is inserted in the same transaction as the state
+  that needs it (`enqueueJob` in `packages/database`, an upsert keyed by `deduplicationKey`). A lost
+  dispatch therefore never loses work. Payloads hold identifiers only (ADR-0008).
+- **Two runtimes share `jobOutbox`.**
+  - `media.process.v1` keeps its own claim rules, statuses and Trigger.dev tasks
+    (`media-processing`).
+  - Generic jobs use `modules/jobs`:
+    - `createJobRunner` claims the oldest due job of a registered type, validates its payload,
+      runs the idempotent handler, and then completes it, retries it with backoff
+      (`min(2^attempts × 30 s, 1 h)`), or moves it to `dead` with `lastErrorCode`;
+    - a `processing` lease older than 10 minutes is claimed again.
+  - Every query names its types, so neither runtime ever touches the other's jobs.
+- **Dispatch** follows `MEDIA_WORKER_MODE`:
+  - `inline` runs up to 10 steps right after the commit;
+  - `trigger` asks for `jobs-drain`;
+  - `jobs-sweep` runs every 5 minutes.
+
+  A dispatch never fails the request that enqueued the work. `composition/gifts.ts` loads
+  `composition/jobs` lazily, because the jobs composition builds on the gifts and media ones.
+
+- **Handlers.** `gift.assets.cleanup.v1` (`modules/media/application/gift-assets-cleanup.ts`) is
+  enqueued by every update publish. It deletes the detached photos that the current publication no
+  longer references:
+  1. a conditional move to `deleting`;
+  2. the storage removals;
+  3. `deleted`.
+
+  The expired-asset cleanup of the media worker finishes any removal that failed. A detached photo
+  can never be referenced by a save again, so no later publication can need it.
+
+- **Health.** Readiness fails with `JobOutboxStalledError` when a generic job has been due for more
+  than 10 minutes. This is a separate check from `MediaOutboxStalledError`.
+
+**Schema version 12 rollout and rollback.**
+
+- **Validator.** The `jobOutbox` validator allows `dead` and `lastErrorCode`.
+- **Backfill.** `db:migrate` enqueues one cleanup job for each published gift that already has
+  detached photos.
+- **Rollback.** The previous build never writes generic jobs. Its `db:verify` reports drift, and its
+  `db:migrate` restores the old validator, under which any remaining `dead` job no longer
+  validates on update. Leave them untouched until the roll forward; nothing runs them meanwhile.
+
 ## Configuration
 
 Each infrastructure boundary owns and validates its environment variables. Server-only URLs use

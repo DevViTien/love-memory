@@ -247,7 +247,10 @@ A successful publish SHALL, in one database transaction, do all of the following
   `templateVersion`, the registered artifact `contentHash` (`artifactContentHash`), the stored
   content, the referenced asset ids in content order (`assetIds`), the audio track id or `null`
   (`audioTrackId`) and `publishedAt`;
-- record the idempotency key (see "Idempotent publish").
+- record the idempotency key (see "Idempotent publish");
+- for an update, enqueue one `gift.assets.cleanup.v1` job for the gift (`media-upload` "Cleanup of
+  detached assets"), with the deduplication key `gift.assets.cleanup.v1:{giftId}:{revision}` of the
+  published revision. A first publish enqueues no cleanup job.
 
 The new publication becomes the gift's current publication when the transaction commits. Earlier
 publication records of the gift SHALL be kept unchanged and SHALL NOT be served to recipients. When
@@ -307,6 +310,13 @@ exactly `publicId`, `status` (`published`), `shareId`, `sharePath` (`/g/{shareId
 - **WHEN** a gift's `expiresAt` passes between the update's checks and its write
 - **THEN** nothing is written and the response is `409` with code `CONFLICT` and
   `error.details.reason` `GIFT_EXPIRED`
+
+#### Scenario: Update enqueues the cleanup of detached photos
+
+- **WHEN** the owner publishes revision `9` of a published gift
+- **THEN** exactly one `gift.assets.cleanup.v1` job with the deduplication key
+  `gift.assets.cleanup.v1:{giftId}:9` is committed with the new publication
+- **AND** a first publish of a draft commits no such job
 
 ### Requirement: Share id
 

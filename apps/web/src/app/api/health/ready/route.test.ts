@@ -4,14 +4,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const databaseMocks = vi.hoisted(() => ({ pingDatabase: vi.fn() }));
 const mediaMocks = vi.hoisted(() => ({ checkMediaOutbox: vi.fn() }));
+const jobMocks = vi.hoisted(() => ({ checkJobOutbox: vi.fn() }));
 
 vi.mock("@/composition/media", () => ({ checkMediaOutbox: mediaMocks.checkMediaOutbox }));
+vi.mock("@/composition/jobs", () => ({ checkJobOutbox: jobMocks.checkJobOutbox }));
 
 vi.mock("@love-memory/database", async (importOriginal) => ({
   ...(await importOriginal<typeof DatabaseModule>()),
   pingDatabase: databaseMocks.pingDatabase,
 }));
 
+import { JobOutboxStalledError } from "@/modules/jobs/application/job-outbox-health";
 import { MediaOutboxStalledError } from "@/modules/media/application/media-outbox-health";
 
 import { GET } from "./route";
@@ -28,6 +31,7 @@ describe("readiness dependency checks", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     databaseMocks.pingDatabase.mockResolvedValue(undefined);
     mediaMocks.checkMediaOutbox.mockResolvedValue(undefined);
+    jobMocks.checkJobOutbox.mockResolvedValue(undefined);
     for (const name of [
       "BLOB_READ_WRITE_TOKEN",
       "BLOB_STORE_ID",
@@ -118,5 +122,31 @@ describe("readiness dependency checks", () => {
 
     expect((await GET()).status).toBe(503);
     expect(mediaMocks.checkMediaOutbox).not.toHaveBeenCalled();
+  });
+
+  it("is unavailable when a generic job is overdue (Generic job worker stalled)", async () => {
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "blob-token");
+    jobMocks.checkJobOutbox.mockRejectedValue(new JobOutboxStalledError());
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await GET();
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: { code: "SERVICE_UNAVAILABLE", message: "Service dependencies are not ready." },
+    });
+    // Stalled job worker is named in the log, with no job, asset or gift identifier.
+    expect(errorLog).toHaveBeenCalledWith("Readiness check failed", {
+      errorName: "JobOutboxStalledError",
+      requestId: expect.any(String) as string,
+    });
+  });
+
+  it("checks the generic jobs after the media outbox", async () => {
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "blob-token");
+    mediaMocks.checkMediaOutbox.mockRejectedValue(new MediaOutboxStalledError());
+
+    expect((await GET()).status).toBe(503);
+    expect(jobMocks.checkJobOutbox).not.toHaveBeenCalled();
   });
 });

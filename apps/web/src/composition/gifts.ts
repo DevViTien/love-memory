@@ -35,6 +35,10 @@ export const giftService = createGiftService({
   createId: randomUUID,
   createPublicId: () => randomBytes(18).toString("base64url"),
   gifts: mongoGiftRepository,
+  // Loaded on use: `composition/jobs` builds on media and gifts, so a static import would cycle.
+  jobs: {
+    dispatch: async (type) => (await import("@/composition/jobs")).jobDispatcher.dispatch(type),
+  },
   publishing: {
     artifacts: {
       resolve: (templateId, version) => {

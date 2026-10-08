@@ -3,6 +3,7 @@ import { pingDatabase } from "@love-memory/database";
 import { getStorageConfiguration } from "@love-memory/storage";
 import { NextResponse } from "next/server";
 
+import { checkJobOutbox } from "@/composition/jobs";
 import { checkMediaOutbox } from "@/composition/media";
 import { WEB_APP_VERSION } from "@/config/application";
 import { getHealthStatus } from "@/modules/health/application/get-health-status";
@@ -21,6 +22,8 @@ export async function GET() {
     await pingDatabase();
     // A stalled media worker leaves uploads "processing" forever without any other signal.
     await checkMediaOutbox();
+    // Likewise for the generic jobs: a stalled `jobs-drain`/`jobs-sweep` leaves cleanup undone.
+    await checkJobOutbox();
 
     return NextResponse.json(
       { data: getHealthStatus({ version: WEB_APP_VERSION }) },

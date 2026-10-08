@@ -9,8 +9,9 @@ import {
 } from "mongodb";
 
 import { COLLECTIONS, type CollectionName } from "./collections";
+import { enqueueJob } from "./job-outbox";
 
-export const DATABASE_SCHEMA_VERSION = 11;
+export const DATABASE_SCHEMA_VERSION = 12;
 
 type DatabaseMigrationDocument = Readonly<{
   _id: string;
@@ -462,8 +463,9 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
           attempts: { bsonType: "int", minimum: 0 },
           availableAt: { bsonType: "date" },
           deduplicationKey: { bsonType: "string" },
+          lastErrorCode: { bsonType: ["string", "null"] },
           payload: { bsonType: "object" },
-          status: { enum: ["pending", "processing", "completed", "failed"] },
+          status: { enum: ["pending", "processing", "completed", "failed", "dead"] },
           type: { bsonType: "string" },
           ...timestampsValidator,
         },
@@ -696,6 +698,41 @@ export async function backfillLegacyEntitlements(database: Db): Promise<void> {
     ]);
 }
 
+/**
+ * Published gifts whose photos were detached before `gift.assets.cleanup.v1` existed get one
+ * cleanup job each, keyed by their current publication, so photos no served publication needs are
+ * eventually deleted. Idempotent: the deduplication key makes a second run insert nothing.
+ */
+export async function backfillDetachedAssetCleanupJobs(database: Db, now: Date): Promise<void> {
+  const giftIds = (
+    await database
+      .collection(COLLECTIONS.assets)
+      .aggregate<{ _id: string }>([
+        { $match: { detachedAt: { $ne: null }, status: "ready" } },
+        { $group: { _id: "$giftId" } },
+      ])
+      .toArray()
+  ).map((group) => group._id);
+  if (giftIds.length === 0) return;
+
+  const gifts = await database
+    .collection<{ _id: string; publishedRevision?: number }>(COLLECTIONS.gifts)
+    .find(
+      { _id: { $in: giftIds }, status: "published" },
+      { projection: { _id: 1, publishedRevision: 1 } },
+    )
+    .toArray();
+  for (const gift of gifts) {
+    if (gift.publishedRevision === undefined) continue;
+    await enqueueJob(database, {
+      deduplicationKey: `gift.assets.cleanup.v1:${gift._id}:${gift.publishedRevision}`,
+      now,
+      payload: { giftId: gift._id },
+      type: "gift.assets.cleanup.v1",
+    });
+  }
+}
+
 export async function runDatabaseMigrations(
   database: Db,
   onProgress: (collection: CollectionName, phase: "complete" | "start") => void = () => undefined,
@@ -708,6 +745,7 @@ export async function runDatabaseMigrations(
 
   await backfillPublishedRevisions(database);
   await backfillLegacyEntitlements(database);
+  await backfillDetachedAssetCleanupJobs(database, new Date());
 
   await database.collection<DatabaseMigrationDocument>(COLLECTIONS.databaseMigrations).updateOne(
     { _id: "core" },

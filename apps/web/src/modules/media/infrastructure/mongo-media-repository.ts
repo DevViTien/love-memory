@@ -10,6 +10,7 @@ import {
 import { MongoServerError } from "mongodb";
 import { randomUUID } from "node:crypto";
 
+import { type DetachedAssetRepository } from "../application/gift-assets-cleanup";
 import { type MarkDeletingResult, type MediaAssetRepository } from "../application/media-service";
 import { type MediaOutboxMonitor } from "../application/media-outbox-health";
 import { type ClaimResult, type MediaWorkerRepository } from "../application/media-worker";
@@ -538,6 +539,39 @@ export const mongoMediaWorkerRepository: MediaWorkerRepository = {
         },
       },
     );
+  },
+};
+
+/** The detached assets a `gift.assets.cleanup.v1` job may retire (`media-upload`). */
+export const mongoDetachedAssetRepository: DetachedAssetRepository = {
+  async listDetachedReady(giftId) {
+    const database = await getDatabase();
+    // `assets_gift_field_created` (prefix `giftId`) serves it; status and detach are residual.
+    const documents = await database
+      .collection<MediaAssetDocument>(COLLECTIONS.assets)
+      .find({ detachedAt: { $ne: null }, giftId, status: "ready" })
+      .toArray();
+    return documents.map(toDomain);
+  },
+
+  async markDeleted(assetId, now) {
+    return mongoMediaAssetRepository.markDeleted(assetId, now);
+  },
+
+  async markDetachedDeleting(assetId, giftId, now) {
+    const database = await getDatabase();
+    // Still detached and `ready`: never an asset of the working copy or one already taken.
+    const result = await database.collection<MediaAssetDocument>(COLLECTIONS.assets).updateOne(
+      { _id: assetId, detachedAt: { $ne: null }, giftId, status: "ready" },
+      {
+        $set: {
+          expiresAt: new Date(now.getTime() + 60 * 1000),
+          status: "deleting",
+          updatedAt: now,
+        },
+      },
+    );
+    return result.modifiedCount === 1;
   },
 };
 

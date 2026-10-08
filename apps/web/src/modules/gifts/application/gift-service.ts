@@ -23,6 +23,8 @@ import {
 } from "@love-memory/template-sdk";
 import { z } from "zod";
 
+import { type JobType } from "@/modules/jobs/application/job-registry";
+import { GIFT_ASSETS_CLEANUP_JOB } from "@/modules/media/application/gift-assets-cleanup";
 import {
   collectContentIssues,
   issuesToFieldErrors,
@@ -203,6 +205,9 @@ export type GiftAnalyticsDependencies = Readonly<{
   publish: PublishAnalytics;
 }>;
 
+/** Never throws and never decides whether the work happens: the outbox does. */
+export type GiftJobDispatch = Readonly<{ dispatch: (type: JobType) => Promise<void> }>;
+
 export type GiftPublishingDependencies = Readonly<{
   artifacts: GiftArtifactResolver;
   assets: Readonly<{ listByGiftId: (giftId: string) => Promise<readonly MediaAsset[]> }>;
@@ -289,6 +294,8 @@ export const PUBLISH_IDEMPOTENCY_TTL_MILLISECONDS = 24 * 60 * 60 * 1000;
 export type GiftServiceDependencies = Readonly<{
   /** Funnel analytics ports; without them the service behaves as with analytics disabled. */
   analytics?: GiftAnalyticsDependencies;
+  /** Wakes a background worker after a commit that enqueued jobs (`background-jobs`). */
+  jobs?: GiftJobDispatch;
   audioTracks: GiftAudioCatalog;
   clock: () => Date;
   createAnonymousIdentity: (idempotencyKey: string) => AnonymousDraftIdentity;
@@ -714,8 +721,17 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
       });
       switch (outcome.status) {
         case "published":
-          // A first publish only: updates, replays and every rejection record nothing.
-          if (isUpdate) return success(toPublicationDto(published.data, outcome.publication));
+          if (isUpdate) {
+            // The update committed a cleanup job for photos it no longer shows; a failed
+            // dispatch is left to `jobs-sweep` and never changes this response.
+            try {
+              await dependencies.jobs?.dispatch(GIFT_ASSETS_CLEANUP_JOB);
+            } catch {
+              // The dispatcher already reports and swallows; this guards a misbehaving port.
+            }
+            // A first publish only records `gift_published`: updates record nothing.
+            return success(toPublicationDto(published.data, outcome.publication));
+          }
           try {
             dependencies.analytics?.publish.giftPublished({
               giftId: gift.id,

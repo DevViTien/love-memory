@@ -155,8 +155,8 @@ constraints:
   `expiresAt`, `createdAt`, `updatedAt`, with non-empty `actorKey`, `giftId` and
   `requestFingerprint`;
 - `jobOutbox` requires `_id`, `type`, `payload` (object), `status` (`pending`, `processing`,
-  `completed`, `failed`), `attempts` (int >= 0), `availableAt`, `deduplicationKey`, `createdAt`,
-  `updatedAt`;
+  `completed`, `failed`, `dead`), `attempts` (int >= 0), `availableAt`, `deduplicationKey`,
+  `createdAt`, `updatedAt`; when present, `lastErrorCode` MUST be a string or null;
 - `previewTokens` requires `_id` (the token's SHA-256 hash, 64 lowercase hex characters), `giftId`
   (non-empty string), `expiresAt` (date) and `createdAt` (date);
 - `giftPublications` requires `_id` (non-empty string), `giftId` (non-empty string), `shareId` (22
@@ -229,6 +229,12 @@ migration run.
 - **WHEN** a `gifts` document with an `entitlement` whose `planId` is `premium`, whose `priceVnd`
   is `"49000"`, or that has no `grantedAt`, or with an `expiresAt` of `"2026-10-22"`, is written
 - **THEN** MongoDB rejects the write with a document validation error
+
+#### Scenario: Dead-letter job accepted
+
+- **WHEN** a `jobOutbox` document with `status` `dead` and `lastErrorCode` `JOB_FAILED` is written
+- **THEN** MongoDB accepts it, and a document with `status` `abandoned` or a numeric
+  `lastErrorCode` is rejected with a document validation error
 
 ### Requirement: Named indexes
 
@@ -319,7 +325,7 @@ second publication of a gift, which keeps its share id.
 The system SHALL provide `db:migrate`, which converges the database to the current schema (creating
 missing collections with validators, updating validators, reconciling indexes) and then upserts the
 ledger document `_id: "core"` in `databaseMigrations` with `version` equal to the current schema
-version `11`, `appliedAt` set to now, and `createdAt` set only on first insert. Before writing the
+version `12`, `appliedAt` set to now, and `createdAt` set only on first insert. Before writing the
 ledger it SHALL run these backfills, in this order:
 
 1. set `publishedRevision` to the gift's `revision` on every `published` gift that has no
@@ -329,7 +335,11 @@ ledger it SHALL run these backfills, in this order:
    of `gift-plans`, with `source` `legacy` and `grantedAt` equal to the gift's `publishedAt`, and
    set its `expiresAt` to `publishedAt` plus 365 days. Such gifts were published under the
    internal publish entitlement, before plans existed (schema version `11`), with up to the
-   template's photo limit.
+   template's photo limit;
+3. enqueue, for every `published` gift that has at least one detached `ready` asset, one
+   `gift.assets.cleanup.v1` job (`media-upload` "Cleanup of detached assets") with the deduplication
+   key `gift.assets.cleanup.v1:{giftId}:{publishedRevision}`, inserting nothing when that key
+   already exists. Such assets were detached before the cleanup job existed (schema version `12`).
 
 Running it repeatedly SHALL produce the same schema and data without errors. It SHALL print one
 JSON line per collection and phase,
@@ -345,7 +355,7 @@ and always close the MongoDB client before exiting. An unrecognized command MUST
 #### Scenario: Re-running migrations is safe
 
 - **WHEN** `db:migrate` is run twice against the same database
-- **THEN** both runs succeed, the schema verifies, and the ledger `version` is `11`
+- **THEN** both runs succeed, the schema verifies, and the ledger `version` is `12`
 
 #### Scenario: Published gifts backfilled
 
@@ -369,18 +379,25 @@ and always close the MongoDB client before exiting. An unrecognized command MUST
 - **WHEN** any database command fails, for example because verification detects drift
 - **THEN** the process exits with a non-zero status and does not print the success message
 
+#### Scenario: Cleanup jobs backfilled for detached photos
+
+- **WHEN** `db:migrate` runs on a database with a `published` gift at `publishedRevision` `7` that has
+  a detached `ready` asset, and another published gift without detached assets
+- **THEN** exactly one `pending` `gift.assets.cleanup.v1` job exists, for the first gift, with the
+  deduplication key `gift.assets.cleanup.v1:{giftId}:7`, and a second run adds no job
+
 ### Requirement: Schema verification
 
 The system SHALL provide `db:verify`, which fails without modifying the database when any managed
 collection is missing (`Missing MongoDB collection`), a validator differs from its definition
 (`MongoDB validator mismatch`), a legacy index remains (`Legacy MongoDB index remains`), an expected
 index is missing (`Missing MongoDB index`) or differs in key or options (`MongoDB index mismatch`),
-or the ledger version differs from `11` or is missing (`MongoDB schema version mismatch`).
+or the ledger version differs from `12` or is missing (`MongoDB schema version mismatch`).
 
 #### Scenario: Schema drift detected
 
 - **WHEN** the ledger document records `version` `1`
-- **THEN** `db:verify` fails with `MongoDB schema version mismatch: expected 11, received 1.`
+- **THEN** `db:verify` fails with `MongoDB schema version mismatch: expected 12, received 1.`
 
 #### Scenario: Database not yet migrated to version 7
 
@@ -388,7 +405,7 @@ or the ledger version differs from `11` or is missing (`MongoDB schema version m
 - **THEN** `db:verify` fails without modifying the database, for example with
   `MongoDB validator mismatch` for `apiRateLimits` or `gifts`, or `Missing MongoDB collection` for
   `previewTokens`, `giftPublications` or `analyticsEvents`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `11`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `12`
 
 #### Scenario: Database not yet migrated to version 8
 
@@ -396,7 +413,7 @@ or the ledger version differs from `11` or is missing (`MongoDB schema version m
 - **THEN** `db:verify` fails without modifying the database, for example with
   `MongoDB validator mismatch` for `apiRateLimits` or `gifts`, or `Missing MongoDB collection` for
   `giftPublications` or `analyticsEvents`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `11`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `12`
 
 #### Scenario: Database not yet migrated to version 9
 
@@ -404,7 +421,7 @@ or the ledger version differs from `11` or is missing (`MongoDB schema version m
 - **THEN** `db:verify` fails without modifying the database, for example with
   `MongoDB validator mismatch` for `apiRateLimits`, or `Missing MongoDB collection` for
   `analyticsEvents`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `11`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `12`
 
 #### Scenario: Database not yet migrated to version 10
 
@@ -412,14 +429,21 @@ or the ledger version differs from `11` or is missing (`MongoDB schema version m
 - **THEN** `db:verify` fails without modifying the database, for example with
   `MongoDB validator mismatch` for `gifts` or `assets`, or `Legacy MongoDB index remains` for
   `giftPublications.gift_publications_share_id_unique`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `11`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `12`
 
 #### Scenario: Database not yet migrated to version 11
 
 - **WHEN** the ledger document records `version` `10`
 - **THEN** `db:verify` fails without modifying the database, with `MongoDB validator mismatch` for
   `gifts` or `MongoDB schema version mismatch: expected 11, received 10.`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `11`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `12`
+
+#### Scenario: Database not yet migrated to version 12
+
+- **WHEN** the ledger document records `version` `11`
+- **THEN** `db:verify` fails without modifying the database, with `MongoDB validator mismatch` for
+  `jobOutbox` or `MongoDB schema version mismatch: expected 12, received 11.`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `12`
 
 #### Scenario: Empty database fails verification
 
@@ -489,8 +513,9 @@ publish key returns the same publication; a publish at a stale revision is rejec
 published gift by share id is answered by an index scan of `gifts_share_id_unique` (checked with
 `explain`); a save of the published gift's working copy persists the next revision while the
 current publication is unchanged; publishing that revision with a new key stores a second
-publication with the same `shareId`, switches `publishedRevision`, and leaves the first publication,
-the entitlement and `expiresAt` unchanged; the lookup of the current publication by gift id and
+publication with the same `shareId`, switches `publishedRevision`, leaves the first publication,
+the entitlement and `expiresAt` unchanged, and commits exactly one `gift.assets.cleanup.v1` job for
+that revision; the lookup of the current publication by gift id and
 revision is answered by an index scan of `gift_publications_gift_revision_unique`; replaying the
 first publish key still returns the first publication; publishing the same revision again with
 another key is rejected and stores nothing; the share-id lookup at a time after the gift's

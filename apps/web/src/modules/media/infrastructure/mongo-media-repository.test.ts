@@ -14,6 +14,7 @@ vi.mock("@love-memory/database", async (importOriginal) => ({
 }));
 
 import {
+  mongoDetachedAssetRepository,
   mongoMediaAssetRepository,
   mongoMediaOutboxMonitor,
   mongoMediaWorkerRepository,
@@ -417,6 +418,68 @@ describe("Mongo media repositories", () => {
       },
       { projection: { _id: 1 } },
     );
+  });
+
+  describe("detached asset cleanup", () => {
+    it("lists the detached ready assets of one gift", async () => {
+      const detached = {
+        ...document("ready"),
+        checksumSha256: "a".repeat(64),
+        derivatives: [
+          { contentType: "image/webp", height: 10, key: "private/w320.webp", width: 10 },
+        ],
+        detachedAt: now,
+        fieldSlot: null,
+        giftSlot: null,
+      };
+      assets.find.mockReturnValue({
+        sort: () => ({ toArray: () => Promise.resolve([]) }),
+        toArray: () => Promise.resolve([detached]),
+      });
+
+      await expect(
+        mongoDetachedAssetRepository.listDetachedReady(baseAsset.giftId),
+      ).resolves.toMatchObject([{ detachedAt: now, id: baseAsset.id, status: "ready" }]);
+      expect(assets.find).toHaveBeenCalledWith({
+        detachedAt: { $ne: null },
+        giftId: baseAsset.giftId,
+        status: "ready",
+      });
+    });
+
+    it("moves only a still detached, ready asset to deleting with a 60 s expiry", async () => {
+      await expect(
+        mongoDetachedAssetRepository.markDetachedDeleting(baseAsset.id, baseAsset.giftId, now),
+      ).resolves.toBe(true);
+      expect(assets.updateOne).toHaveBeenCalledWith(
+        {
+          _id: baseAsset.id,
+          detachedAt: { $ne: null },
+          giftId: baseAsset.giftId,
+          status: "ready",
+        },
+        {
+          $set: {
+            expiresAt: new Date(now.getTime() + 60_000),
+            status: "deleting",
+            updatedAt: now,
+          },
+        },
+      );
+
+      assets.updateOne.mockResolvedValue({ matchedCount: 0, modifiedCount: 0 });
+      await expect(
+        mongoDetachedAssetRepository.markDetachedDeleting(baseAsset.id, baseAsset.giftId, now),
+      ).resolves.toBe(false);
+    });
+
+    it("marks a deleting asset deleted", async () => {
+      await expect(mongoDetachedAssetRepository.markDeleted(baseAsset.id, now)).resolves.toBe(true);
+      expect(assets.updateOne).toHaveBeenCalledWith(
+        { _id: baseAsset.id, status: "deleting" },
+        { $set: { expiresAt: null, status: "deleted", updatedAt: now } },
+      );
+    });
   });
 
   describe("markDeleting", () => {

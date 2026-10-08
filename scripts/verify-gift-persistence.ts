@@ -20,7 +20,14 @@ import {
 } from "../packages/domain/src/index";
 import { type GiftPublishInput } from "../apps/web/src/modules/gifts/application/gift-service";
 import { mongoGiftRepository } from "../apps/web/src/modules/gifts/infrastructure/mongo-gift-repository";
-import { mongoMediaAssetRepository } from "../apps/web/src/modules/media/infrastructure/mongo-media-repository";
+import { createJobRunner } from "../apps/web/src/modules/jobs/application/job-runner";
+import { mongoJobOutbox } from "../apps/web/src/modules/jobs/infrastructure/mongo-job-outbox";
+import { createGiftAssetsCleanupHandler } from "../apps/web/src/modules/media/application/gift-assets-cleanup";
+import { mongoGiftPublicationRepository } from "../apps/web/src/modules/gifts/infrastructure/mongo-gift-publication-repository";
+import {
+  mongoDetachedAssetRepository,
+  mongoMediaAssetRepository,
+} from "../apps/web/src/modules/media/infrastructure/mongo-media-repository";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -63,6 +70,8 @@ const idempotency = {
 
 const verificationUserId = "verification-user";
 const assetId = randomUUID();
+// The photo that replaces `assetId` in a later update, so the detached one can be cleaned up.
+const replacementAssetId = randomUUID();
 // A second, owned draft for the publish-versus-delete race.
 const raceGiftId = randomUUID();
 const racePublicId = `verify_${randomBytes(12).toString("base64url")}`;
@@ -382,6 +391,15 @@ try {
       updatedGift.expiresAt?.getTime() === grantedExpiry.getTime(),
     "The update changed the entitlement or the expiry.",
   );
+  const cleanupJobs = await database
+    .collection<{ deduplicationKey: string; payload: { giftId: string } }>(COLLECTIONS.jobOutbox)
+    .find({ "payload.giftId": giftId, type: "gift.assets.cleanup.v1" })
+    .toArray();
+  assert(
+    cleanupJobs.length === 1 &&
+      cleanupJobs[0]?.deduplicationKey === `gift.assets.cleanup.v1:${giftId}:${firstRevision + 1}`,
+    `The update did not commit exactly one cleanup job, or the first publish committed one: ${cleanupJobs.length}.`,
+  );
   const publications = await database
     .collection<{ giftId: string; revision: number; shareId: string }>(COLLECTIONS.giftPublications)
     .find({ giftId })
@@ -446,6 +464,86 @@ try {
       assetAfter.detachedAt !== null &&
       assetAfter.giftSlot === null,
     "The detached photo left ready or kept its quota slots.",
+  );
+
+  // An update without the detached photo: its cleanup job deletes the photo for good.
+  await database
+    .collection<MediaAsset & { _id: string }>(COLLECTIONS.assets)
+    .insertOne(readyAsset(replacementAssetId, giftId));
+  const beforeReplacement = await mongoGiftRepository.findAuthorized(publicId, [ownerOfPublished]);
+  assert(beforeReplacement?.status === "published", "The published gift was not readable.");
+  const replacementSave = updateGiftDraft(beforeReplacement, {
+    content: { ...beforeReplacement.content, data: { headline: "Photo replaced" } },
+    expectedRevision: beforeReplacement.revision,
+    now: new Date(),
+  });
+  assert(replacementSave.ok, "Domain update before the replacement failed.");
+  const replacementCopy = await mongoGiftRepository.updateDraft(
+    replacementSave.data,
+    beforeReplacement.revision,
+    [ownerOfPublished],
+  );
+  assert(replacementCopy, "The working copy before the replacement was not saved.");
+  const replacement = await mongoGiftRepository.publish(
+    republishInputFor(
+      replacementCopy,
+      replacementAssetId,
+      randomUUID(),
+      beforeReplacement.publishedRevision ?? 0,
+    ),
+  );
+  assert(
+    replacement.status === "published",
+    `The replacement update failed: ${replacement.status}.`,
+  );
+  const detachedPlan = await explainLookup(COLLECTIONS.assets, {
+    detachedAt: { $ne: null },
+    giftId,
+    status: "ready",
+  });
+  assert(
+    usesIndex(detachedPlan, "assets_gift_field_created"),
+    "The detached-asset lookup is not answered by assets_gift_field_created.",
+  );
+  const deletedKeys: string[] = [];
+  const cleanupRunner = createJobRunner({
+    handlers: [
+      createGiftAssetsCleanupHandler({
+        assets: mongoDetachedAssetRepository,
+        gifts: mongoGiftRepository,
+        publications: mongoGiftPublicationRepository,
+        storage: {
+          deleteObject: (key) => {
+            deletedKeys.push(key);
+            return Promise.resolve();
+          },
+        },
+      }),
+    ],
+    repository: mongoJobOutbox,
+  });
+  const cleanupResults = await cleanupRunner.runAvailable(10);
+  const cleanedAsset = await database
+    .collection<{ _id: string; status: string }>(COLLECTIONS.assets)
+    .findOne({ _id: assetId });
+  const keptAsset = await database
+    .collection<{ _id: string; status: string }>(COLLECTIONS.assets)
+    .findOne({ _id: replacementAssetId });
+  // Only this gift's jobs: the database may hold other generic jobs of its own.
+  const ownCleanupJobs = await database
+    .collection<{ status: string }>(COLLECTIONS.jobOutbox)
+    .find({ "payload.giftId": giftId, type: "gift.assets.cleanup.v1" })
+    .toArray();
+  assert(
+    cleanupResults.length >= 1 &&
+      ownCleanupJobs.length === 2 &&
+      ownCleanupJobs.every((job) => job.status === "completed") &&
+      cleanedAsset?.status === "deleted" &&
+      keptAsset?.status === "ready" &&
+      deletedKeys.includes(`private/verification/${assetId}/w768.webp`),
+    `The cleanup jobs did not delete exactly the detached photo: ${ownCleanupJobs
+      .map((job) => job.status)
+      .join(", ")}.`,
   );
 
   // A publish and a deletion of its only photo race on a fresh draft: exactly one of them wins.
@@ -564,6 +662,9 @@ try {
     ].map((name) =>
       database.collection<{ giftId: string }>(name).deleteMany({ giftId: { $in: giftIds } }),
     ),
+    database
+      .collection<{ payload: { giftId: string } }>(COLLECTIONS.jobOutbox)
+      .deleteMany({ "payload.giftId": { $in: giftIds } }),
   ]);
   const client = await getMongoClient().catch(() => undefined);
   await client?.close();

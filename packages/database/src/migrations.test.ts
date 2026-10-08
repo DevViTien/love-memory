@@ -67,11 +67,61 @@ class FakeCollection {
     },
   );
   readonly updateOne = vi.fn(
-    (_filter: unknown, update: Readonly<{ $set?: Readonly<{ version?: number }> }>) => {
+    (
+      filter: Readonly<Record<string, unknown>>,
+      update: Readonly<{
+        $set?: Readonly<{ version?: number }>;
+        $setOnInsert?: Readonly<Record<string, unknown>>;
+      }>,
+    ) => {
+      // `enqueueJob`: an upsert keyed by the deduplication key, a no-op when it exists.
+      if (update.$setOnInsert && "deduplicationKey" in filter) {
+        const key = filter["deduplicationKey"];
+        if (!this.documents.some((document) => document["deduplicationKey"] === key)) {
+          this.documents.push({ ...update.$setOnInsert, deduplicationKey: key });
+        }
+        return Promise.resolve();
+      }
       this.migrationVersion = update.$set?.version;
       return Promise.resolve();
     },
   );
+
+  /** `$match` (equality, `$ne`, `$in`) and `$group` by one field: what the backfills use. */
+  private matches(filter: Readonly<Record<string, unknown>>, document: Record<string, unknown>) {
+    return Object.entries(filter).every(([key, condition]) => {
+      if (typeof condition === "object" && condition !== null && !(condition instanceof Date)) {
+        if ("$ne" in condition) return document[key] !== condition.$ne;
+        if ("$in" in condition) {
+          return (condition as { $in: unknown[] }).$in.includes(document[key]);
+        }
+      }
+      return document[key] === condition;
+    });
+  }
+
+  aggregate(
+    pipeline: ReadonlyArray<
+      Readonly<{ $group?: { _id: string }; $match?: Readonly<Record<string, unknown>> }>
+    >,
+  ) {
+    let rows: Array<Record<string, unknown>> = this.documents;
+    for (const stage of pipeline) {
+      if (stage.$match) rows = rows.filter((row) => this.matches(stage.$match!, row));
+      if (stage.$group) {
+        const field = stage.$group._id.slice(1);
+        rows = [...new Set(rows.map((row) => row[field]))].map((value) => ({ _id: value }));
+      }
+    }
+    return { toArray: () => Promise.resolve(rows) };
+  }
+
+  find(filter: Readonly<Record<string, unknown>>) {
+    return {
+      toArray: () =>
+        Promise.resolve(this.documents.filter((document) => this.matches(filter, document))),
+    };
+  }
 
   createIndex(key: unknown, options: Readonly<Record<string, unknown> & { name: string }>) {
     const existing = this.indexDefinitions.findIndex((index) => index["name"] === options.name);
@@ -149,7 +199,7 @@ describe("database schema migration", () => {
       CORE_COLLECTION_DEFINITIONS.map((definition) => [definition.name, definition]),
     );
 
-    expect(DATABASE_SCHEMA_VERSION).toBe(11);
+    expect(DATABASE_SCHEMA_VERSION).toBe(12);
     expect(definitions.has(COLLECTIONS.users)).toBe(true);
     expect(definitions.has(COLLECTIONS.apiRateLimits)).toBe(true);
     expect(definitions.has(COLLECTIONS.templates)).toBe(true);
@@ -368,7 +418,7 @@ describe("database schema migration", () => {
       fake.collection(COLLECTIONS.gifts).indexDefinitions.map((index) => index["name"]),
     ).toContain("gifts_share_id_unique");
     expect(fake.collections.has(COLLECTIONS.analyticsEvents)).toBe(true);
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(11);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(12);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
   });
 
@@ -398,7 +448,7 @@ describe("database schema migration", () => {
       fake.collection(COLLECTIONS.giftPublications).indexDefinitions.map((index) => index["name"]),
     ).toEqual(["_id_", "gift_publications_gift_revision_unique"]);
     expect(fake.collections.has(COLLECTIONS.analyticsEvents)).toBe(true);
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(11);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(12);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
   });
 
@@ -439,7 +489,7 @@ describe("database schema migration", () => {
       },
       { _id: "draft", revision: 2, status: "draft" },
     ]);
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(11);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(12);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
   });
 
@@ -551,6 +601,84 @@ describe("database schema migration", () => {
     expect(required).not.toContain("expiresAt");
   });
 
+  it("allows dead-letter jobs and their error code", () => {
+    const jobOutbox = CORE_COLLECTION_DEFINITIONS.find(
+      (definition) => definition.name === COLLECTIONS.jobOutbox,
+    )?.validator as {
+      $jsonSchema: { properties: Record<string, unknown>; required: string[] };
+    };
+
+    expect(jobOutbox.$jsonSchema.properties["status"]).toEqual({
+      enum: ["pending", "processing", "completed", "failed", "dead"],
+    });
+    expect(jobOutbox.$jsonSchema.properties["lastErrorCode"]).toEqual({
+      bsonType: ["string", "null"],
+    });
+    expect(jobOutbox.$jsonSchema.required).not.toContain("lastErrorCode");
+  });
+
+  it("enqueues one cleanup job per published gift with detached photos, once", async () => {
+    const fake = new FakeDatabase();
+    const database = fake as unknown as Db;
+    fake
+      .collection(COLLECTIONS.assets)
+      .documents.push(
+        { _id: "a1", detachedAt: publishedAt, giftId: "gift-1", status: "ready" },
+        { _id: "a2", detachedAt: publishedAt, giftId: "gift-1", status: "ready" },
+        { _id: "a3", detachedAt: null, giftId: "gift-2", status: "ready" },
+        { _id: "a4", detachedAt: publishedAt, giftId: "gift-3", status: "deleted" },
+      );
+    fake
+      .collection(COLLECTIONS.gifts)
+      .documents.push(
+        { _id: "gift-1", ...entitled, publishedRevision: 7, revision: 9, status: "published" },
+        { _id: "gift-2", ...entitled, publishedRevision: 2, revision: 2, status: "published" },
+      );
+
+    await runDatabaseMigrations(database);
+    await runDatabaseMigrations(database);
+
+    const jobs = fake.collection(COLLECTIONS.jobOutbox).documents;
+    expect(jobs).toEqual([
+      expect.objectContaining({
+        attempts: 0,
+        deduplicationKey: "gift.assets.cleanup.v1:gift-1:7",
+        lastErrorCode: null,
+        payload: { giftId: "gift-1" },
+        status: "pending",
+        type: "gift.assets.cleanup.v1",
+      }),
+    ]);
+  });
+
+  it("detects a database not yet migrated to version 12", async () => {
+    const fake = new FakeDatabase();
+    const database = fake as unknown as Db;
+    await runDatabaseMigrations(database);
+    const jobOutbox = CORE_COLLECTION_DEFINITIONS.find(
+      (definition) => definition.name === COLLECTIONS.jobOutbox,
+    )?.validator as { $jsonSchema: { properties: Record<string, unknown> } };
+    const previous = structuredClone(jobOutbox);
+    previous.$jsonSchema.properties["status"] = {
+      enum: ["pending", "processing", "completed", "failed"],
+    };
+    delete previous.$jsonSchema.properties["lastErrorCode"];
+    fake.validators.set(COLLECTIONS.jobOutbox, previous);
+    fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 11;
+
+    await expect(verifyDatabaseSchema(database)).rejects.toThrow(
+      "MongoDB validator mismatch: jobOutbox",
+    );
+    fake.validators.set(COLLECTIONS.jobOutbox, jobOutbox);
+    await expect(verifyDatabaseSchema(database)).rejects.toThrow(
+      "MongoDB schema version mismatch: expected 12, received 11.",
+    );
+
+    await runDatabaseMigrations(database);
+    await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(12);
+  });
+
   it("detects a database not yet migrated to version 11", async () => {
     const fake = new FakeDatabase();
     const database = fake as unknown as Db;
@@ -569,12 +697,12 @@ describe("database schema migration", () => {
     );
     fake.validators.set(COLLECTIONS.gifts, gifts);
     await expect(verifyDatabaseSchema(database)).rejects.toThrow(
-      "MongoDB schema version mismatch: expected 11, received 10.",
+      "MongoDB schema version mismatch: expected 12, received 10.",
     );
 
     await runDatabaseMigrations(database);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(11);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(12);
   });
 
   it("validates the publication pointer and the detach time", () => {
@@ -679,7 +807,7 @@ describe("database schema migration", () => {
       expect.arrayContaining(["analytics_events_expiry_ttl", "analytics_events_name_occurred"]),
     );
     expect(JSON.stringify(publications.indexDefinitions)).toBe(indexesBefore);
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(11);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(12);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
   });
 
@@ -825,7 +953,7 @@ describe("database schema migration", () => {
     await runDatabaseMigrations(database);
     fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 1;
     await expect(verifyDatabaseSchema(database)).rejects.toThrow(
-      "MongoDB schema version mismatch: expected 11, received 1.",
+      "MongoDB schema version mismatch: expected 12, received 1.",
     );
 
     await runDatabaseMigrations(database);

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   reportClientBoundaryError,
+  reportJobFailure,
   reportOperationalFailure,
   reportReadinessFailure,
 } from "./operational-errors";
@@ -54,5 +55,21 @@ describe("operational error reporting", () => {
       requestId: "request-3",
     });
     expect(JSON.stringify(sink.error.mock.calls)).not.toContain("secret URL");
+  });
+
+  it("logs a job failure with its id, type, attempts and code only", () => {
+    const sink = { error: vi.fn() };
+
+    reportJobFailure(
+      { attempts: 2, code: "JOB_FAILED", jobId: "job-1", type: "gift.assets.cleanup.v1" },
+      sink,
+    );
+
+    expect(sink.error).toHaveBeenCalledWith("Job failed", {
+      attempts: 2,
+      code: "JOB_FAILED",
+      jobId: "job-1",
+      type: "gift.assets.cleanup.v1",
+    });
   });
 });

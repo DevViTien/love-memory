@@ -17,6 +17,22 @@ export function reportOperationalFailure(
   });
 }
 
+/**
+ * A background job failure (`background-jobs`): the job id, type, attempts and error code only,
+ * never the payload, an error message or gift content.
+ */
+export function reportJobFailure(
+  entry: Readonly<{ attempts: number; code: string; jobId: string; type: string }>,
+  sink: ErrorLogSink = console,
+): void {
+  sink.error("Job failed", {
+    attempts: entry.attempts,
+    code: entry.code,
+    jobId: entry.jobId,
+    type: entry.type,
+  });
+}
+
 export function reportReadinessFailure(
   error: unknown,
   requestId: string,

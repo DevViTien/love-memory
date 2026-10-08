@@ -44,8 +44,11 @@ the media outbox: readiness SHALL fail when a `pending` `media.process.v1` job w
 attempts has an `availableAt` more than 600 seconds (10 minutes) in the past, because then neither a
 dispatched drain nor the five-minute `media-worker-sweep` is processing media work. Jobs whose
 `availableAt` is still in the future (scheduled automatic retries), or less than 10 minutes in the
-past, SHALL NOT fail readiness. The outbox check SHALL be a single indexed read of the job outbox
-that returns no job content. Apart from that read, readiness SHALL NOT perform MongoDB reads or
+past, SHALL NOT fail readiness. Readiness SHALL then check the generic job outbox (`background-jobs`)
+the same way: it SHALL fail when a `pending` job of a registered generic type has an `availableAt`
+more than 600 seconds in the past, because then neither a dispatched `jobs-drain` nor the five-minute
+`jobs-sweep` is running. Each outbox check SHALL be a single indexed read of the job outbox that
+returns no job content. Apart from those two reads, readiness SHALL NOT perform MongoDB reads or
 writes of application data, and it SHALL NOT read or write stored objects. Readiness SHALL be
 evaluated on every request and never served from a prerendered or cached result.
 
@@ -97,6 +100,17 @@ evaluated on every request and never served from a prerendered or cached result.
 - **WHEN** the only `pending` `media.process.v1` job is an automatic retry whose `availableAt` is 60 seconds in the future
 - **THEN** the response status is `200`
 
+#### Scenario: Generic job worker stalled
+
+- **WHEN** configuration is valid, MongoDB answers `ping`, no media job is overdue, and a `pending`
+  `gift.assets.cleanup.v1` job became available 11 minutes ago
+- **THEN** the response status is `503` with the generic failure body
+
+#### Scenario: Generic retry is not a stall
+
+- **WHEN** the only `pending` generic job is a retry whose `availableAt` is 60 seconds in the future
+- **THEN** the response status is `200`
+
 ### Requirement: Safe readiness failure response
 
 The system SHALL respond to any failed readiness check with HTTP `503` and exactly the JSON body
@@ -114,8 +128,9 @@ strings, tokens or other configuration values.
 
 The system SHALL log each readiness failure server-side as `Readiness check failed` with only the
 error name (or `UnknownError` for non-`Error` values) and the request identifier. A failure of the
-media outbox check SHALL use the error name `MediaOutboxStalledError`, so operators can tell a
-stalled media worker from a configuration or database failure without the response revealing it.
+media outbox check SHALL use the error name `MediaOutboxStalledError`, and a failure of the generic
+job outbox check SHALL use `JobOutboxStalledError`, so operators can tell a stalled media worker or
+job worker from a configuration or database failure without the response revealing it.
 The log entry MUST NOT include the error message, stack, configuration values, asset or gift
 identifiers.
 
@@ -128,6 +143,12 @@ identifiers.
 
 - **WHEN** readiness fails because a media job has been overdue for more than 10 minutes
 - **THEN** the log entry has `errorName` `MediaOutboxStalledError` and contains no asset, job or gift identifier
+
+#### Scenario: Stalled job worker is named in the log
+
+- **WHEN** readiness fails because a generic job has been overdue for more than 10 minutes
+- **THEN** the log entry has `errorName` `JobOutboxStalledError` and contains no job, asset or gift
+  identifier
 
 ### Requirement: Request identification
 

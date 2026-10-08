@@ -76,6 +76,10 @@ export async function cleanupE2eRecord(record: Readonly<E2eRecord>): Promise<voi
             (name) => database.collection(name).deleteMany({ giftId: gift._id }),
           )
         : []),
+      // Background jobs of the gift (`gift.assets.cleanup.v1`), keyed by its internal id.
+      ...(gift
+        ? [database.collection("jobOutbox").deleteMany({ "payload.giftId": gift._id })]
+        : []),
       ...(user
         ? [
             database.collection("accounts").deleteMany({ userId: user._id }),
@@ -132,6 +136,16 @@ export async function findGiftId(publicId: string): Promise<string> {
   );
   if (!gift) throw new Error("The E2E gift does not exist.");
   return gift._id;
+}
+
+/** An asset's status, read from the E2E database (never shown by any page). */
+export async function findAssetStatus(assetId: string): Promise<string | null> {
+  const asset = await withE2eDatabase((database) =>
+    database
+      .collection<{ _id: string; status: string }>("assets")
+      .findOne({ _id: assetId }, { projection: { status: 1 } }),
+  );
+  return asset?.status ?? null;
 }
 
 /**

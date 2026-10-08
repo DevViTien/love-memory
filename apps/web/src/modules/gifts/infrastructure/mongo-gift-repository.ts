@@ -1,5 +1,6 @@
 import {
   COLLECTIONS,
+  enqueueJob,
   getDatabase,
   getMongoClient,
   LEGACY_ENTITLEMENT,
@@ -23,6 +24,10 @@ import {
   type GiftPublishReplay,
   type GiftRepository,
 } from "../application/gift-service";
+import {
+  GIFT_ASSETS_CLEANUP_JOB,
+  giftAssetsCleanupKey,
+} from "@/modules/media/application/gift-assets-cleanup";
 import {
   type GiftPublicationDocument,
   toPublicationDocument,
@@ -413,6 +418,20 @@ export const mongoGiftRepository: GiftRepository = {
           await database
             .collection<GiftPublicationDocument>(COLLECTIONS.giftPublications)
             .insertOne(toPublicationDocument(publication), { session });
+          if (precondition.status === "published") {
+            // Photos detached from the working copy that this revision no longer shows can go
+            // (`media-upload` "Cleanup of detached assets"); committed with the publication.
+            await enqueueJob(
+              database,
+              {
+                deduplicationKey: giftAssetsCleanupKey(gift.id, publication.revision),
+                now: publication.publishedAt,
+                payload: { giftId: gift.id },
+                type: GIFT_ASSETS_CLEANUP_JOB,
+              },
+              session,
+            );
+          }
           await database.collection<GiftIdempotencyDocument>(COLLECTIONS.idempotencyKeys).insertOne(
             {
               _id: `${idempotency.scope}:${idempotency.key}`,

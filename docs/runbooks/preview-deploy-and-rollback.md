@@ -62,6 +62,17 @@ Until it runs, the new build serves published gifts normally, but an update of a
 (`Cập nhật món quà`) answers `500`: the legacy unique index rejects a second publication with the
 same share id. Recipients keep the first publication.
 
+Schema version `12` (`add-job-outbox-dispatcher`):
+
+- allows `dead` and `lastErrorCode` in the `jobOutbox` validator;
+- enqueues one `gift.assets.cleanup.v1` job for each published gift that already has detached photos.
+
+After `db:migrate`, run `pnpm jobs:deploy` for the tier's Trigger.dev environment, so that
+`jobs-drain` and `jobs-sweep` exist. Without them nothing runs the generic jobs, and readiness
+answers `503` (`JobOutboxStalledError`) within 10 minutes. See the
+[background jobs runbook](./background-jobs.md). Rolling back past version 12 needs no data repair:
+the previous build ignores generic jobs, and they run after the roll forward.
+
 Schema version `11` (`add-gift-plans-and-entitlements`):
 
 - adds `entitlement` and `expiresAt` to the `gifts` validator;

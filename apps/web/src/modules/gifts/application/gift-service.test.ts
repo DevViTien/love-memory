@@ -1464,6 +1464,32 @@ describe("gift publishing", () => {
       expect(gift.expiresAt).toEqual(new Date("2026-10-15T08:00:00.000Z"));
     });
 
+    it("wakes the job worker after an update, and only then", async () => {
+      const dispatch = vi.fn(() => Promise.resolve());
+      service = createService({ jobs: { dispatch } });
+      await publish();
+      expect(dispatch).not.toHaveBeenCalled();
+      await publishedAndEdited();
+      service = createService({ clock: () => later, jobs: { dispatch } });
+
+      await expect(
+        publish({ expectedRevision: 9, idempotencyKey: secondKey }),
+      ).resolves.toMatchObject({ ok: true });
+      expect(dispatch).toHaveBeenCalledExactlyOnceWith("gift.assets.cleanup.v1");
+    });
+
+    it("still answers 201 when the dispatch throws (Job failure does not fail the request)", async () => {
+      await publishedAndEdited();
+      service = createService({
+        clock: () => later,
+        jobs: { dispatch: () => Promise.reject(new Error("worker down")) },
+      });
+
+      await expect(
+        publish({ expectedRevision: 9, idempotencyKey: secondKey }),
+      ).resolves.toMatchObject({ data: { revision: 9 }, ok: true });
+    });
+
     it("answers NO_UNPUBLISHED_CHANGES to a concurrent update of the same revision (Concurrent updates of one revision)", async () => {
       await publishedAndEdited();
       beforeWrite = () => ({ status: "revision-taken" });
