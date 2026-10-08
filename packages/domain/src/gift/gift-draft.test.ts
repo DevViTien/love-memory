@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { grantEntitlement } from "../billing/gift-entitlement";
+import { currentPlan } from "../billing/plan";
 import { claimGiftDraft, createGiftDraft, updateGiftDraft } from "./gift-draft";
 import { GiftSchema } from "./gift-schema";
 
@@ -62,6 +64,7 @@ describe("gift draft behavior", () => {
     });
     const published = GiftSchema.parse({
       ...owned,
+      ...grantEntitlement(currentPlan("free"), "free", now),
       publishedAt: now,
       publishedRevision: 0,
       shareId: "Ab0_-cdefghijklmnopqrs",

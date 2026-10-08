@@ -1,6 +1,12 @@
-import { COLLECTIONS, getDatabase, getMongoClient } from "@love-memory/database";
+import {
+  COLLECTIONS,
+  getDatabase,
+  getMongoClient,
+  LEGACY_ENTITLEMENT,
+} from "@love-memory/database";
 import {
   EDITABLE_GIFT_STATUSES,
+  entitlementExpiry,
   GiftSchema,
   type Gift,
   type GiftRevision,
@@ -71,7 +77,19 @@ function toDomain(document: GiftDocument): Gift {
     gift.status === "published" && gift.publishedRevision === undefined
       ? gift.revision
       : gift.publishedRevision;
-  return GiftSchema.parse({ ...gift, id: _id, publishedRevision });
+  // A gift published before plans existed has no entitlement until `db:migrate` backfills it; it is
+  // read exactly as the backfill writes it. Its share link stays closed until then, because the
+  // public lookup filters on the stored `expiresAt`.
+  const legacy =
+    gift.status === "published" && gift.entitlement === undefined && gift.publishedAt
+      ? legacyGrant(gift.publishedAt)
+      : {};
+  return GiftSchema.parse({ ...gift, ...legacy, id: _id, publishedRevision });
+}
+
+function legacyGrant(publishedAt: Date): Pick<Gift, "entitlement" | "expiresAt"> {
+  const entitlement = { ...LEGACY_ENTITLEMENT, grantedAt: publishedAt };
+  return { entitlement, expiresAt: entitlementExpiry(entitlement) };
 }
 
 function singleAccessFilter(accessor: GiftAccessor): Filter<GiftDocument> {
@@ -176,6 +194,8 @@ async function findPublishReplay(
 function publishPreconditionFilter(precondition: GiftPublishPrecondition): Filter<GiftDocument> {
   if (precondition.status === "draft") return { status: "draft" };
   return {
+    // An update never reaches recipients once the gift expired, even if it expired after the checks.
+    expiresAt: { $gt: precondition.now },
     publishedRevision:
       precondition.publishedRevision === undefined
         ? { $exists: false }
@@ -280,12 +300,14 @@ export const mongoGiftRepository: GiftRepository = {
     return document ? toDomain(document) : null;
   },
 
-  async findPublishedByShareId(shareId) {
+  async findPublishedByShareId(shareId, now) {
     const database = await getDatabase();
     const document = await database.collection<GiftDocument>(COLLECTIONS.gifts).findOne({
       // `$type` matches the partial filter of `gifts_share_id_unique`, which makes that index
       // eligible; `$eq` keeps a value from ever being read as an operator.
       "access.mode": "unlisted",
+      // Server time decides expiry; a document without `expiresAt` never matches (fails closed).
+      expiresAt: { $gt: now },
       shareId: { $eq: shareId, $type: "string" },
       status: "published",
     });
@@ -347,8 +369,15 @@ export const mongoGiftRepository: GiftRepository = {
                 $set: {
                   publishedAt: gift.publishedAt,
                   publishedRevision: gift.publishedRevision,
-                  // Set once by the first publish; an update keeps the recipient link.
-                  ...(precondition.status === "draft" ? { shareId: gift.shareId } : {}),
+                  // Set once by the first publish; an update keeps the recipient link, the
+                  // entitlement and the expiry.
+                  ...(precondition.status === "draft"
+                    ? {
+                        entitlement: gift.entitlement,
+                        expiresAt: gift.expiresAt,
+                        shareId: gift.shareId,
+                      }
+                    : {}),
                   status: "published",
                   updatedAt: gift.updatedAt,
                 },

@@ -1,6 +1,10 @@
 "use client";
 
-import { type GiftPublicationDto, type LicensedAudioTrackDto } from "@love-memory/contracts";
+import {
+  type GiftPublicationDto,
+  type LicensedAudioTrackDto,
+  type PlanOfferDto,
+} from "@love-memory/contracts";
 import { createContext, useContext, type MouseEvent } from "react";
 
 import { type AutosaveController } from "./autosave-controller";
@@ -15,13 +19,13 @@ export type StudioNavigation = Readonly<{
 
 /** What the `Xuất bản` step needs from the page; it never decides access (the API does). */
 export type StudioPublishContext = Readonly<{
-  /** The internal publish entitlement, read by the page from the same server flag as the API. */
-  enabled: boolean;
   /** A first publish or an update succeeded; the store already holds the new publication. */
   onPublished: (publication: GiftPublicationDto) => void;
   /** A template artifact is registered for the draft's exact version (it can be published). */
   publishable: boolean;
   ownerKind: "anonymous" | "user";
+  /** The plans the page offers for a first publish, in catalog order (`gift-plans`). */
+  planOffers: readonly PlanOfferDto[];
   signedIn: boolean;
 }>;
 

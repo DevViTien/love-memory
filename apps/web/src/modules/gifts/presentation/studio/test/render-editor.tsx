@@ -3,6 +3,7 @@ import {
   type GiftPublicationSummary,
   type LicensedAudioTrackDto,
   type MediaAssetDto,
+  type PlanOfferDto,
 } from "@love-memory/contracts";
 import { type TemplateManifest } from "@love-memory/template-sdk";
 import { render } from "@testing-library/react";
@@ -33,6 +34,51 @@ type StudioFetchOptions = Readonly<{
   /** A published gift: the default save answers with its working copy and this publication. */
   publication?: GiftPublicationSummary;
 }>;
+
+/**
+ * The offers the page renders: Free, and Standard unavailable (no checkout yet) or granted
+ * internally. The values are those of `gift-plans`.
+ */
+export function studioPlanOffers(
+  standard: "internal" | "unavailable" = "unavailable",
+): PlanOfferDto[] {
+  return [
+    {
+      available: true,
+      internalGrant: false,
+      maxPhotos: 3,
+      name: "Miễn phí",
+      planId: "free",
+      planVersion: 1,
+      priceVnd: 0,
+      retentionDays: 14,
+      watermark: true,
+    },
+    {
+      available: standard === "internal",
+      internalGrant: standard === "internal",
+      maxPhotos: null,
+      name: "Tiêu chuẩn",
+      planId: "standard",
+      planVersion: 1,
+      priceVnd: 49_000,
+      retentionDays: 365,
+      watermark: false,
+    },
+  ];
+}
+
+/** `count` photos for the `memories` field, with their ready assets. */
+export function studioPhotos(count: number) {
+  const ids = Array.from(
+    { length: count },
+    (_, index) => `550e8400-e29b-41d4-a716-4466554400${String(index).padStart(2, "0")}`,
+  );
+  return {
+    assets: ids.map((assetId) => readyAsset(assetId)),
+    memories: ids.map((assetId) => ({ assetId })),
+  };
+}
 
 export function readyAsset(assetId: string, fieldId = "memories"): MediaAssetDto {
   return {
@@ -120,8 +166,9 @@ export type RenderEditorOptions = Readonly<{
   content?: Record<string, unknown>;
   manifest?: TemplateManifest;
   ownerKind?: "anonymous" | "user";
+  /** The page's plan offers; Free and an unavailable Standard by default. */
+  planOffers?: readonly PlanOfferDto[];
   publishable?: boolean;
-  publishEnabled?: boolean;
   /** Renders a published gift whose working copy the editor edits. */
   publication?: GiftPublicationSummary;
   revision?: number;
@@ -141,8 +188,8 @@ export function editorElement(options: RenderEditorOptions = {}) {
         revision: options.revision ?? 0,
       })}
       manifest={options.manifest ?? steppedManifest}
+      planOffers={options.planOffers ?? studioPlanOffers()}
       publishable={options.publishable ?? true}
-      publishEnabled={options.publishEnabled ?? false}
       signedIn={options.signedIn ?? false}
     />
   );

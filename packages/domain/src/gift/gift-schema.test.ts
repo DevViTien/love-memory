@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
+import { grantEntitlement } from "../billing/gift-entitlement";
+import { currentPlan } from "../billing/plan";
 import { GiftSchema } from "./gift-schema";
+
+const freeGrant = grantEntitlement(
+  currentPlan("free"),
+  "free",
+  new Date("2026-09-16T00:00:00.000Z"),
+);
 
 describe("GiftSchema", () => {
   it("parses a valid published gift", () => {
@@ -13,6 +21,8 @@ describe("GiftSchema", () => {
         templateVersion: "1.0.0",
       },
       createdAt: "2026-09-16T00:00:00.000Z",
+      entitlement: freeGrant.entitlement,
+      expiresAt: "2026-09-30T00:00:00.000Z",
       id: "7afd9fe9-d30d-41cc-8f9a-0fe907f7df89",
       ownership: { anonymousDraftId: null, claimTokenHash: null, ownerId: "owner-1" },
       publicId: "q1w2e3r4t5y6u7i8",
@@ -113,6 +123,8 @@ describe("GiftSchema", () => {
       updatedAt: new Date("2026-09-16T00:00:00.000Z"),
     } as const;
     const shareFields = {
+      entitlement: freeGrant.entitlement,
+      expiresAt: freeGrant.expiresAt,
       publishedAt: new Date("2026-09-16T00:00:00.000Z"),
       publishedRevision: 3,
       shareId: "Ab0_-cdefghijklmnopqrs",
@@ -159,6 +171,39 @@ describe("GiftSchema", () => {
       expect(GiftSchema.safeParse({ ...base, ...shareFields, status: "published" }).success).toBe(
         true,
       );
+    });
+
+    it("requires a published gift to carry its entitlement and expiry", () => {
+      const { entitlement: _entitlement, ...withoutEntitlement } = shareFields;
+      const { expiresAt: _expiresAt, ...withoutExpiry } = shareFields;
+
+      expect(
+        GiftSchema.safeParse({ ...base, ...withoutEntitlement, status: "published" }).success,
+      ).toBe(false);
+      expect(GiftSchema.safeParse({ ...base, ...withoutExpiry, status: "published" }).success).toBe(
+        false,
+      );
+    });
+
+    it("rejects a draft with an entitlement or an expiry", () => {
+      expect(
+        GiftSchema.safeParse({ ...base, entitlement: freeGrant.entitlement, status: "draft" })
+          .success,
+      ).toBe(false);
+      expect(
+        GiftSchema.safeParse({ ...base, expiresAt: freeGrant.expiresAt, status: "draft" }).success,
+      ).toBe(false);
+    });
+
+    it("rejects an expiry that does not follow from the entitlement", () => {
+      expect(
+        GiftSchema.safeParse({
+          ...base,
+          ...shareFields,
+          expiresAt: new Date("2026-09-30T00:00:00.001Z"),
+          status: "published",
+        }).success,
+      ).toBe(false);
     });
 
     it("rejects a malformed share id", () => {

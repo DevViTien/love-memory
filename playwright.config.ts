@@ -52,8 +52,9 @@ export default defineConfig({
         process.env["BETTER_AUTH_SECRET"] || "playwright-secret-with-at-least-32-characters",
       BETTER_AUTH_URL: process.env["BETTER_AUTH_URL"] || baseURL,
       MONGODB_DATABASE: e2eDatabase,
-      // The internal free publish entitlement (off by default, forced off in Production).
-      INTERNAL_PUBLISH_ENABLED: "true",
+      // The internal paid-plan grant: Standard without payment (off by default, forced off in
+      // Production). Free publishing needs no flag.
+      INTERNAL_PLAN_GRANT_ENABLED: "true",
       MEDIA_WORKER_MODE: "inline",
       // Development/E2E-only filesystem object storage; refused on every Vercel deployment.
       STORAGE_DRIVER: "local",

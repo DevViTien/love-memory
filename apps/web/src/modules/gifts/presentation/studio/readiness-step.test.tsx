@@ -6,12 +6,12 @@ import type * as PreviewActionModule from "./preview-action";
 import { apiError, assetIds, jsonResponse } from "./test/fixtures";
 import {
   analyticsEventNames,
-  readyAsset,
   renderEditor,
   setStudioUrl,
   stubStudioFetch,
   studioAnalytics,
   urlOf,
+  studioPhotos,
 } from "./test/render-editor";
 
 const previewMocks = vi.hoisted(() => ({ navigate: vi.fn() }));
@@ -51,16 +51,23 @@ describe("Readiness steps", () => {
     expect(document.activeElement?.id).toBe("studio-step-letter");
   });
 
-  it("shows every step ready and the action disabled while publishing is not available (Action not yet available)", async () => {
-    const fetchMock = stubStudioFetch({ assets: assetIds.map((assetId) => readyAsset(assetId)) });
+  it("shows every step ready and the action disabled while no plan fits (Action not yet available)", async () => {
+    const photos = studioPhotos(5);
+    const fetchMock = stubStudioFetch({ assets: photos.assets });
     setStudioUrl("?step=publish");
-    renderEditor({ content: completeContent, ownerKind: "user", signedIn: true });
-    await screen.findAllByText("3/8 ảnh");
+    renderEditor({
+      content: { ...completeContent, memories: photos.memories },
+      ownerKind: "user",
+      signedIn: true,
+    });
+    await screen.findAllByText("5/8 ảnh");
 
     const step = within(screen.getByRole("region", { name: "Xuất bản" }));
     expect(step.getByText("Tất cả các bước đã sẵn sàng.")).toBeTruthy();
+    expect(step.getByText("Món quà đang có 5 ảnh, gói này cho tối đa 3 ảnh.")).toBeTruthy();
+    expect(step.getByText("Sắp mở thanh toán.")).toBeTruthy();
     expect(step.getByRole<HTMLButtonElement>("button", { name: "Xuất bản" }).disabled).toBe(true);
-    expect(step.getByText("Xuất bản chưa được mở cho tài khoản này.")).toBeTruthy();
+    expect(step.getByText("Chọn một gói để xuất bản.")).toBeTruthy();
     expect(step.queryByText("Sắp ra mắt")).toBeNull();
     expect(
       fetchMock.mock.calls.every(([input]) => urlOf(input).startsWith("/api/media/assets?")),

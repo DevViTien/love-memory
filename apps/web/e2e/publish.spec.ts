@@ -33,7 +33,8 @@ import { captureViewerScreenshot, pressTemplateNext } from "./viewer-harness";
 
 // Requires the earlier Sprint 3 changes: memory-box@1.1.0, the step-based Studio, local object
 // storage (STORAGE_DRIVER=local on the Playwright web server) and the preview. The web server also
-// sets INTERNAL_PUBLISH_ENABLED=true and ANALYTICS_ENABLED=true (`add-funnel-analytics`), so this
+// sets INTERNAL_PLAN_GRANT_ENABLED=true (Standard for the 8-photo journey,
+// `add-gift-plans-and-entitlements`) and ANALYTICS_ENABLED=true (`add-funnel-analytics`), so this
 // journey is also the Gate M2 funnel, snapshot and edge-case evidence.
 
 const VIEWER_TITLE = "LoveMemory template viewer";
@@ -347,6 +348,10 @@ async function runPublishJourney(page: Page, testInfo: TestInfo, journey: Journe
   }
   const assetIds = await listDraftAssetIds(page, publicId);
   expect(assetIds).toHaveLength(content.photos.length);
+  // Free fits three photos; more need Standard, granted internally on the E2E web server
+  // (INTERNAL_PLAN_GRANT_ENABLED=true) until checkout exists.
+  const onFree = content.photos.length <= 3;
+  const planName = onFree ? "Miễn phí" : "Tiêu chuẩn";
 
   // 2. The preview lists no issue, and plays to its end without any funnel event.
   await studioStep(page, /Xem trước/).click();
@@ -388,7 +393,22 @@ async function runPublishJourney(page: Page, testInfo: TestInfo, journey: Journe
   await studioStep(page, /Xuất bản/).click();
   await expect(publishButton).toBeEnabled();
 
-  // 5. Publish, capturing the request, and see the published panel, also after a reload.
+  // 5. The plan choice, then publish, capturing the request, and see the published panel, also
+  // after a reload.
+  const freePlan = publishRegion.getByRole("radio", { name: /^Miễn phí/ });
+  const standardPlan = publishRegion.getByRole("radio", { name: /^Tiêu chuẩn · 49\.000đ/ });
+  if (onFree) {
+    await expect(freePlan).toBeChecked();
+  } else {
+    await expect(freePlan).toBeDisabled();
+    await expect(
+      publishRegion.getByText(
+        `Món quà đang có ${content.photos.length} ảnh, gói này cho tối đa 3 ảnh.`,
+      ),
+    ).toBeVisible();
+    await expect(standardPlan).toBeChecked();
+    await expect(publishRegion.getByText("Cấp nội bộ để thử nghiệm, không thu phí.")).toBeVisible();
+  }
   const publishRequest = page.waitForRequest(
     (request) =>
       request.url().endsWith(`/api/gifts/${publicId}/publish`) && request.method() === "POST",
@@ -397,12 +417,21 @@ async function runPublishJourney(page: Page, testInfo: TestInfo, journey: Journe
   await publishButton.click();
   // Publishing is irreversible, so it asks first; the confirmation itself sends nothing.
   await expect(publishRegion.getByRole("heading", { name: "Xuất bản món quà này?" })).toBeFocused();
+  await expect(publishRegion.getByText(`Gói đã chọn: ${planName}.`)).toBeVisible();
   await publishRegion.getByRole("button", { name: "Xác nhận xuất bản" }).click();
   const request = await publishRequest;
   const idempotencyKey = request.headers()["idempotency-key"] ?? "";
   const requestBody = request.postData() ?? "";
   expect(idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+  expect(JSON.parse(requestBody)).toMatchObject({ planId: onFree ? "free" : "standard" });
   await expect(page.getByRole("heading", { name: "Đã xuất bản" })).toBeVisible();
+  await expect(
+    page.getByText(
+      new RegExp(
+        `^Gói ${planName} · Người nhận mở được đến \\d{2}:\\d{2} \\d{2}/\\d{2}/\\d{4}\\.$`,
+      ),
+    ),
+  ).toBeVisible();
   // The refreshed page shows the published panel above the editor of the working copy.
   await expect(
     page.getByText("Món quà đã được bảo vệ bởi tài khoản của bạn. Chỉ bạn sửa được nội dung."),
@@ -448,7 +477,10 @@ async function runPublishJourney(page: Page, testInfo: TestInfo, journey: Journe
   const expectedRevision = (JSON.parse(requestBody) as { expectedRevision: number })
     .expectedRevision;
   const conflicting = await ownerFetch(page, {
-    body: JSON.stringify({ expectedRevision: expectedRevision + 1 }),
+    body: JSON.stringify({
+      ...(JSON.parse(requestBody) as object),
+      expectedRevision: expectedRevision + 1,
+    }),
     headers,
     method: "POST",
     path,
@@ -470,7 +502,18 @@ async function runPublishJourney(page: Page, testInfo: TestInfo, journey: Journe
   const draftRead = await ownerFetch(page, { method: "GET", path: `/api/gifts/${publicId}` });
   expect(draftRead.status).toBe(200);
   expect(draftRead.body).toMatchObject({
-    data: { gift: { publication: { revision: expectedRevision, shareId }, status: "published" } },
+    data: {
+      gift: {
+        publication: {
+          maxPhotos: onFree ? 3 : null,
+          planId: onFree ? "free" : "standard",
+          revision: expectedRevision,
+          shareId,
+          watermark: onFree,
+        },
+        status: "published",
+      },
+    },
   });
   const photoDelete = await ownerFetch(page, {
     body: JSON.stringify({ giftPublicId: publicId }),
@@ -606,6 +649,8 @@ async function runPublishJourney(page: Page, testInfo: TestInfo, journey: Journe
     const fallbackEvents = recordAnalyticsEvents(guest);
     await guest.route("**/template-artifacts/**", (route) => route.abort());
     await guest.goto(shareUrl);
+    // The Free plan's host-level mark over the frame; a Standard gift has none (`gift-plans`).
+    await expect(guest.getByText("Tạo bằng LoveMemory")).toHaveCount(onFree ? 1 : 0);
     const open = guest.getByRole("button", { name: "Mở quà" });
     await waitForHydration(open);
     await open.click();
@@ -638,7 +683,9 @@ async function runPublishJourney(page: Page, testInfo: TestInfo, journey: Journe
     // 11. An unknown share link: the opaque not-found page with a real 404, and a 404 from the API.
     const unknown = randomBytes(16).toString("base64url");
     const missing = await guest.goto(`/g/${unknown}`);
-    await expect(guest.getByText("Món quà không tồn tại hoặc đã được thu hồi.")).toBeVisible();
+    await expect(
+      guest.getByText("Món quà không tồn tại, đã hết hạn hoặc đã được thu hồi."),
+    ).toBeVisible();
     expect(missing?.status()).toBe(404);
     expect(missing?.headers()["x-robots-tag"]).toBe("noindex");
     expect(missing?.headers()["cache-control"]).toContain("no-store");

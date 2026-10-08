@@ -5,7 +5,9 @@ import { deleteAnalyticsEvents, giftRefOf } from "./support/analytics";
 import { uniqueE2eEmail } from "./support/auth";
 import {
   cleanupE2eRecord,
+  createMemoryBoxDraft,
   type E2eRecord,
+  fillCompleteMemoryBox,
   listDraftAssetIds,
   publishTypicalMemoryBox,
   saveStatus,
@@ -17,7 +19,8 @@ import { assignOwnAuthClientAddress, expect, test } from "./test";
 
 // Edit after publish (`change-gift-publication-revisions`): the owner keeps editing a published
 // gift, recipients keep the current publication until `Cập nhật món quà`, and the share link never
-// changes. Needs INTERNAL_PUBLISH_ENABLED=true and local object storage on the web server.
+// changes. Publishes on the Free plan (`add-gift-plans-and-entitlements`); the plan case needs
+// INTERNAL_PLAN_GRANT_ENABLED=true, and every case local object storage on the web server.
 
 test.use({ actionTimeout: 20_000 });
 
@@ -97,6 +100,10 @@ test("an edited published gift reaches recipients only after Cập nhật món q
   // The Studio of a published gift: the published panel above the editor.
   await page.goto(`/studio/${record.publicId}?field=final-letter`);
   await expect(page.getByRole("heading", { name: "Đã xuất bản" })).toBeVisible();
+  // The Free plan and its expiry, 14 days after the first publish.
+  await expect(
+    page.getByText(/^Gói Miễn phí · Người nhận mở được đến \d{2}:\d{2} \d{2}\/\d{2}\/\d{4}\.$/),
+  ).toBeVisible();
   await expect(page.getByText("Người nhận đang xem bản mới nhất.", { exact: true })).toBeVisible();
   const letter = page.getByRole("textbox", { name: "Lá thư cuối" });
   await expect(letter).toBeFocused();
@@ -109,6 +116,8 @@ test("an edited published gift reaches recipients only after Cập nhật món q
   // Edit not visible to recipients.
   const recipient = await openRecipient(page, shareUrl);
   try {
+    // A Free gift carries the host-level mark over the frame.
+    await expect(recipient.pages()[0]!.getByText("Tạo bằng LoveMemory")).toBeVisible();
     const before = await recipientPayload(recipient, shareId);
     expect(before.payload["final-letter"]).toBe(TYPICAL_MEMORY_BOX.letter);
 
@@ -185,4 +194,26 @@ test("a photo of the live publication stays with recipients until the update rep
   } finally {
     await recipient.close();
   }
+});
+
+test("a draft with more photos than Free allows is offered Standard only", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(180_000);
+  const publicId = await createMemoryBoxDraft(page);
+  records.push({ publicId });
+  await fillCompleteMemoryBox(page, publicId, resolve(dirname(testInfo.file), "fixtures"), {
+    ...TYPICAL_MEMORY_BOX,
+    photos: [...TYPICAL_MEMORY_BOX.photos, "photo.jpg"],
+  });
+
+  await studioStep(page, /Xuất bản/).click();
+  const publishRegion = page.getByRole("region", { name: "Xuất bản" });
+  const freePlan = publishRegion.getByRole("radio", { name: /^Miễn phí/ });
+  await waitForHydration(freePlan);
+  await expect(freePlan).toBeDisabled();
+  await expect(
+    publishRegion.getByText("Món quà đang có 4 ảnh, gói này cho tối đa 3 ảnh."),
+  ).toBeVisible();
+  await expect(publishRegion.getByRole("radio", { name: /^Tiêu chuẩn · 49\.000đ/ })).toBeChecked();
 });

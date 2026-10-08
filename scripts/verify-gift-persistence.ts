@@ -10,7 +10,9 @@ import {
 import {
   createGiftDraft,
   createGiftPublication,
+  currentPlan,
   type Gift,
+  grantEntitlement,
   type MediaAsset,
   publishGiftDraft,
   republishGift,
@@ -106,9 +108,11 @@ function readyAsset(id: string, owningGiftId: string): MediaAsset & { _id: strin
 
 /** A publish of `gift` referencing one asset, with a freshly generated share id and record id. */
 function publishInputFor(gift: Gift, referencedAssetId: string, key: string): GiftPublishInput {
+  const now = new Date();
   const published = publishGiftDraft(gift, {
     expectedRevision: gift.revision,
-    now: new Date(),
+    grant: grantEntitlement(currentPlan("free"), "free", now),
+    now,
     shareId: randomBytes(16).toString("base64url"),
   });
   assert(published.ok, "Domain publish failed.");
@@ -137,13 +141,15 @@ function publishInputFor(gift: Gift, referencedAssetId: string, key: string): Gi
 
 /**
  * An update of a published gift whose working copy is at `gift.revision`, conditional on the
- * current publication `publishedRevision` (what the publish checks saw).
+ * current publication `publishedRevision` (what the publish checks saw) and on the gift not having
+ * expired at `writeTime`.
  */
 function republishInputFor(
   gift: Gift,
   referencedAssetId: string,
   key: string,
   publishedRevision: number,
+  writeTime = new Date(),
 ): GiftPublishInput {
   const republished = republishGift(gift, { expectedRevision: gift.revision, now: new Date() });
   assert(republished.ok, "Domain republish failed.");
@@ -159,7 +165,7 @@ function republishInputFor(
       scope: "gift-publish",
     },
     ownerId: verificationUserId,
-    precondition: { publishedRevision, status: "published" },
+    precondition: { now: writeTime, publishedRevision, status: "published" },
     publication: createGiftPublication({
       artifactContentHash: "f".repeat(64),
       assetIds: [referencedAssetId],
@@ -286,10 +292,18 @@ try {
     .collection<{ giftId: string }>(COLLECTIONS.giftPublications)
     .countDocuments({ giftId });
   assert(publicationCount === 1, "Publishing did not store exactly one publication record.");
-  const publishedGift = await mongoGiftRepository.findPublishedByShareId(shareId);
+  const publishedGift = await mongoGiftRepository.findPublishedByShareId(shareId, new Date());
   assert(
     publishedGift?.id === giftId && publishedGift.status === "published",
     "The published gift was not found by its share id.",
+  );
+  const grantedEntitlement = publishedGift.entitlement;
+  const grantedExpiry = publishedGift.expiresAt;
+  assert(
+    grantedEntitlement?.planId === "free" &&
+      grantedEntitlement.source === "free" &&
+      grantedExpiry?.getTime() === grantedEntitlement.grantedAt.getTime() + 14 * 86_400_000,
+    "The first publish did not grant the free entitlement and its expiry.",
   );
 
   const publishReplay = await mongoGiftRepository.publish(publishInput);
@@ -312,6 +326,7 @@ try {
   // The exact filter of `findPublishedByShareId`.
   const plan = await explainLookup(COLLECTIONS.gifts, {
     "access.mode": "unlisted",
+    expiresAt: { $gt: new Date() },
     shareId: { $eq: shareId, $type: "string" },
     status: "published",
   });
@@ -357,10 +372,15 @@ try {
       update.publication.revision === firstRevision + 1,
     `Publishing the working copy did not store a second publication: ${update.status}.`,
   );
-  const updatedGift = await mongoGiftRepository.findPublishedByShareId(shareId);
+  const updatedGift = await mongoGiftRepository.findPublishedByShareId(shareId, new Date());
   assert(
     updatedGift?.publishedRevision === firstRevision + 1 && updatedGift.shareId === shareId,
     "The update did not move the pointer under the same share id.",
+  );
+  assert(
+    JSON.stringify(updatedGift.entitlement) === JSON.stringify(grantedEntitlement) &&
+      updatedGift.expiresAt?.getTime() === grantedExpiry.getTime(),
+    "The update changed the entitlement or the expiry.",
   );
   const publications = await database
     .collection<{ giftId: string; revision: number; shareId: string }>(COLLECTIONS.giftPublications)
@@ -399,6 +419,19 @@ try {
     (duplicateRevision.status === "stale" || duplicateRevision.status === "revision-taken") &&
       publicationsAfterDuplicate === 2,
     `Publishing the same revision again under another key was not refused: ${duplicateRevision.status}.`,
+  );
+
+  // Expiry: past `expiresAt` the share link is gone, and an update write conditioned on that time
+  // is refused by its `expiresAt` clause (with a live time it would reach the publication insert).
+  const afterExpiry = new Date(grantedExpiry.getTime() + 1);
+  const expiredLookup = await mongoGiftRepository.findPublishedByShareId(shareId, afterExpiry);
+  assert(expiredLookup === null, "An expired share link was still found.");
+  const expiredUpdate = await mongoGiftRepository.publish(
+    republishInputFor(savedWorkingCopy, assetId, randomUUID(), firstRevision + 1, afterExpiry),
+  );
+  assert(
+    expiredUpdate.status === "stale",
+    `An update after expiry was not refused by the write: ${expiredUpdate.status}.`,
   );
 
   // A photo of the current publication is detached from the working copy, never deleted.

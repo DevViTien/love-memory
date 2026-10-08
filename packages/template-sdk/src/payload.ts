@@ -115,3 +115,17 @@ export function listImageFieldReferences(
     return [{ assetIds, fieldId: field.id }];
   });
 }
+
+/**
+ * The photo count that plan limits apply to: image items across every image field, as the
+ * creator sees them. Malformed items are skipped, as in `listImageFieldReferences`.
+ */
+export function countImageItems(
+  manifest: TemplateManifest,
+  content: Readonly<Record<string, unknown>>,
+): number {
+  return listImageFieldReferences(manifest, content).reduce(
+    (total, reference) => total + reference.assetIds.length,
+    0,
+  );
+}

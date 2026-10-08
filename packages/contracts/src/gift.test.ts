@@ -8,6 +8,7 @@ import {
   GiftPreviewLinkResponseSchema,
   GiftPublicationDtoSchema,
   GiftPublicationResponseSchema,
+  PlanOfferDtoSchema,
   PublicGiftIdSchema,
   PublishGiftRequestSchema,
   ShareIdSchema,
@@ -106,10 +107,14 @@ describe("gift API contracts", () => {
       updatedAt: "2026-10-02T00:00:00.000Z",
     } as const;
     const summary = {
+      expiresAt: "2026-10-15T08:00:00.000Z",
+      maxPhotos: 3,
+      planId: "free",
       publishedAt: "2026-10-01T08:00:00.000Z",
       revision: 7,
       shareId,
       sharePath: `/g/${shareId}`,
+      watermark: true,
     };
 
     it("accepts a published gift's working copy with its publication summary", () => {
@@ -131,11 +136,36 @@ describe("gift API contracts", () => {
       ).toBe(false);
       expect(GiftDraftDtoSchema.safeParse(working).success).toBe(false);
     });
+
+    it("carries the entitlement values the Studio needs, never the source or price", () => {
+      expect(
+        GiftDraftDtoSchema.safeParse({
+          ...working,
+          publication: { ...summary, maxPhotos: null, planId: "standard", watermark: false },
+        }).success,
+      ).toBe(true);
+      for (const extra of [
+        { source: "free" },
+        { priceVnd: 0 },
+        { grantedAt: summary.publishedAt },
+      ]) {
+        expect(
+          GiftDraftDtoSchema.safeParse({ ...working, publication: { ...summary, ...extra } })
+            .success,
+        ).toBe(false);
+      }
+      const { planId: _planId, ...withoutPlan } = summary;
+      expect(GiftDraftDtoSchema.safeParse({ ...working, publication: withoutPlan }).success).toBe(
+        false,
+      );
+    });
   });
 
   describe("publish", () => {
     const shareId = "Ab0_-cdefghijklmnopqrs";
     const publication = {
+      expiresAt: "2026-10-15T08:00:00.000Z",
+      planId: "free",
       publicId: "q1w2e3r4t5y6u7i8",
       publishedAt: "2026-10-01T08:00:00.000Z",
       revision: 7,
@@ -144,13 +174,21 @@ describe("gift API contracts", () => {
       status: "published",
     } as const;
 
-    it("accepts only a non-negative expected revision in the request", () => {
-      expect(PublishGiftRequestSchema.parse({ expectedRevision: 3 })).toEqual({
+    it("accepts only a non-negative expected revision and a released plan in the request", () => {
+      expect(PublishGiftRequestSchema.parse({ expectedRevision: 3, planId: "free" })).toEqual({
         expectedRevision: 3,
+        planId: "free",
       });
-      expect(PublishGiftRequestSchema.safeParse({ expectedRevision: -1 }).success).toBe(false);
       expect(
-        PublishGiftRequestSchema.safeParse({ expectedRevision: 3, shareId: "abc" }).success,
+        PublishGiftRequestSchema.safeParse({ expectedRevision: -1, planId: "free" }).success,
+      ).toBe(false);
+      expect(
+        PublishGiftRequestSchema.safeParse({ expectedRevision: 3, planId: "free", shareId: "abc" })
+          .success,
+      ).toBe(false);
+      expect(PublishGiftRequestSchema.safeParse({ expectedRevision: 3 }).success).toBe(false);
+      expect(
+        PublishGiftRequestSchema.safeParse({ expectedRevision: 3, planId: "premium" }).success,
       ).toBe(false);
       expect(PublishGiftRequestSchema.safeParse({}).success).toBe(false);
     });
@@ -182,5 +220,25 @@ describe("gift API contracts", () => {
       expect(ShareIdSchema.safeParse(shareId).success).toBe(true);
       expect(ShareIdSchema.safeParse(shareId.slice(1)).success).toBe(false);
     });
+  });
+});
+
+describe("plan offers", () => {
+  const offer = {
+    available: true,
+    internalGrant: false,
+    maxPhotos: 3,
+    name: "Miễn phí",
+    planId: "free",
+    planVersion: 1,
+    priceVnd: 0,
+    retentionDays: 14,
+    watermark: true,
+  } as const;
+
+  it("accepts an offer and rejects extra keys or an unknown plan", () => {
+    expect(PlanOfferDtoSchema.parse(offer)).toEqual(offer);
+    expect(PlanOfferDtoSchema.safeParse({ ...offer, source: "free" }).success).toBe(false);
+    expect(PlanOfferDtoSchema.safeParse({ ...offer, planId: "premium" }).success).toBe(false);
   });
 });

@@ -19,6 +19,7 @@ export function getPublicGiftService(): PublicGiftService {
   publicGiftService ??= createPublicGiftService({
     analytics: { contextForGift: analyticsContextForGift },
     assets: mongoMediaAssetRepository,
+    clock: () => new Date(),
     gifts: mongoGiftRepository,
     payload: viewerPayloadDependencies,
     publications: mongoGiftPublicationRepository,

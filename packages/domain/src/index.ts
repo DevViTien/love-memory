@@ -1,4 +1,6 @@
 export * from "./audio/licensed-audio-catalog";
+export * from "./billing/gift-entitlement";
+export * from "./billing/plan";
 export * from "./gift/gift-identity";
 export * from "./gift/gift-draft";
 export * from "./gift/gift-publication";

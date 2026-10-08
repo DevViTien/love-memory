@@ -1,6 +1,8 @@
 "use client";
 
+import { type GiftPublicationSummary } from "@love-memory/contracts";
 import { ROUTES } from "@love-memory/shared";
+import { countImageItems } from "@love-memory/template-sdk";
 import { Button, buttonVariants } from "@love-memory/ui";
 import Link from "next/link";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -8,8 +10,11 @@ import { useStore } from "zustand";
 
 import { ClaimDraftButton } from "../claim-draft-button";
 import { selectCanUpdatePublication } from "./draft-editor-store";
+import { PlanChoice, planOptions, selectedPlan } from "./plan-choice";
+import { planName } from "./plan-format";
 import { reloadStudioPage, requestPublish } from "./publish-action";
 import { studioLinkHandler, useStudio } from "./studio-context";
+import { useNow } from "./use-now";
 
 type Notice =
   | Readonly<{ kind: "message"; text: string }>
@@ -20,7 +25,13 @@ type Notice =
 const MESSAGES = {
   accessUnsupported: "Chế độ truy cập của món quà này chưa hỗ trợ xuất bản.",
   anonymous: "Đăng nhập và lưu quà vào tài khoản để xuất bản.",
-  notEnabled: "Xuất bản chưa được mở cho tài khoản này.",
+  expired: "Món quà đã hết hạn nên không thể cập nhật.",
+  noPlan: "Chọn một gói để xuất bản.",
+  overPlanLimit: (name: string, maxPhotos: number) =>
+    `Gói ${name} cho tối đa ${maxPhotos} ảnh. Hãy bớt ảnh để cập nhật.`,
+  photoLimit: (maxPhotos: number, photoCount: number) =>
+    `Gói đã chọn cho tối đa ${maxPhotos} ảnh, món quà đang có ${photoCount} ảnh.`,
+  planUnavailable: "Gói này chưa mở cho tài khoản của bạn.",
   sessionExpired: "Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại để xuất bản.",
   unpublishable: "Phiên bản mẫu của món quà này không hỗ trợ xuất bản.",
 } as const;
@@ -64,19 +75,30 @@ function signInHref(publicId: string) {
 }
 
 /**
- * The `Xuất bản` action of a draft, or `Cập nhật món quà` of a published gift: disabled with one
- * explanation until the template version can be published, the draft is claimed, publishing is
- * enabled, every step is complete and (for an update) something changed. It asks for a
- * confirmation first. Confirming freezes the editor, settles pending saves and publishes the last
- * saved revision. One `Idempotency-Key` serves every attempt until a `201`; the next publish of
- * the page uses a new one.
+ * The `Xuất bản` action of a draft with its plan choice, or `Cập nhật món quà` of a published gift
+ * on its entitlement's plan: disabled with one explanation until the template version can be
+ * published, the draft is claimed, every step is complete, a plan fits (or, for an update, the gift
+ * has not expired, fits its plan and something changed). It asks for a confirmation first.
+ * Confirming freezes the editor, settles pending saves and publishes the last saved revision. One
+ * `Idempotency-Key` serves every attempt until a `201`; the next publish of the page uses a new
+ * one. Plan limits shown here are the server's; the publish endpoint decides again.
  */
 export function PublishStep({ incomplete }: Readonly<{ incomplete: boolean }>) {
   const { controller, navigation, publish, report, store } = useStudio();
   const publicId = store.getState().context.publicId;
   const mode = useStore(store, (state) => (state.publication ? "update" : "publish"));
   const canUpdate = useStore(store, selectCanUpdatePublication);
+  const publication = useStore(store, (state) => state.publication);
+  const photoCount = useStore(store, (state) =>
+    countImageItems(state.context.manifest, state.content),
+  );
   const texts = MODE_TEXTS[mode];
+  const [chosenPlanId, setChosenPlanId] = useState<string | null>(null);
+  const options = planOptions(publish.planOffers, photoCount);
+  const selected = selectedPlan(options, chosenPlanId);
+  const now = useNow();
+  // Display only: the server refuses an expired update with `GIFT_EXPIRED` and the page reloads.
+  const expired = publication !== null && Date.parse(publication.expiresAt) <= now;
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   // Created on the first attempt and reused by every retry until one succeeds.
@@ -105,10 +127,26 @@ export function PublishStep({ incomplete }: Readonly<{ incomplete: boolean }>) {
         )}
       </div>
     );
-  } else if (!publish.enabled) {
-    blocked = <p className="text-sm font-semibold text-stone-600">{MESSAGES.notEnabled}</p>;
+  } else if (mode === "update" && expired) {
+    blocked = <p className="text-sm font-semibold text-stone-600">{MESSAGES.expired}</p>;
   } else if (incomplete) {
     blocked = <p className="text-sm font-semibold text-stone-600">{texts.incomplete}</p>;
+  } else if (mode === "publish" && !selected) {
+    blocked = <p className="text-sm font-semibold text-stone-600">{MESSAGES.noPlan}</p>;
+  } else if (
+    mode === "update" &&
+    publication !== null &&
+    publication.maxPhotos !== null &&
+    photoCount > publication.maxPhotos
+  ) {
+    blocked = (
+      <p className="text-sm font-semibold text-stone-600">
+        {MESSAGES.overPlanLimit(
+          planName(publish.planOffers, publication.planId),
+          publication.maxPhotos,
+        )}
+      </p>
+    );
   } else if (mode === "update" && !canUpdate) {
     blocked = <p className="text-sm font-semibold text-stone-600">{NOTHING_TO_UPDATE}</p>;
   }
@@ -127,20 +165,45 @@ export function PublishStep({ incomplete }: Readonly<{ incomplete: boolean }>) {
     busyRef.current = true;
     setBusy(true);
     setNotice(null);
+    // The plan of this request: the selection for a first publish, the entitlement's for an update.
+    const current = store.getState().publication;
+    const offer = selected;
+    const planId = current?.planId ?? offer?.planId;
+    if (!planId) {
+      busyRef.current = false;
+      setBusy(false);
+      return;
+    }
     idempotencyKey.current ??= crypto.randomUUID();
     // Nothing on screen may change while the request runs: what is shown is what is published.
     store.getState().setPublishing(true);
     const outcome = await requestPublish({
       flush: () => controller.flush(),
       idempotencyKey: idempotencyKey.current,
+      planId,
       publicId,
     });
     const state = store.getState();
     state.setPublishing(false);
     switch (outcome.kind) {
       case "published": {
-        const { publishedAt, revision, shareId, sharePath } = outcome.publication;
-        state.setPublication({ publishedAt, revision, shareId, sharePath });
+        const { expiresAt, publishedAt, revision, shareId, sharePath } = outcome.publication;
+        // A first publish is granted the current version of the chosen plan, as offered; an
+        // update keeps the entitlement.
+        const limits: Pick<GiftPublicationSummary, "maxPhotos" | "watermark"> = current ?? {
+          maxPhotos: offer?.maxPhotos ?? null,
+          watermark: offer?.watermark ?? true,
+        };
+        state.setPublication({
+          expiresAt,
+          maxPhotos: limits.maxPhotos,
+          planId: outcome.publication.planId,
+          publishedAt,
+          revision,
+          shareId,
+          sharePath,
+          watermark: limits.watermark,
+        });
         // A recorded key belongs to that revision: the next publish of this page needs a new one.
         idempotencyKey.current = null;
         if (mode === "update") setNotice({ kind: "updated" });
@@ -162,8 +225,14 @@ export function PublishStep({ incomplete }: Readonly<{ incomplete: boolean }>) {
       case "unauthenticated":
         setNotice({ kind: "sign-in-again" });
         break;
-      case "forbidden":
-        setNotice({ kind: "message", text: MESSAGES.notEnabled });
+      case "plan-unavailable":
+        setNotice({ kind: "message", text: MESSAGES.planUnavailable });
+        break;
+      case "photo-limit":
+        setNotice({
+          kind: "message",
+          text: MESSAGES.photoLimit(outcome.maxPhotos, outcome.photoCount),
+        });
         break;
       case "gone":
         // The same non-editable path as a 404 save: the alert shows and autosave stops.
@@ -201,6 +270,18 @@ export function PublishStep({ incomplete }: Readonly<{ incomplete: boolean }>) {
 
   return (
     <div className="space-y-3">
+      {mode === "publish" ? (
+        <PlanChoice
+          disabled={confirming || busy}
+          onSelect={setChosenPlanId}
+          options={options}
+          selectedPlanId={selected?.planId ?? null}
+        />
+      ) : publication ? (
+        <p className="text-sm font-bold text-stone-700">
+          Gói {planName(publish.planOffers, publication.planId)}
+        </p>
+      ) : null}
       {confirming ? (
         <div className="space-y-4 rounded-3xl border border-rose-200 bg-rose-50/60 p-5">
           <h3
@@ -211,6 +292,9 @@ export function PublishStep({ incomplete }: Readonly<{ incomplete: boolean }>) {
             {texts.confirmHeading}
           </h3>
           <p className="text-sm leading-6 text-stone-700">{texts.confirmText}</p>
+          {mode === "publish" && selected ? (
+            <p className="text-sm font-semibold text-stone-800">Gói đã chọn: {selected.name}.</p>
+          ) : null}
           <div className="flex flex-wrap gap-3">
             <Button disabled={busy} onClick={() => void startPublish()} size="lg">
               {busy ? texts.busy : texts.confirm}

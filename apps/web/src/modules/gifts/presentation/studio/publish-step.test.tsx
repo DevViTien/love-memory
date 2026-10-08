@@ -14,6 +14,8 @@ import {
   setStudioUrl,
   stubStudioFetch,
   studioAnalytics,
+  studioPhotos,
+  studioPlanOffers,
   urlOf,
 } from "./test/render-editor";
 
@@ -40,6 +42,8 @@ function published(revision: number) {
     {
       data: {
         publication: {
+          expiresAt: "2026-10-15T08:00:00.000Z",
+          planId: "free",
           publicId,
           publishedAt: "2026-10-01T08:00:00.000Z",
           revision,
@@ -82,9 +86,12 @@ async function publishNow(user: UserEvent) {
 const owner: RenderEditorOptions = {
   content: completeContent,
   ownerKind: "user",
-  publishEnabled: true,
   signedIn: true,
 };
+
+function planRadio(name: RegExp) {
+  return publishStep().getByRole<HTMLInputElement>("radio", { name });
+}
 
 async function openReadyPublishStep(options: RenderEditorOptions = owner) {
   setStudioUrl("?step=publish");
@@ -121,7 +128,6 @@ describe("Xuất bản step: availability", () => {
     stubStudioFetch({ assets: readyAssets });
     const view = await openReadyPublishStep({
       content: completeContent,
-      publishEnabled: true,
       signedIn: true,
     });
 
@@ -140,12 +146,74 @@ describe("Xuất bản step: availability", () => {
     ).toBeTruthy();
   });
 
-  it("explains that publishing is not enabled (Publishing not enabled)", async () => {
+  it("selects Free and explains that Standard is not open yet (Publishing not enabled)", async () => {
     stubStudioFetch({ assets: readyAssets });
-    await openReadyPublishStep({ ...owner, publishEnabled: false });
+    await openReadyPublishStep();
 
-    expect(publishButton().disabled).toBe(true);
-    expect(publishStep().getByText("Xuất bản chưa được mở cho tài khoản này.")).toBeTruthy();
+    expect(planRadio(/^Miễn phí · Miễn phí/).checked).toBe(true);
+    expect(planRadio(/^Tiêu chuẩn · 49\.000đ/).disabled).toBe(true);
+    expect(publishStep().getByText("Sắp mở thanh toán.")).toBeTruthy();
+    expect(publishButton().disabled).toBe(false);
+    expect(publishStep().queryByText("Xuất bản chưa được mở cho tài khoản này.")).toBeNull();
+  });
+
+  it("describes each plan from the server's values", async () => {
+    stubStudioFetch({ assets: readyAssets });
+    await openReadyPublishStep({ ...owner, planOffers: studioPlanOffers("internal") });
+
+    expect(
+      publishStep().getByText(
+        "Tối đa 3 ảnh · Có dòng chữ “Tạo bằng LoveMemory” · Người nhận mở được trong 14 ngày",
+        { exact: false },
+      ),
+    ).toBeTruthy();
+    expect(
+      publishStep().getByText(
+        "Tất cả ảnh mẫu quà cho phép · Không có dòng chữ “Tạo bằng LoveMemory” · Người nhận mở được trong 1 năm",
+        { exact: false },
+      ),
+    ).toBeTruthy();
+    expect(publishStep().getByText("Cấp nội bộ để thử nghiệm, không thu phí.")).toBeTruthy();
+  });
+
+  it("offers Standard through the internal grant for 8 photos (Standard through the internal grant)", async () => {
+    const photos = studioPhotos(8);
+    const fetchMock = stubStudioFetch({ assets: photos.assets, publish: () => published(0) });
+    const user = userEvent.setup();
+    setStudioUrl("?step=publish");
+    renderEditor({
+      ...owner,
+      content: { ...completeContent, memories: photos.memories },
+      planOffers: studioPlanOffers("internal"),
+    });
+    await screen.findAllByText("8/8 ảnh");
+
+    expect(planRadio(/^Miễn phí/).disabled).toBe(true);
+    expect(
+      publishStep().getByText("Món quà đang có 8 ảnh, gói này cho tối đa 3 ảnh."),
+    ).toBeTruthy();
+    expect(planRadio(/^Tiêu chuẩn · 49\.000đ/).checked).toBe(true);
+
+    await publishNow(user);
+
+    await waitFor(() => expect(publishPosts(fetchMock)).toHaveLength(1));
+    const [, init] = publishPosts(fetchMock)[0]!;
+    expect(JSON.parse(init?.body as string)).toMatchObject({ planId: "standard" });
+  });
+
+  it("lets the creator choose Standard and sends it", async () => {
+    const fetchMock = stubStudioFetch({ assets: readyAssets, publish: () => published(0) });
+    const user = userEvent.setup();
+    await openReadyPublishStep({ ...owner, planOffers: studioPlanOffers("internal") });
+
+    expect(planRadio(/^Miễn phí/).checked).toBe(true);
+    await user.click(planRadio(/^Tiêu chuẩn/));
+    expect(planRadio(/^Tiêu chuẩn/).checked).toBe(true);
+    await publishNow(user);
+
+    await waitFor(() => expect(publishPosts(fetchMock)).toHaveLength(1));
+    const [, init] = publishPosts(fetchMock)[0]!;
+    expect(JSON.parse(init?.body as string)).toMatchObject({ planId: "standard" });
   });
 
   it("blocks publishing while a step is missing (Incomplete steps block publishing)", () => {
@@ -173,6 +241,8 @@ describe("Xuất bản step: confirmation", () => {
         "Ai có đường dẫn đều mở được món quà. Bạn có thể chỉnh sửa và cập nhật sau, nhưng chưa thể thu hồi đường dẫn.",
       ),
     ).toBeTruthy();
+    expect(publishStep().getByText("Gói đã chọn: Miễn phí.")).toBeTruthy();
+    expect(planRadio(/^Miễn phí/).disabled).toBe(true);
     expect(publishPosts(fetchMock)).toHaveLength(0);
   });
 
@@ -258,7 +328,7 @@ describe("Xuất bản step: publishing", () => {
       .map(([input, init]) => `${init?.method} ${urlOf(input)}`);
     expect(order).toEqual([`PATCH /api/gifts/${publicId}`, `POST /api/gifts/${publicId}/publish`]);
     const [, init] = publishPosts(fetchMock)[0]!;
-    expect(JSON.parse(init?.body as string)).toEqual({ expectedRevision: 1 });
+    expect(JSON.parse(init?.body as string)).toEqual({ expectedRevision: 1, planId: "free" });
     expect(new Headers(init?.headers).get("Idempotency-Key")).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );
@@ -399,9 +469,20 @@ describe("Xuất bản step: publishing", () => {
       "Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại để xuất bản.",
     ],
     [
-      "403",
-      () => jsonResponse(apiError("FORBIDDEN"), 403),
-      "Xuất bản chưa được mở cho tài khoản này.",
+      "409 PLAN_NOT_AVAILABLE",
+      () => jsonResponse(apiError("CONFLICT", { details: { reason: "PLAN_NOT_AVAILABLE" } }), 409),
+      "Gói này chưa mở cho tài khoản của bạn.",
+    ],
+    [
+      "409 PLAN_PHOTO_LIMIT_EXCEEDED (Photo limit refused by the server)",
+      () =>
+        jsonResponse(
+          apiError("CONFLICT", {
+            details: { maxPhotos: 3, photoCount: 4, reason: "PLAN_PHOTO_LIMIT_EXCEEDED" },
+          }),
+          409,
+        ),
+      "Gói đã chọn cho tối đa 3 ảnh, món quà đang có 4 ảnh.",
     ],
     [
       "429",
@@ -492,10 +573,14 @@ describe("Xuất bản step: publishing", () => {
 
 describe("Cập nhật món quà step: a published gift", () => {
   const publication = {
+    expiresAt: "2099-10-15T08:00:00.000Z",
+    maxPhotos: 3,
+    planId: "free" as const,
     publishedAt: "2026-10-01T08:00:00.000Z",
     revision: 0,
     shareId,
     sharePath: `/g/${shareId}`,
+    watermark: true,
   };
   const publishedOwner: RenderEditorOptions = { ...owner, publication };
 
@@ -514,6 +599,35 @@ describe("Cập nhật món quà step: a published gift", () => {
     await user.type(screen.getByRole("textbox", { name: "Lá thư" }), " Thật nhiều.");
     await user.click(screen.getByRole("button", { name: /^7\. Xuất bản/ }));
   }
+
+  it("refuses an update of an expired gift (Expired gift cannot be updated)", async () => {
+    const expiredPublication = { ...publication, expiresAt: "2026-01-01T00:00:00.000Z" };
+    stubStudioFetch({ assets: readyAssets, publication: expiredPublication });
+    await openReadyPublishStep({ ...owner, publication: expiredPublication, revision: 2 });
+
+    expect(updateButton().disabled).toBe(true);
+    expect(publishStep().getByText("Món quà đã hết hạn nên không thể cập nhật.")).toBeTruthy();
+  });
+
+  it("refuses an update over the entitlement's photo limit (Free gift over its photo limit)", async () => {
+    const photos = studioPhotos(4);
+    stubStudioFetch({ assets: photos.assets, publication });
+    setStudioUrl("?step=publish");
+    renderEditor({
+      ...owner,
+      content: { ...completeContent, memories: photos.memories },
+      publication,
+      revision: 2,
+    });
+    await screen.findAllByText("4/8 ảnh");
+
+    expect(updateButton().disabled).toBe(true);
+    expect(
+      publishStep().getByText("Gói Miễn phí cho tối đa 3 ảnh. Hãy bớt ảnh để cập nhật."),
+    ).toBeTruthy();
+    expect(publishStep().getByText("Gói Miễn phí")).toBeTruthy();
+    expect(publishStep().queryByRole("radio")).toBeNull();
+  });
 
   it("shows the panel above the editor and nothing to update (Nothing to update)", async () => {
     stubStudioFetch({ assets: readyAssets, publication });
@@ -555,7 +669,7 @@ describe("Cập nhật món quà step: a published gift", () => {
     expect(await publishStep().findByText("Đã cập nhật món quà.")).toBeTruthy();
     expect(screen.getByText("Người nhận đang xem bản mới nhất.")).toBeTruthy();
     const [, init] = publishPosts(fetchMock)[0]!;
-    expect(JSON.parse(init?.body as string)).toEqual({ expectedRevision: 1 });
+    expect(JSON.parse(init?.body as string)).toEqual({ expectedRevision: 1, planId: "free" });
     expect(updateButton().disabled).toBe(true);
   });
 

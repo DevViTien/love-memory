@@ -2,10 +2,11 @@
 
 ## Purpose
 
-Lets the signed-in owner of a gift draft publish it once, under an internal free entitlement,
-into an immutable snapshot that pins the exact template version and artifact, and gives it a
-share link. It covers the publish endpoint, its checks and idempotency, the gift state transition,
-what publishing ends, and the owner's view of a published gift in the Studio.
+Lets the signed-in owner of a gift publish it on a plan of `gift-plans`, and publish newer
+revisions later, into immutable snapshots that pin the exact template version and artifact behind
+one stable share link. It covers the publish endpoint, its checks and idempotency, the entitlement
+granted at the first publish, the gift state transition, and the owner's view of a published gift
+in the Studio.
 
 ## Requirements
 
@@ -13,23 +14,25 @@ what publishing ends, and the owner's view of a published gift in the Studio.
 
 The system SHALL publish a draft through `POST /api/gifts/{publicId}/publish`. The request SHALL
 carry an `Idempotency-Key` header with a UUID and a strict JSON body that holds only
-`expectedRevision`, a non-negative integer. The checks run in this order:
+`expectedRevision`, a non-negative integer, and `planId`, one of the plan ids of `gift-plans`
+(`free` or `standard`). The checks run in this order:
 
 1. the media type and origin guards of `mutation-request-guards`;
 2. the `publicId` format. A malformed id SHALL respond `404` with code `NOT_FOUND`;
 3. the `Idempotency-Key` header. A missing or malformed key SHALL respond `400` with code
    `VALIDATION_ERROR` and `fieldErrors.idempotencyKey`;
 4. the `gift-publish` rate limit;
-5. the body. An invalid body SHALL respond `400` with code `VALIDATION_ERROR`;
+5. the body. An invalid body, including a missing or unknown `planId`, SHALL respond `400` with
+   code `VALIDATION_ERROR`;
 6. the session. A request without a signed-in user SHALL respond `401` with code `UNAUTHORIZED`;
 7. ownership. The gift SHALL be found only when its owner is the signed-in user. The anonymous
    draft cookie MUST NOT authorize publishing, and the user's role, including `admin`, grants
    nothing. A gift that does not exist, or that the user does not own, including an unclaimed
    anonymous draft whose cookie the user holds, SHALL respond `404` with code `NOT_FOUND` and the
-   message `Gift draft was not found.`;
-8. the internal publish entitlement (see "Internal publish entitlement").
+   message `Gift draft was not found.`
 
-Only after these checks SHALL the idempotency replay and the pre-publish checks run.
+Only after these checks SHALL the idempotency replay and the pre-publish checks run, so no plan,
+expiry or entitlement answer ever reveals that a gift exists to someone who does not own it.
 
 #### Scenario: Not signed in
 
@@ -56,35 +59,21 @@ Only after these checks SHALL the idempotency replay and the pre-publish checks 
 
 #### Scenario: Unexpected body
 
-- **WHEN** the owner sends the body `{ "expectedRevision": 3, "shareId": "abc" }`
+- **WHEN** the owner sends the body `{ "expectedRevision": 3, "planId": "free", "shareId": "abc" }`,
+  or the body `{ "expectedRevision": 3, "shareId": "abc" }`
 - **THEN** the response is `400` with code `VALIDATION_ERROR`, and nothing is published
 
-### Requirement: Internal publish entitlement
+#### Scenario: Missing or unknown plan
 
-Publishing SHALL require the internal free entitlement. The entitlement is granted to every owner
-when the server environment variable `INTERNAL_PUBLISH_ENABLED` is exactly `true`, and to nobody
-otherwise. It SHALL be off when the variable is absent, and it MUST be off whenever `VERCEL_ENV` is
-`production`, whatever the variable says. Any value other than `true` or `false` SHALL be treated
-as `false` and MUST NOT stop the application. When the entitlement is off, an authorized owner
-SHALL receive `403` with code `FORBIDDEN`, and nothing SHALL be published. A requester who is not
-the owner SHALL receive the `404` of "Publish endpoint and authorization" first, so the flag never
-reveals that a gift exists.
+- **WHEN** the owner sends the body `{ "expectedRevision": 3 }` or
+  `{ "expectedRevision": 3, "planId": "premium" }`
+- **THEN** the response is `400` with code `VALIDATION_ERROR`, and nothing is published
 
-#### Scenario: Flag off for the owner
+#### Scenario: Plan refusal hidden from non-owners
 
-- **WHEN** `INTERNAL_PUBLISH_ENABLED` is absent and the owner sends a valid publish request
-- **THEN** the response is `403` with code `FORBIDDEN`, and the gift stays a `draft`
-
-#### Scenario: Flag off for a non-owner
-
-- **WHEN** `INTERNAL_PUBLISH_ENABLED` is absent and a signed-in non-owner sends a valid publish
-  request
-- **THEN** the response is `404` with code `NOT_FOUND`
-
-#### Scenario: Production never grants it
-
-- **WHEN** `INTERNAL_PUBLISH_ENABLED` is `true` and `VERCEL_ENV` is `production`
-- **THEN** an owner's publish request is answered `403` with code `FORBIDDEN`
+- **WHEN** a signed-in user who does not own the gift sends a valid publish request on plan
+  `standard` while the internal paid-plan grant is off
+- **THEN** the response is `404` with code `NOT_FOUND`, not a plan refusal
 
 ### Requirement: Pre-publish checks
 
@@ -99,22 +88,35 @@ check fails:
    current publication, so that each publish carries unpublished changes. Otherwise the response
    SHALL be `409` with code `CONFLICT` and `details.reason` `NO_UNPUBLISHED_CHANGES`, without
    `details.actualRevision`.
-4. The gift's access policy SHALL be `unlisted`, the only policy this change can serve. Any other
+4. For a `published` gift, the server time SHALL be before the gift's `expiresAt` (`gift-plans`
+   "Entitlement expiry"). Otherwise the response SHALL be `409` with code `CONFLICT` and
+   `details.reason` `GIFT_EXPIRED`.
+5. The plan. For a `draft`, `planId` SHALL be available to the owner (`gift-plans` "Plan
+   availability"). Otherwise the response SHALL be `409` with code `CONFLICT` and `details.reason`
+   `PLAN_NOT_AVAILABLE`. For a `published` gift, `planId` SHALL equal the `planId` of the gift's
+   entitlement. Otherwise the response SHALL be `409` with code `CONFLICT` and `details.reason`
+   `PLAN_CHANGE_UNSUPPORTED`.
+6. The gift's access policy SHALL be `unlisted`, the only policy this change can serve. Any other
    policy fails closed with `409`, code `CONFLICT` and `details.reason`
    `ACCESS_POLICY_UNSUPPORTED`.
-5. The bound template version SHALL still be resolvable for editing, as for a draft save.
+7. The bound template version SHALL still be resolvable for editing, as for a draft save.
    Otherwise the response SHALL be `409` with code `CONFLICT` and `details.reason`
    `TEMPLATE_VERSION_NOT_EDITABLE`.
-6. The bound template version SHALL have a registered template artifact. Otherwise, as for a draft
+8. The bound template version SHALL have a registered template artifact. Otherwise, as for a draft
    bound to the retired `memory-box` `1.0.0`, the response SHALL be `409` with code `CONFLICT` and
    `details.reason` `TEMPLATE_VERSION_UNPUBLISHABLE`.
-7. The stored content SHALL have no content issue as defined by `viewer-payload` "Content issues",
+9. The stored content SHALL have no content issue as defined by `viewer-payload` "Content issues",
    computed from the stored content, the gift's asset records and the audio catalog. That means
    the full (non-draft) payload rules hold, every referenced asset is `ready`, belongs to this gift
    and field and is not detached from the working copy (`media-upload`), and the audio value, when
    present, is a selectable track. Otherwise the response SHALL be `400` with code
    `VALIDATION_ERROR` and one `fieldErrors` entry per issue: keyed by the field id, or by
    `{fieldId}.{itemIndex}` for an issue of one list item. The messages MUST NOT contain gift text.
+10. The content's photo count (`gift-plans` "Plan catalog") SHALL NOT exceed the `maxPhotos` of
+    the plan: the current version of `planId` for a `draft`, the gift's entitlement for a
+    `published` gift. A `maxPhotos` of `null` never limits. Otherwise the response SHALL be `409`
+    with code `CONFLICT`, `details.reason` `PLAN_PHOTO_LIMIT_EXCEEDED`, `details.maxPhotos` and
+    `details.photoCount`.
 
 The content checked SHALL be the stored content of the expected revision. The request body MUST NOT
 carry content.
@@ -175,7 +177,7 @@ carry content.
 #### Scenario: Preview and publish agree
 
 - **WHEN** the preview of a draft or of a published gift's working copy lists no server issue
-- **THEN** publishing the same revision passes check 7
+- **THEN** publishing the same revision passes check 9
 
 #### Scenario: Unsupported access policy
 
@@ -190,6 +192,40 @@ carry content.
 - **THEN** the response is `409` with code `CONFLICT` and `error.details.reason`
   `TEMPLATE_VERSION_NOT_EDITABLE`
 
+#### Scenario: Paid plan not available
+
+- **WHEN** the internal paid-plan grant is off and the owner publishes a complete draft with
+  `planId` `standard`
+- **THEN** the response is `409` with code `CONFLICT` and `error.details.reason`
+  `PLAN_NOT_AVAILABLE`, and the gift stays a `draft`
+
+#### Scenario: Too many photos for the Free plan
+
+- **WHEN** the owner publishes a complete `memory-box` `1.1.0` draft with 5 ready photos on plan
+  `free`
+- **THEN** the response is `409` with code `CONFLICT`, `error.details.reason`
+  `PLAN_PHOTO_LIMIT_EXCEEDED`, `error.details.maxPhotos` `3` and `error.details.photoCount` `5`,
+  and the gift stays a `draft`
+
+#### Scenario: Update over the entitlement's photo limit
+
+- **WHEN** the owner of a gift published on `free` adds a fourth photo to the working copy and
+  publishes it with `planId` `free`
+- **THEN** the response is `409` with code `CONFLICT` and `error.details.reason`
+  `PLAN_PHOTO_LIMIT_EXCEEDED`, and recipients keep receiving the current publication
+
+#### Scenario: Plan change on update refused
+
+- **WHEN** the owner of a gift published on `free` publishes an update with `planId` `standard`
+- **THEN** the response is `409` with code `CONFLICT` and `error.details.reason`
+  `PLAN_CHANGE_UNSUPPORTED`, and the entitlement is unchanged
+
+#### Scenario: Update of an expired gift
+
+- **WHEN** the owner of a gift whose `expiresAt` has passed saves the working copy and publishes it
+- **THEN** the response is `409` with code `CONFLICT` and `error.details.reason` `GIFT_EXPIRED`,
+  and nothing is written
+
 ### Requirement: Immutable publication snapshot
 
 A successful publish SHALL, in one database transaction, do all of the following, or none of them:
@@ -197,10 +233,13 @@ A successful publish SHALL, in one database transaction, do all of the following
 - move the gift through `publishing` to `published`, following the gift state transitions: from
   `draft` for a first publish, from `published` for an update. It SHALL set `publishedRevision` to
   the published revision and `publishedAt` to the time of this publication, set `updatedAt`, and
-  keep its `revision` unchanged. A first publish SHALL also set the gift's `shareId`; an update
-  SHALL keep it. The write SHALL be conditional, at the moment of writing, on the owner, access
-  mode `unlisted`, the expected revision, and the state the checks saw: status `draft` for a first
-  publish, or status `published` with the same `publishedRevision` for an update;
+  keep its `revision` unchanged. A first publish SHALL also set the gift's `shareId`, and grant the
+  gift's entitlement and `expiresAt` from the current version of `planId` (`gift-plans` "Gift
+  entitlement snapshot"); an update SHALL keep the `shareId`, the entitlement and `expiresAt`. The
+  write SHALL be conditional, at the moment of writing, on the owner, access mode `unlisted`, the
+  expected revision, and the state the checks saw: status `draft` for a first publish, or status
+  `published` with the same `publishedRevision` and an `expiresAt` later than the time of writing
+  for an update;
 - confirm that every referenced asset is still `ready`, of this gift and of its field, and not
   detached, with a write to each of those asset records, so that a concurrent asset deletion or
   detach conflicts with the publish instead of interleaving with it;
@@ -217,14 +256,15 @@ one the matching check of "Pre-publish checks" or "Publish endpoint and authoriz
 API SHALL modify or delete a publication record. The `publishing` status is never observable
 outside the transaction. On success the response SHALL be `201` with `data.publication` holding
 exactly `publicId`, `status` (`published`), `shareId`, `sharePath` (`/g/{shareId}`),
-`publishedAt` (ISO 8601) and `revision`.
+`publishedAt` (ISO 8601), `revision`, `planId` (the entitlement's) and `expiresAt` (ISO 8601).
 
 #### Scenario: Owner publishes a complete gift
 
 - **WHEN** the entitled owner publishes a complete `memory-box` `1.1.0` draft at revision `7` with
-  `expectedRevision` `7`
+  `expectedRevision` `7` and `planId` `free`
 - **THEN** the response is `201` with `data.publication.status` `published`, a 22-character
-  `shareId`, `sharePath` `/g/{shareId}` and `revision` `7`
+  `shareId`, `sharePath` `/g/{shareId}`, `revision` `7`, `planId` `free` and an `expiresAt` 14 days
+  after `publishedAt`
 - **AND** the stored publication holds `templateVersion` `1.1.0`, the artifact's 64-character
   `contentHash` and the content of revision `7`, and the gift's `publishedRevision` is `7`
 
@@ -233,7 +273,7 @@ exactly `publicId`, `status` (`published`), `shareId`, `sharePath` (`/g/{shareId
 - **WHEN** the owner of a gift published at revision `7` saves the working copy to revision `9` and
   publishes with `expectedRevision` `9`
 - **THEN** the response is `201` with the same `shareId`, `revision` `9` and a `publishedAt` later
-  than that of revision `7`
+  than that of revision `7`, with the same `planId` and `expiresAt` as the first publish
 - **AND** a new publication for revision `9` is stored, the publication for revision `7` is
   unchanged, and the gift's `publishedRevision` is `9`
 
@@ -261,6 +301,12 @@ exactly `publicId`, `status` (`published`), `shareId`, `sharePath` (`/g/{shareId
 - **WHEN** the domain is asked to move a gift from `draft` or `published` to `published` without
   passing through `publishing`, or to update a gift whose status is not `published`
 - **THEN** it refuses with an invalid-transition error, and nothing is written
+
+#### Scenario: Expiry reached during an update
+
+- **WHEN** a gift's `expiresAt` passes between the update's checks and its write
+- **THEN** nothing is written and the response is `409` with code `CONFLICT` and
+  `error.details.reason` `GIFT_EXPIRED`
 
 ### Requirement: Share id
 
@@ -291,12 +337,12 @@ the gift's internal id, its `publicId`, the owner or the content.
 
 Each `Idempotency-Key` SHALL be unique within the `gift-publish` scope and SHALL be kept for 24
 hours after a successful publish. The key is recorded only by a successful publish, so a request
-that failed MAY be retried with the same key and a different `expectedRevision`. A repeated request
-with the key of a successful publish SHALL return `201` with the publication of that request's
-revision only when it comes from the same signed-in user, for the same `publicId`, with the same
-`expectedRevision`. It does so even when the gift was updated again since. In every other case it
-SHALL respond `409` with code `CONFLICT` and publish nothing. Concurrent requests with the same key
-SHALL produce at most one publication.
+that failed MAY be retried with the same key and a different `expectedRevision` or `planId`. A
+repeated request with the key of a successful publish SHALL return `201` with the publication of
+that request's revision only when it comes from the same signed-in user, for the same `publicId`,
+with the same `expectedRevision` and the same `planId`. It does so even when the gift was updated
+again since, or has expired since. In every other case it SHALL respond `409` with code `CONFLICT`
+and publish nothing. Concurrent requests with the same key SHALL produce at most one publication.
 
 #### Scenario: Lost response replayed
 
@@ -314,8 +360,8 @@ SHALL produce at most one publication.
 
 #### Scenario: Replay with a different body
 
-- **WHEN** the owner reuses the key of a successful publish with another `expectedRevision`, or for
-  another gift
+- **WHEN** the owner reuses the key of a successful publish with another `expectedRevision` or
+  another `planId`, or for another gift
 - **THEN** the response is `409` with code `CONFLICT`
 
 #### Scenario: Retry after a validation failure
@@ -323,6 +369,12 @@ SHALL produce at most one publication.
 - **WHEN** a publish fails with `400`, the owner fixes the content, and publishes again with the
   same key and the new revision
 - **THEN** the publish is accepted
+
+#### Scenario: Retry with another plan after a refusal
+
+- **WHEN** a first publish on `free` fails with `PLAN_PHOTO_LIMIT_EXCEEDED`, and the owner retries
+  with the same key on `standard` while the internal paid-plan grant is on
+- **THEN** the publish is accepted with `planId` `standard`
 
 #### Scenario: Double click
 
@@ -342,6 +394,10 @@ panel SHALL show:
 - a `Sao chép liên kết` button. It copies the URL and then reads `Đã sao chép`. When copying fails,
   the panel shows `Không sao chép được — hãy chọn đường dẫn và sao chép thủ công.`;
 - a link `Mở món quà` to `/g/{shareId}`;
+- the plan line `Gói {planName} · Người nhận mở được đến {expiry}.`, where `{planName}` is the
+  name of the entitlement's plan in `gift-plans` and `{expiry}` is `expiresAt` formatted as
+  `HH:mm dd/MM/yyyy` in the `Asia/Ho_Chi_Minh` time zone. Once `expiresAt` has passed, the line
+  SHALL instead read `Món quà đã hết hạn lúc {expiry}. Người nhận không còn mở được.`;
 - the status `Có thay đổi chưa cập nhật. Người nhận vẫn đang xem bản đã gửi trước đó.` while the
   gift has unpublished changes, and otherwise `Người nhận đang xem bản mới nhất.`. The status SHALL
   follow each successful save and each successful update without a page reload;
@@ -372,6 +428,17 @@ not-found page.
 - **WHEN** the owner edits a caption of a published gift and the autosave answers `200`
 - **THEN** the panel shows `Có thay đổi chưa cập nhật. Người nhận vẫn đang xem bản đã gửi trước
 đó.` without a reload
+
+#### Scenario: Plan and expiry shown
+
+- **WHEN** the owner opens a gift first published on `free` at `2026-10-08T10:00:00Z`
+- **THEN** the panel shows `Gói Miễn phí · Người nhận mở được đến 17:00 22/10/2026.`
+
+#### Scenario: Expired gift in the Studio
+
+- **WHEN** the owner opens that gift after `2026-10-22T10:00:00Z`
+- **THEN** the panel shows `Món quà đã hết hạn lúc 17:00 22/10/2026. Người nhận không còn mở
+được.`, and the editor stays editable
 
 ### Requirement: Editing a published gift
 

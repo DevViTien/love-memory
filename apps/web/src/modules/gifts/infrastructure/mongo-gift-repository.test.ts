@@ -1,8 +1,10 @@
-import { COLLECTIONS } from "@love-memory/database";
+import { COLLECTIONS, LEGACY_ENTITLEMENT } from "@love-memory/database";
 import type * as DatabaseModule from "@love-memory/database";
 import {
   createGiftDraft,
   createGiftPublication,
+  currentPlan,
+  grantEntitlement,
   publishGiftDraft,
   republishGift,
   updateGiftDraft,
@@ -175,6 +177,9 @@ describe("Mongo gift repository", () => {
 
     const legacy = await mongoGiftRepository.findAuthorized(draft.publicId, [owner]);
     expect(legacy).toMatchObject({ publishedRevision: 0, revision: 0, status: "published" });
+    // Published before plans existed: read with the entitlement the schema 11 backfill writes.
+    expect(legacy?.entitlement).toEqual({ ...LEGACY_ENTITLEMENT, grantedAt: draft.createdAt });
+    expect(legacy?.expiresAt).toEqual(new Date(draft.createdAt.getTime() + 365 * 86_400_000));
 
     const updated = updateGiftDraft(legacy!, {
       content: { ...draft.content, data: { headline: "Sửa sau khi gửi" } },
@@ -359,7 +364,8 @@ describe("Mongo gift repository publishing", () => {
     ownerId,
     publicId: "q1w2e3r4t5y6u7i8",
   });
-  const publishedResult = publishGiftDraft(owned, { expectedRevision: 0, now, shareId });
+  const grant = grantEntitlement(currentPlan("free"), "free", now);
+  const publishedResult = publishGiftDraft(owned, { expectedRevision: 0, grant, now, shareId });
   if (!publishedResult.ok) throw new Error("Expected a published gift.");
   const published = publishedResult.data;
   const publication = createGiftPublication({
@@ -413,7 +419,7 @@ describe("Mongo gift repository publishing", () => {
         key: "5f1f2c6e-1e0b-4a5f-9a39-0d6c5f1f2c6e",
         requestFingerprint: JSON.stringify(["publish", owned.publicId, 2]),
       },
-      precondition: { ...precondition, status: "published" } as const,
+      precondition: { ...precondition, now: later, status: "published" } as const,
       publication: createGiftPublication({
         artifactContentHash: "f".repeat(64),
         assetIds: [assetA, assetB],
@@ -470,6 +476,8 @@ describe("Mongo gift repository publishing", () => {
       },
       {
         $set: {
+          entitlement: grant.entitlement,
+          expiresAt: grant.expiresAt,
           publishedAt: now,
           publishedRevision: 0,
           shareId,
@@ -631,6 +639,7 @@ describe("Mongo gift repository publishing", () => {
       {
         _id: owned.id,
         "access.mode": "unlisted",
+        expiresAt: { $gt: later },
         "ownership.ownerId": ownerId,
         publishedRevision: 0,
         revision: 2,
@@ -686,22 +695,25 @@ describe("Mongo gift repository publishing", () => {
     await expect(mongoGiftRepository.publish(input)).rejects.toThrow("network");
   });
 
-  it("looks a share id up as a string among published, unlisted gifts", async () => {
+  it("looks a share id up as a string among published, unlisted, unexpired gifts", async () => {
     collections.gifts.findOne.mockResolvedValue(null);
-    await expect(mongoGiftRepository.findPublishedByShareId(shareId)).resolves.toBeNull();
+    await expect(mongoGiftRepository.findPublishedByShareId(shareId, later)).resolves.toBeNull();
     expect(collections.gifts.findOne).toHaveBeenCalledWith({
       "access.mode": "unlisted",
+      expiresAt: { $gt: later },
       shareId: { $eq: shareId, $type: "string" },
       status: "published",
     });
 
     const { id, ...fields } = published;
     collections.gifts.findOne.mockResolvedValue({ _id: id, ...fields });
-    await expect(mongoGiftRepository.findPublishedByShareId(shareId)).resolves.toMatchObject({
-      id,
-      shareId,
-      status: "published",
-    });
+    await expect(mongoGiftRepository.findPublishedByShareId(shareId, later)).resolves.toMatchObject(
+      {
+        id,
+        shareId,
+        status: "published",
+      },
+    );
   });
 });
 

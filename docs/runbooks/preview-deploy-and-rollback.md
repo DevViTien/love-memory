@@ -62,24 +62,37 @@ Until it runs, the new build serves published gifts normally, but an update of a
 (`Cập nhật món quà`) answers `500`: the legacy unique index rejects a second publication with the
 same share id. Recipients keep the first publication.
 
+Schema version `11` (`add-gift-plans-and-entitlements`):
+
+- adds `entitlement` and `expiresAt` to the `gifts` validator;
+- backfills every published gift without an `entitlement` with `standard` version `1`
+  (`source` `legacy`), granted at its `publishedAt` and expiring 365 days later.
+
+Until it runs, the new build answers `404` for the share links of those legacy gifts (no stored
+`expiresAt`, so the link fails closed); their Studio pages keep working, because the build reads a
+missing entitlement exactly as the backfill writes it. Gifts published after the deploy are
+unaffected. Before deploying, rename
+`INTERNAL_PUBLISH_ENABLED` to `INTERNAL_PLAN_GRANT_ENABLED` on the tier (see "Environment
+variables").
+
 ## Environment variables
 
 Configure shared Preview secrets once and override environment identity per branch:
 
-| Variable                    | `dev` Preview branch                                      | `stg` Preview branch                                  | Production                                       |
-| --------------------------- | --------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------ |
-| `APP_URL`                   | Development stable URL                                    | Staging stable URL                                    | Production stable URL                            |
-| `BETTER_AUTH_URL`           | Development stable URL                                    | Staging stable URL                                    | Production stable URL                            |
-| `MONGODB_DATABASE`          | `love_memory_development`                                 | `love_memory_staging`                                 | `love_memory_production`                         |
-| `MONGODB_URI`               | Shared Preview secret or dedicated development credential | Shared Preview secret or dedicated staging credential | Dedicated Production secret                      |
-| `BETTER_AUTH_SECRET`        | Shared Preview secret or a branch-specific secret         | Shared Preview secret or a branch-specific secret     | Dedicated Production secret                      |
-| `RESEND_API_KEY`            | Preview secret                                            | Preview secret                                        | Production secret                                |
-| `INTERNAL_PUBLISH_ENABLED`  | `true`                                                    | `true`                                                | Absent (forced off anyway)                       |
-| `ANALYTICS_ENABLED`         | `true`                                                    | `true`                                                | Absent (off) until the Product Owner turns it on |
-| `ANALYTICS_GIFT_REF_SECRET` | 48 random bytes, base64url; development only              | 48 random bytes, base64url; staging only              | Its own 48 random bytes, provisioned now         |
-| `MEDIA_WORKER_MODE`         | `trigger`, or `inline` until Trigger.dev is configured    | `trigger`                                             | `trigger`                                        |
-| `TRIGGER_SECRET_KEY`        | Secret of its Trigger.dev environment (never `tr_dev_…`)  | Secret of its Trigger.dev environment                 | Trigger.dev Production secret                    |
-| `TRIGGER_PROJECT_REF`       | LoveMemory Trigger.dev project ref                        | LoveMemory Trigger.dev project ref                    | LoveMemory Trigger.dev project ref               |
+| Variable                      | `dev` Preview branch                                      | `stg` Preview branch                                  | Production                                       |
+| ----------------------------- | --------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------ |
+| `APP_URL`                     | Development stable URL                                    | Staging stable URL                                    | Production stable URL                            |
+| `BETTER_AUTH_URL`             | Development stable URL                                    | Staging stable URL                                    | Production stable URL                            |
+| `MONGODB_DATABASE`            | `love_memory_development`                                 | `love_memory_staging`                                 | `love_memory_production`                         |
+| `MONGODB_URI`                 | Shared Preview secret or dedicated development credential | Shared Preview secret or dedicated staging credential | Dedicated Production secret                      |
+| `BETTER_AUTH_SECRET`          | Shared Preview secret or a branch-specific secret         | Shared Preview secret or a branch-specific secret     | Dedicated Production secret                      |
+| `RESEND_API_KEY`              | Preview secret                                            | Preview secret                                        | Production secret                                |
+| `INTERNAL_PLAN_GRANT_ENABLED` | `true`                                                    | `true`                                                | Absent (forced off anyway)                       |
+| `ANALYTICS_ENABLED`           | `true`                                                    | `true`                                                | Absent (off) until the Product Owner turns it on |
+| `ANALYTICS_GIFT_REF_SECRET`   | 48 random bytes, base64url; development only              | 48 random bytes, base64url; staging only              | Its own 48 random bytes, provisioned now         |
+| `MEDIA_WORKER_MODE`           | `trigger`, or `inline` until Trigger.dev is configured    | `trigger`                                             | `trigger`                                        |
+| `TRIGGER_SECRET_KEY`          | Secret of its Trigger.dev environment (never `tr_dev_…`)  | Secret of its Trigger.dev environment                 | Trigger.dev Production secret                    |
+| `TRIGGER_PROJECT_REF`         | LoveMemory Trigger.dev project ref                        | LoveMemory Trigger.dev project ref                    | LoveMemory Trigger.dev project ref               |
 
 The media worker variables and the Trigger.dev task deployment are described in the
 [media pipeline runbook](./media-pipeline.md#worker-mode-per-deployment). If the smoke test finds
@@ -90,9 +103,12 @@ processed on that deployment.
 current stage. Technical-spike endpoints stay disabled unless a time-boxed verification explicitly
 requires them.
 
-`INTERNAL_PUBLISH_ENABLED` is the Sprint 3 stand-in for a publish entitlement. Only the exact value
-`true` enables publishing, and the application forces it off whenever `VERCEL_ENV` is `production`,
-so Production cannot publish until Sprint 4 brings real entitlements. Never set it in Production.
+Every owner can publish on the Free plan in every environment, Production included
+([ADR-0011](../adr/0011-versioned-plan-catalog.md)). `INTERNAL_PLAN_GRANT_ENABLED` grants the paid
+Standard plan without payment (entitlement `source` `internal`) until checkout exists. Only the
+exact value `true` enables it, and the application forces it off whenever `VERCEL_ENV` is
+`production`. Never set it in Production. It replaces the Sprint 3 `INTERNAL_PUBLISH_ENABLED`, which
+the application no longer reads: delete that variable from each tier.
 
 `ANALYTICS_ENABLED` turns on first-party funnel analytics ([ADR-0010](../adr/0010-first-party-funnel-analytics.md)).
 Only the exact value `true` enables it, and only with an `ANALYTICS_GIFT_REF_SECRET` of at least 32
@@ -238,6 +254,27 @@ The old `db:verify` reports drift after a rollback. The old `db:migrate` recreat
 `gift_publications_share_id_unique` index, which fails while any gift has two publications; do not
 run it until those extra publications are dealt with by the reviewed script. Re-deploying version
 `10` later restores access without data repair.
+
+### Rolling back past schema version 11 (plans and entitlements)
+
+Schema version `11` gives every published gift an `entitlement` and an `expiresAt` (the backfill
+and every new publish). The previous build parses `gifts` strictly and fails on both fields:
+`/studio/{publicId}` and `/g/{shareId}` of every published gift answer `500`. Unlike the earlier
+versions, **Production is affected too**: from this version on, every owner can publish Free gifts
+there. In order of preference:
+
+1. roll forward with a fix instead of rolling back;
+2. on `dev` and `stg`, roll back and accept those `500`s for the test gifts until the roll forward.
+   On Production, do this only with the Product Owner's agreement, because real recipients see the
+   errors;
+3. for a clean rollback, run a one-off script that is written and reviewed at that time. For
+   example, it can `$unset` `entitlement` and `expiresAt` on published gifts, after exporting both
+   so a roll forward can restore them. Never run it ad hoc. Restoring them matters: without its
+   `entitlement` a Free gift would come back on the next `db:migrate` with the 365-day `legacy`
+   Standard entitlement.
+
+Soak this version on `stg` before promoting it to `main`. The old `db:verify` reports drift after a
+rollback; re-deploying version `11` later restores access without data repair.
 
 ## Escalation
 

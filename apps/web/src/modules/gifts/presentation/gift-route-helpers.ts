@@ -125,12 +125,41 @@ function mapGiftServiceError(error: GiftServiceError, id: string): Response {
         requestId: id,
         status: 404,
       });
-    case "FORBIDDEN":
+    case "GIFT_EXPIRED":
       return createApiErrorResponse({
-        code: API_ERROR_CODES.forbidden,
-        message: "Publishing is not enabled for this account.",
+        code: API_ERROR_CODES.conflict,
+        details: { reason: "GIFT_EXPIRED" },
+        message: "This gift has expired and cannot be updated.",
         requestId: id,
-        status: 403,
+        status: 409,
+      });
+    case "PLAN_NOT_AVAILABLE":
+      return createApiErrorResponse({
+        code: API_ERROR_CODES.conflict,
+        details: { reason: "PLAN_NOT_AVAILABLE" },
+        message: "This plan is not available.",
+        requestId: id,
+        status: 409,
+      });
+    case "PLAN_CHANGE_UNSUPPORTED":
+      return createApiErrorResponse({
+        code: API_ERROR_CODES.conflict,
+        details: { reason: "PLAN_CHANGE_UNSUPPORTED" },
+        message: "A published gift keeps the plan it was published on.",
+        requestId: id,
+        status: 409,
+      });
+    case "PLAN_PHOTO_LIMIT_EXCEEDED":
+      return createApiErrorResponse({
+        code: API_ERROR_CODES.conflict,
+        details: {
+          maxPhotos: error.maxPhotos,
+          photoCount: error.photoCount,
+          reason: "PLAN_PHOTO_LIMIT_EXCEEDED",
+        },
+        message: "The gift has more photos than its plan allows.",
+        requestId: id,
+        status: 409,
       });
     case "ACCESS_POLICY_UNSUPPORTED":
       return createApiErrorResponse({

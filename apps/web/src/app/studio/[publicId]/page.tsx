@@ -5,9 +5,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { audioCatalog } from "@/composition/audio";
-import { getGiftTemplateManifest, giftService } from "@/composition/gifts";
+import { getGiftTemplateManifest, giftService, planGrantPolicy } from "@/composition/gifts";
 import { isTemplateVersionAvailable } from "@/composition/templates";
-import { getInternalPublishEnvironment } from "@/config/internal-publish";
+import { listPlanOffers } from "@/modules/gifts/application/plan-offers";
 import { ClaimDraftButton } from "@/modules/gifts/presentation/claim-draft-button";
 import { DraftEditor } from "@/modules/gifts/presentation/draft-editor";
 import { getGiftRequestContextFromHeaders } from "@/modules/gifts/presentation/gift-route-helpers";
@@ -64,8 +64,8 @@ export default async function StudioDraftPage({ params }: StudioDraftPageProps) 
                 audioTracks={audioCatalog.listSelectableTracks()}
                 gift={draft}
                 manifest={manifest}
+                planOffers={listPlanOffers(planGrantPolicy)}
                 publishable={isTemplateVersionAvailable(draft.templateId, draft.templateVersion)}
-                publishEnabled={getInternalPublishEnvironment().enabled}
                 signedIn={context.userId !== null}
               />
             </div>

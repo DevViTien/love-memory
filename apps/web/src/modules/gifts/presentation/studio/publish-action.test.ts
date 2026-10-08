@@ -10,6 +10,8 @@ const idempotencyKey = "9c1b2f0e-6a7d-4c90-8d7a-4a559c1b2f0e";
 const shareId = "Ab0_-cdefghijklmnopqrs";
 const saved: FlushResult = { kind: "saved", revision: 4 };
 const publication = {
+  expiresAt: "2026-10-15T08:00:00.000Z",
+  planId: "free",
   publicId,
   publishedAt: "2026-10-01T08:00:00.000Z",
   revision: 4,
@@ -40,6 +42,7 @@ function publish(fetchMock: typeof fetch, flushed: FlushResult = saved) {
     fetch: fetchMock,
     flush: () => Promise.resolve(flushed),
     idempotencyKey,
+    planId: "free",
     publicId,
   });
 }
@@ -62,7 +65,7 @@ describe("requestPublish", () => {
 
     await expect(publish(fetchMock)).resolves.toEqual({ kind: "published", publication });
     expect(fetchMock).toHaveBeenCalledExactlyOnceWith(`/api/gifts/${publicId}/publish`, {
-      body: JSON.stringify({ expectedRevision: 4 }),
+      body: JSON.stringify({ expectedRevision: 4, planId: "free" }),
       headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
       method: "POST",
       signal: expect.any(AbortSignal) as AbortSignal,
@@ -92,7 +95,6 @@ describe("requestPublish", () => {
 
   it.each([
     [401, "UNAUTHORIZED", "unauthenticated"],
-    [403, "FORBIDDEN", "forbidden"],
     [404, "NOT_FOUND", "gone"],
   ] as const)("maps %s to %s", async (status, code, kind) => {
     await expect(publish(stubFetch(json(status, apiError(code))))).resolves.toEqual({ kind });
@@ -129,12 +131,41 @@ describe("requestPublish", () => {
     });
   });
 
-  it("maps a 409 with NO_UNPUBLISHED_CHANGES to a reload: published or updated elsewhere", async () => {
+  it.each(["NO_UNPUBLISHED_CHANGES", "PLAN_CHANGE_UNSUPPORTED", "GIFT_EXPIRED"])(
+    "maps a 409 with %s to a reload: published, updated or expired elsewhere",
+    async (reason) => {
+      const fetchMock = stubFetch(json(409, apiError("CONFLICT", { details: { reason } })));
+
+      await expect(publish(fetchMock)).resolves.toEqual({ kind: "reload" });
+    },
+  );
+
+  it("maps a 409 with PLAN_NOT_AVAILABLE to plan-unavailable", async () => {
     const fetchMock = stubFetch(
-      json(409, apiError("CONFLICT", { details: { reason: "NO_UNPUBLISHED_CHANGES" } })),
+      json(409, apiError("CONFLICT", { details: { reason: "PLAN_NOT_AVAILABLE" } })),
     );
 
-    await expect(publish(fetchMock)).resolves.toEqual({ kind: "reload" });
+    await expect(publish(fetchMock)).resolves.toEqual({ kind: "plan-unavailable" });
+  });
+
+  it("maps a 409 with PLAN_PHOTO_LIMIT_EXCEEDED to photo-limit with its counts", async () => {
+    const limit = { maxPhotos: 3, photoCount: 4, reason: "PLAN_PHOTO_LIMIT_EXCEEDED" };
+    await expect(
+      publish(stubFetch(json(409, apiError("CONFLICT", { details: limit })))),
+    ).resolves.toEqual({ kind: "photo-limit", maxPhotos: 3, photoCount: 4 });
+    await expect(
+      publish(
+        stubFetch(
+          json(409, apiError("CONFLICT", { details: { reason: "PLAN_PHOTO_LIMIT_EXCEEDED" } })),
+        ),
+      ),
+    ).resolves.toEqual({ kind: "failed" });
+  });
+
+  it("no longer knows a 403: it is an unexpected failure", async () => {
+    await expect(publish(stubFetch(json(403, apiError("FORBIDDEN"))))).resolves.toEqual({
+      kind: "failed",
+    });
   });
 
   it("treats a 409 with unknown details or an unreadable body as a failure", async () => {
@@ -181,6 +212,7 @@ describe("requestPublish timeout", () => {
       fetch: fetchMock,
       flush: () => Promise.resolve(saved),
       idempotencyKey,
+      planId: "free",
       publicId,
     });
 

@@ -1,5 +1,10 @@
 import { type ViewerPayloadDto, ViewerPayloadDtoSchema } from "@love-memory/contracts";
-import { type Gift, type GiftPublication } from "@love-memory/domain";
+import {
+  currentPlan,
+  type Gift,
+  type GiftPublication,
+  grantEntitlement,
+} from "@love-memory/domain";
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import { type ViewerPayload } from "@/modules/viewer/application/viewer-payload";
@@ -21,6 +26,9 @@ import {
 const shareId = "Ab0_-cdefghijklmnopqrs";
 const contentHash = "f".repeat(64);
 const publishedAt = new Date("2026-10-01T08:00:00.000Z");
+/** A Free gift granted at `publishedAt` expires 14 days later. */
+const freeGrant = grantEntitlement(currentPlan("free"), "free", publishedAt);
+const expiresAt = new Date("2026-10-15T08:00:00.000Z");
 
 function publishedGift(overrides: Partial<Gift> = {}): Gift {
   return {
@@ -33,6 +41,7 @@ function publishedGift(overrides: Partial<Gift> = {}): Gift {
       templateVersion: "1.1.0",
     },
     createdAt: publishedAt,
+    ...freeGrant,
     id: giftId,
     ownership: { anonymousDraftId: null, claimTokenHash: null, ownerId: "owner-1" },
     publicId: "q1w2e3r4t5y6u7i8",
@@ -90,6 +99,7 @@ describe("public gift service", () => {
   let findPublishedByShareId: ReturnType<
     typeof vi.fn<PublicGiftServiceDependencies["gifts"]["findPublishedByShareId"]>
   >;
+  let now: Date;
 
   beforeEach(() => {
     gift = publishedGift();
@@ -108,6 +118,7 @@ describe("public gift service", () => {
     registeredHash = contentHash;
     manifestAvailable = true;
     findPublishedByShareId = vi.fn(() => Promise.resolve(gift));
+    now = new Date("2026-10-02T00:00:00.000Z");
     dependencies = {
       assets: {
         listByIdsForGift: (_giftId, ids) =>
@@ -117,6 +128,7 @@ describe("public gift service", () => {
               .map((id) => mediaAsset(id)),
           ),
       },
+      clock: () => now,
       gifts: { findPublishedByShareId },
       payload: {
         clock: () => publishedAt,
@@ -259,6 +271,11 @@ describe("public gift service", () => {
       () => (publication = snapshot({ giftId: "9b2f3c1e-0d7a-4a55-9c1b-2f0e6a7d8c90" })),
     ],
     ["a missing manifest", () => (manifestAvailable = false)],
+    ["an expired gift whose status is still published (Expired gift)", () => (now = expiresAt)],
+    [
+      "a published gift without an expiry",
+      () => (gift = { ...publishedGift(), expiresAt: undefined }),
+    ],
   ];
 
   it.each(notFoundCases)("gives null from both entry points for %s", async (_name, arrange) => {
@@ -272,7 +289,39 @@ describe("public gift service", () => {
   it("reports a live share for the page, without analytics when the port is absent", async () => {
     await expect(
       createPublicGiftService(dependencies).resolvePublicGiftPage(shareId),
-    ).resolves.toEqual({ analytics: null });
+    ).resolves.toEqual({ analytics: null, watermark: true });
+  });
+
+  it("looks the share up at the server time of the request", async () => {
+    await createPublicGiftService(dependencies).resolvePublicGiftPage(shareId);
+
+    expect(findPublishedByShareId).toHaveBeenCalledWith(shareId, now);
+  });
+
+  it("closes a Free link 14 days after its grant (Free link expires after 14 days)", async () => {
+    now = expiresAt;
+    const service = createPublicGiftService(dependencies);
+
+    await expect(service.resolvePublicGiftPage(shareId)).resolves.toBeNull();
+    await expect(service.openPublicGift(shareId)).resolves.toBeNull();
+  });
+
+  it("keeps the link live until the last moment (Last moment before expiry)", async () => {
+    now = new Date(expiresAt.getTime() - 1000);
+    const service = createPublicGiftService(dependencies);
+
+    await expect(service.resolvePublicGiftPage(shareId)).resolves.not.toBeNull();
+    await expect(service.openPublicGift(shareId)).resolves.not.toBeNull();
+  });
+
+  it("gives the page the entitlement's watermark: on for Free, off for Standard", async () => {
+    gift = publishedGift({
+      ...grantEntitlement(currentPlan("standard"), "internal", publishedAt),
+    });
+
+    await expect(
+      createPublicGiftService(dependencies).resolvePublicGiftPage(shareId),
+    ).resolves.toEqual({ analytics: null, watermark: false });
   });
 
   it("gives the live page the snapshot template and a giftRef of the internal gift id", async () => {
@@ -308,7 +357,7 @@ describe("public gift service", () => {
         ...dependencies,
         analytics: { contextForGift: () => null },
       }).resolvePublicGiftPage(shareId),
-    ).resolves.toEqual({ analytics: null });
+    ).resolves.toEqual({ analytics: null, watermark: true });
   });
 
   it("asks for no analytics context when the share is not live", async () => {

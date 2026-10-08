@@ -1,6 +1,7 @@
 import { failure, type Result, success } from "@love-memory/shared";
 import { z } from "zod";
 
+import { type EntitlementGrant } from "../billing/gift-entitlement";
 import { type GiftDraftError } from "./gift-draft";
 import { GiftTemplateIdSchema, GiftTemplateVersionSchema, ShareIdSchema } from "./gift-identity";
 import { GiftSchema, type Gift } from "./gift-schema";
@@ -46,12 +47,18 @@ export type GiftRepublishError =
   | GiftTransitionError;
 
 /**
- * Moves a draft `draft → publishing → published` in memory. Only the final state is persisted;
- * `publishing` exists so a later payment or outbox step can sit between the two transitions.
+ * Moves a draft `draft → publishing → published` in memory and grants its entitlement. Only the
+ * final state is persisted; `publishing` exists so a later payment or outbox step can sit between
+ * the two transitions.
  */
 export function publishGiftDraft(
   gift: Gift,
-  input: Readonly<{ expectedRevision: number; now: Date; shareId: string }>,
+  input: Readonly<{
+    expectedRevision: number;
+    grant: EntitlementGrant;
+    now: Date;
+    shareId: string;
+  }>,
 ): Result<Gift, GiftPublishError> {
   if (gift.status !== "draft") {
     return failure({ code: "GIFT_NOT_DRAFT" });
@@ -77,6 +84,8 @@ export function publishGiftDraft(
   return success(
     GiftSchema.parse({
       ...gift,
+      entitlement: input.grant.entitlement,
+      expiresAt: input.grant.expiresAt,
       publishedAt: input.now,
       publishedRevision: gift.revision,
       shareId: input.shareId,
@@ -88,8 +97,9 @@ export function publishGiftDraft(
 
 /**
  * Publishes the working copy of a published gift as its new current publication, `published →
- * publishing → published` in memory. The share id stays, so the recipient link never changes;
- * only a revision newer than the current publication can be published.
+ * publishing → published` in memory. The share id, the entitlement and the expiry stay, so the
+ * recipient link never changes and an update costs nothing; only a revision newer than the current
+ * publication can be published.
  */
 export function republishGift(
   gift: Gift,

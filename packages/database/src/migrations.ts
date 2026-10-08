@@ -10,7 +10,7 @@ import {
 
 import { COLLECTIONS, type CollectionName } from "./collections";
 
-export const DATABASE_SCHEMA_VERSION = 10;
+export const DATABASE_SCHEMA_VERSION = 11;
 
 type DatabaseMigrationDocument = Readonly<{
   _id: string;
@@ -222,6 +222,34 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
             required: ["anonymousDraftId", "claimTokenHash", "ownerId"],
           },
           publicId: { bsonType: "string" },
+          entitlement: {
+            bsonType: "object",
+            properties: {
+              grantedAt: { bsonType: "date" },
+              maxPhotos: { bsonType: ["int", "null"], minimum: 1 },
+              passwordAccess: { bsonType: "bool" },
+              planId: { enum: ["free", "standard"] },
+              planVersion: { bsonType: "int", minimum: 1 },
+              priceVnd: { bsonType: "int", minimum: 0 },
+              retentionDays: { bsonType: "int", minimum: 1 },
+              scheduledAccess: { bsonType: "bool" },
+              source: { enum: ["free", "internal", "legacy"] },
+              watermark: { bsonType: "bool" },
+            },
+            required: [
+              "planId",
+              "planVersion",
+              "priceVnd",
+              "maxPhotos",
+              "watermark",
+              "retentionDays",
+              "passwordAccess",
+              "scheduledAccess",
+              "source",
+              "grantedAt",
+            ],
+          },
+          expiresAt: { bsonType: "date" },
           publishedAt: { bsonType: "date" },
           publishedRevision: { bsonType: "int", minimum: 0 },
           revision: { bsonType: "int", minimum: 0 },
@@ -628,6 +656,46 @@ export async function backfillPublishedRevisions(database: Db): Promise<void> {
     ]);
 }
 
+/**
+ * The entitlement given to gifts published before plans existed: `standard` version 1 of the plan
+ * catalog, pinned here so this migration never changes with a later catalog release. The values
+ * are checked against the catalog in `migrations.test.ts`.
+ */
+export const LEGACY_ENTITLEMENT = Object.freeze({
+  maxPhotos: null,
+  passwordAccess: true,
+  planId: "standard",
+  planVersion: 1,
+  priceVnd: 49_000,
+  retentionDays: 365,
+  scheduledAccess: true,
+  source: "legacy",
+  watermark: false,
+});
+
+/**
+ * Gifts published under the internal publish entitlement, before plans existed, get the legacy
+ * Standard entitlement from their `publishedAt`. Idempotent: a gift with an entitlement is skipped.
+ */
+export async function backfillLegacyEntitlements(database: Db): Promise<void> {
+  await database
+    .collection(COLLECTIONS.gifts)
+    .updateMany({ entitlement: { $exists: false }, status: "published" }, [
+      {
+        $set: {
+          entitlement: { ...LEGACY_ENTITLEMENT, grantedAt: "$publishedAt" },
+          expiresAt: {
+            $dateAdd: {
+              amount: LEGACY_ENTITLEMENT.retentionDays,
+              startDate: "$publishedAt",
+              unit: "day",
+            },
+          },
+        },
+      },
+    ]);
+}
+
 export async function runDatabaseMigrations(
   database: Db,
   onProgress: (collection: CollectionName, phase: "complete" | "start") => void = () => undefined,
@@ -639,6 +707,7 @@ export async function runDatabaseMigrations(
   }
 
   await backfillPublishedRevisions(database);
+  await backfillLegacyEntitlements(database);
 
   await database.collection<DatabaseMigrationDocument>(COLLECTIONS.databaseMigrations).updateOne(
     { _id: "core" },

@@ -49,6 +49,21 @@ describe("PublicGiftScreen", () => {
     expect(html).not.toContain("<iframe");
   });
 
+  it("shows the Free plan mark over the frame, outside the viewer, without catching taps", () => {
+    const { container } = render(<PublicGiftScreen shareId={shareId} watermark />);
+
+    const mark = screen.getByText("Tạo bằng LoveMemory");
+    expect(mark.className).toContain("pointer-events-none");
+    // A direct child of the frame, beside the viewer: host chrome, never inside the template.
+    expect(mark.parentElement).toBe(container.querySelector("[data-public-gift]"));
+  });
+
+  it("shows no mark without the watermark", () => {
+    render(<PublicGiftScreen shareId={shareId} />);
+
+    expect(screen.queryByText("Tạo bằng LoveMemory")).toBeNull();
+  });
+
   it("sends no request and shows no content before the tap", () => {
     render(<PublicGiftScreen shareId={shareId} />);
 

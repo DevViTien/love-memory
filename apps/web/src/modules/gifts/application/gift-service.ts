@@ -2,15 +2,21 @@ import { type AnalyticsContext, type LicensedAudioTrackDto } from "@love-memory/
 import {
   createGiftDraft,
   createGiftPublication,
+  currentPlan,
+  type EntitlementSource,
+  exceedsPhotoLimit,
   type Gift,
   type GiftPublication,
+  grantEntitlement,
   isEditableGiftStatus,
   type MediaAsset,
+  type PlanId,
   publishGiftDraft,
   republishGift,
   updateGiftDraft,
 } from "@love-memory/domain";
 import {
+  countImageItems,
   listImageFieldReferences,
   parseTemplateDraftPayload,
   type TemplateManifest,
@@ -69,11 +75,12 @@ export type GiftPublishPersistenceResult =
 
 /**
  * The state the publish checks saw, which the write is conditional on: a draft, or a published gift
- * with its current publication (`undefined` for a document published before the pointer existed).
+ * with its current publication (`undefined` for a document published before the pointer existed)
+ * that has not expired at `now`, the time of the write.
  */
 export type GiftPublishPrecondition =
   | Readonly<{ status: "draft" }>
-  | Readonly<{ publishedRevision: number | undefined; status: "published" }>;
+  | Readonly<{ now: Date; publishedRevision: number | undefined; status: "published" }>;
 
 export type GiftPublishInput = Readonly<{
   /** Every image reference of the content, grouped by field; each must still be `ready`. */
@@ -108,10 +115,10 @@ export interface GiftRepository {
    */
   findEditableById(giftId: string): Promise<Gift | null>;
   /**
-   * A published, `unlisted` gift by its share id. Used only by the public Viewer: the share id is
-   * the recipient's credential.
+   * A published, `unlisted` gift by its share id whose `expiresAt` is later than `now`, the server
+   * time of the request. Used only by the public Viewer: the share id is the recipient's credential.
    */
-  findPublishedByShareId(shareId: string): Promise<Gift | null>;
+  findPublishedByShareId(shareId: string, now: Date): Promise<Gift | null>;
   /**
    * The stored `gift-publish` key, if any, compared with this request. A match replays the
    * publication of the request's revision, even when the gift was updated since.
@@ -147,9 +154,18 @@ export interface GiftPublicationRepository {
   findByGiftRevision(giftId: string, revision: number): Promise<GiftPublication | null>;
 }
 
-/** The internal free entitlement today; a verified-payment entitlement in Sprint 4 (ADR-0009). */
-export interface PublishEntitlement {
-  canPublish(ownerId: string): boolean;
+/**
+ * Whether a plan can be granted for a first publish, and how (`gift-plans` "Plan availability"):
+ * Free always, Standard only through the internal paid-plan grant until checkout adds its outcome.
+ */
+export type PlanGrant =
+  Readonly<{ kind: "grant"; source: PlanGrantSource }> | Readonly<{ kind: "unavailable" }>;
+
+export type PlanGrantSource = Extract<EntitlementSource, "free" | "internal">;
+
+export interface PlanGrantPolicy {
+  /** Synchronous: availability depends only on the plan and configuration today. */
+  grantFor(planId: PlanId): PlanGrant;
 }
 
 /** The registered template artifact of an exact version, or `null` when none is registered. */
@@ -191,7 +207,7 @@ export type GiftPublishingDependencies = Readonly<{
   artifacts: GiftArtifactResolver;
   assets: Readonly<{ listByGiftId: (giftId: string) => Promise<readonly MediaAsset[]> }>;
   createShareId: () => string;
-  entitlement: PublishEntitlement;
+  plans: PlanGrantPolicy;
 }>;
 
 export interface GiftTemplateRepository {
@@ -206,9 +222,12 @@ export type GiftServiceError = Readonly<
   | { code: "INVALID_CONTENT"; fieldErrors: Readonly<Record<string, string>> }
   | { code: "INVALID_STATE" }
   | { actualRevision: number; code: "REVISION_CONFLICT"; expectedRevision: number }
-  | { code: "FORBIDDEN" }
   | { code: "ACCESS_POLICY_UNSUPPORTED" }
   | { code: "NO_UNPUBLISHED_CHANGES" }
+  | { code: "GIFT_EXPIRED" }
+  | { code: "PLAN_NOT_AVAILABLE" }
+  | { code: "PLAN_CHANGE_UNSUPPORTED" }
+  | { code: "PLAN_PHOTO_LIMIT_EXCEEDED"; maxPhotos: number; photoCount: number }
   | { code: "TEMPLATE_NOT_EDITABLE" }
   | { code: "TEMPLATE_UNPUBLISHABLE" }
 >;
@@ -216,12 +235,19 @@ export type GiftServiceError = Readonly<
 export type GiftServiceResult<T> =
   Readonly<{ data: T; ok: true }> | Readonly<{ error: GiftServiceError; ok: false }>;
 
-/** The owner's summary of the current publication of a published gift. */
+/**
+ * The owner's summary of the current publication of a published gift, with the entitlement values
+ * the Studio needs (never the grant source or the price).
+ */
 export type GiftPublicationSummaryDto = Readonly<{
+  expiresAt: string;
+  maxPhotos: number | null;
+  planId: PlanId;
   publishedAt: string;
   revision: number;
   shareId: string;
   sharePath: string;
+  watermark: boolean;
 }>;
 
 /** A draft, or the working copy of a published gift with its current publication. */
@@ -239,6 +265,8 @@ export type GiftDraftDto = Readonly<{
 }>;
 
 export type GiftPublicationDto = Readonly<{
+  expiresAt: string;
+  planId: PlanId;
   publicId: string;
   publishedAt: string;
   revision: number;
@@ -285,12 +313,25 @@ function toPublicationSummary(gift: Gift): GiftPublicationSummaryDto | null {
   if (!gift.shareId || !gift.publishedAt || gift.publishedRevision === undefined) {
     throw new Error("A published gift requires its current publication.");
   }
+  const { entitlement, expiresAt } = grantedEntitlement(gift);
   return {
+    expiresAt: expiresAt.toISOString(),
+    maxPhotos: entitlement.maxPhotos,
+    planId: entitlement.planId,
     publishedAt: gift.publishedAt.toISOString(),
     revision: gift.publishedRevision,
     shareId: gift.shareId,
     sharePath: `/g/${gift.shareId}`,
+    watermark: entitlement.watermark,
   };
+}
+
+/** A published gift's entitlement and expiry; the schema guarantees both for `published`. */
+function grantedEntitlement(gift: Gift) {
+  if (!gift.entitlement || !gift.expiresAt) {
+    throw new Error("A published gift requires its entitlement.");
+  }
+  return { entitlement: gift.entitlement, expiresAt: gift.expiresAt };
 }
 
 function toDto(gift: Gift): GiftDraftDto {
@@ -313,11 +354,14 @@ function toDto(gift: Gift): GiftDraftDto {
 }
 
 function toPublicationDto(
-  publicId: string,
+  gift: Gift,
   publication: Pick<GiftPublication, "publishedAt" | "revision" | "shareId">,
 ): GiftPublicationDto {
+  const { entitlement, expiresAt } = grantedEntitlement(gift);
   return {
-    publicId,
+    expiresAt: expiresAt.toISOString(),
+    planId: entitlement.planId,
+    publicId: gift.publicId,
     publishedAt: publication.publishedAt.toISOString(),
     revision: publication.revision,
     shareId: publication.shareId,
@@ -504,14 +548,16 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
 
     /**
      * Publishes the stored content of the expected revision for its signed-in owner: a draft's
-     * first publication, or a newer revision of a published gift under the same share id. The
-     * checks run in the order of `gift-publishing`; one transaction writes the gift, the asset
+     * first publication on the requested plan, or a newer revision of a published gift under the
+     * same share id and entitlement. The checks run in the order of `gift-publishing`; one
+     * transaction writes the gift (with the granted entitlement on a first publish), the asset
      * confirmations, the immutable publication and the idempotency key.
      */
     async publishGift(
       input: Readonly<{
         expectedRevision: number;
         idempotencyKey: string;
+        planId: PlanId;
         publicId: string;
         /** Correlates a failed after-response analytics write in the log; nothing else. */
         requestId?: string;
@@ -526,17 +572,32 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
       const ownerAccessors: readonly GiftAccessor[] = [{ kind: "user", userId: input.userId }];
       const gift = await dependencies.gifts.findAuthorized(input.publicId, ownerAccessors);
       if (!gift) return failure({ code: "NOT_FOUND" });
-      // Only after ownership is proven, so the flag never reveals that a gift exists.
-      if (!publishing.entitlement.canPublish(input.userId)) return failure({ code: "FORBIDDEN" });
+      // Every plan, expiry and entitlement answer comes after ownership is proven, so none of them
+      // reveals that a gift exists.
 
+      const now = dependencies.clock();
       const idempotency: GiftPublishIdempotency = {
         actorKey: `user:${input.userId}`,
-        expiresAt: new Date(dependencies.clock().getTime() + PUBLISH_IDEMPOTENCY_TTL_MILLISECONDS),
+        expiresAt: new Date(now.getTime() + PUBLISH_IDEMPOTENCY_TTL_MILLISECONDS),
         key: input.idempotencyKey,
-        requestFingerprint: JSON.stringify(["publish", input.publicId, input.expectedRevision]),
+        requestFingerprint: JSON.stringify([
+          "publish",
+          input.publicId,
+          input.expectedRevision,
+          input.planId,
+        ]),
         scope: "gift-publish",
       };
-      // Before the status check: a lost response of a successful publish is replayed as `201`.
+      /** A replayed publication, described with the entitlement the gift holds now. */
+      const replayed = async (
+        publication: GiftPublication,
+      ): Promise<GiftServiceResult<GiftPublicationDto>> => {
+        const current = await dependencies.gifts.findAuthorized(input.publicId, ownerAccessors);
+        if (!current) return failure({ code: "NOT_FOUND" });
+        return success(toPublicationDto(current, publication));
+      };
+      // Before the status check: a lost response of a successful publish is replayed as `201`,
+      // even after a later update or after expiry.
       const replay = await dependencies.gifts.findPublishReplay(
         idempotency,
         gift.id,
@@ -544,7 +605,7 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
       );
       if (replay) {
         return replay.status === "replayed"
-          ? success(toPublicationDto(gift.publicId, replay.publication))
+          ? replayed(replay.publication)
           : failure({ code: "IDEMPOTENCY_CONFLICT" });
       }
 
@@ -556,9 +617,29 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
           expectedRevision: input.expectedRevision,
         });
       }
-      if (gift.status === "published" && input.expectedRevision <= (gift.publishedRevision ?? 0)) {
+      const isUpdate = gift.status === "published";
+      if (isUpdate && input.expectedRevision <= (gift.publishedRevision ?? 0)) {
         return failure({ code: "NO_UNPUBLISHED_CHANGES" });
       }
+
+      // The plan: the gift's own entitlement for an update (never the catalog), the current
+      // version of the requested plan for a first publish.
+      let photoLimit: Readonly<{ maxPhotos: number | null }>;
+      let grantSource: PlanGrantSource = "free";
+      if (isUpdate) {
+        const { entitlement, expiresAt } = grantedEntitlement(gift);
+        if (expiresAt.getTime() <= now.getTime()) return failure({ code: "GIFT_EXPIRED" });
+        if (input.planId !== entitlement.planId) {
+          return failure({ code: "PLAN_CHANGE_UNSUPPORTED" });
+        }
+        photoLimit = entitlement;
+      } else {
+        const planGrant = publishing.plans.grantFor(input.planId);
+        if (planGrant.kind === "unavailable") return failure({ code: "PLAN_NOT_AVAILABLE" });
+        photoLimit = currentPlan(input.planId);
+        grantSource = planGrant.source;
+      }
+
       if (gift.access.mode !== "unlisted") return failure({ code: "ACCESS_POLICY_UNSUPPORTED" });
 
       const manifest = await dependencies.templates.findEditableManifest(
@@ -584,15 +665,22 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
         });
       }
 
-      const isUpdate = gift.status === "published";
+      // Last: a content issue is more actionable, and the count needs valid content.
+      const photoCount = countImageItems(manifest, content);
+      if (photoLimit.maxPhotos !== null && exceedsPhotoLimit(photoLimit, photoCount)) {
+        return failure({
+          code: "PLAN_PHOTO_LIMIT_EXCEEDED",
+          maxPhotos: photoLimit.maxPhotos,
+          photoCount,
+        });
+      }
+
       const published = isUpdate
-        ? republishGift(gift, {
-            expectedRevision: input.expectedRevision,
-            now: dependencies.clock(),
-          })
+        ? republishGift(gift, { expectedRevision: input.expectedRevision, now })
         : publishGiftDraft(gift, {
             expectedRevision: input.expectedRevision,
-            now: dependencies.clock(),
+            grant: grantEntitlement(currentPlan(input.planId), grantSource, now),
+            now,
             shareId: publishing.createShareId(),
           });
       if (!published.ok) {
@@ -620,14 +708,14 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
         idempotency,
         ownerId: input.userId,
         precondition: isUpdate
-          ? { publishedRevision: gift.publishedRevision, status: "published" }
+          ? { now, publishedRevision: gift.publishedRevision, status: "published" }
           : { status: "draft" },
         publication,
       });
       switch (outcome.status) {
         case "published":
           // A first publish only: updates, replays and every rejection record nothing.
-          if (isUpdate) return success(toPublicationDto(gift.publicId, outcome.publication));
+          if (isUpdate) return success(toPublicationDto(published.data, outcome.publication));
           try {
             dependencies.analytics?.publish.giftPublished({
               giftId: gift.id,
@@ -638,9 +726,10 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
           } catch {
             // Best effort: analytics never changes the publish response.
           }
-          return success(toPublicationDto(gift.publicId, outcome.publication));
+          return success(toPublicationDto(published.data, outcome.publication));
         case "replayed":
-          return success(toPublicationDto(gift.publicId, outcome.publication));
+          // A concurrent request with this key committed first, with its own grant time.
+          return replayed(outcome.publication);
         case "idempotency-conflict":
           return failure({ code: "IDEMPOTENCY_CONFLICT" });
         case "assets-changed": {
@@ -657,6 +746,14 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
           const current = await dependencies.gifts.findAuthorized(input.publicId, ownerAccessors);
           if (!current) return failure({ code: "NOT_FOUND" });
           if (!isEditableGiftStatus(current.status)) return failure({ code: "INVALID_STATE" });
+          // Expiry is terminal, so it is answered before any revision conflict.
+          if (
+            current.status === "published" &&
+            current.expiresAt !== undefined &&
+            current.expiresAt.getTime() <= now.getTime()
+          ) {
+            return failure({ code: "GIFT_EXPIRED" });
+          }
           if (current.revision !== input.expectedRevision) {
             return failure({
               actualRevision: current.revision,

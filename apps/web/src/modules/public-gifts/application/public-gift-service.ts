@@ -18,14 +18,19 @@ import { type ViewerPayload } from "@/modules/viewer/application/viewer-payload"
 /** What a recipient receives: the shared viewer payload without the creator-only issues. */
 export type PublicViewerPayload = Omit<ViewerPayload, "issues">;
 
-/** What `/g/{shareId}` needs to render its envelope: no content, only the analytics context. */
-export type PublicGiftPage = Readonly<{ analytics: AnalyticsContext | null }>;
+/**
+ * What `/g/{shareId}` needs to render its envelope: no content, only the analytics context and
+ * whether the gift's entitlement carries the host-level watermark.
+ */
+export type PublicGiftPage = Readonly<{ analytics: AnalyticsContext | null; watermark: boolean }>;
 
 export type PublicGiftServiceDependencies = Readonly<{
   /** The page analytics context after the liveness check; absent or `null` while disabled. */
   analytics?: Readonly<{ contextForGift: AnalyticsContextFactory }>;
   /** The publication snapshot's assets only, filtered by the gift id. */
   assets: Pick<MediaAssetRepository, "listByIdsForGift">;
+  /** Server time, read once per request: it alone decides expiry (`gift-plans`). */
+  clock: () => Date;
   gifts: Pick<GiftRepository, "findPublishedByShareId">;
   payload: BuildViewerPayloadDependencies;
   publications: Pick<GiftPublicationRepository, "findByGiftRevision">;
@@ -47,12 +52,15 @@ export function createPublicGiftService(dependencies: PublicGiftServiceDependenc
     // A malformed share id never reaches the database.
     if (!ShareIdSchema.safeParse(shareId).success) return null;
 
-    const gift = await dependencies.gifts.findPublishedByShareId(shareId);
+    const now = dependencies.clock();
+    const gift = await dependencies.gifts.findPublishedByShareId(shareId, now);
     // The query already filters these; the check repeats them so a looser query fails closed.
     if (
       gift?.status !== "published" ||
       gift.access.mode !== "unlisted" ||
-      gift.shareId !== shareId
+      gift.shareId !== shareId ||
+      gift.expiresAt === undefined ||
+      gift.expiresAt.getTime() <= now.getTime()
     ) {
       return null;
     }
@@ -86,7 +94,7 @@ export function createPublicGiftService(dependencies: PublicGiftServiceDependenc
           templateId: live.publication.templateId,
           templateVersion: live.publication.templateVersion,
         }) ?? null;
-      return { analytics };
+      return { analytics, watermark: live.gift.entitlement?.watermark ?? true };
     },
 
     /**

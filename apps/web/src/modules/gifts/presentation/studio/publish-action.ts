@@ -2,6 +2,7 @@ import {
   ApiErrorResponseSchema,
   type GiftPublicationDto,
   GiftPublicationResponseSchema,
+  type PlanOfferDto,
 } from "@love-memory/contracts";
 
 import { fetchWithTimeout } from "@/http/fetch-with-timeout";
@@ -19,9 +20,10 @@ export type PublishOutcome =
   | Readonly<{ kind: "blocked" }>
   | Readonly<{ actualRevision: number; kind: "conflict" }>
   | Readonly<{ kind: "failed" }>
-  | Readonly<{ kind: "forbidden" }>
   | Readonly<{ kind: "gone" }>
   | Readonly<{ fieldErrors: Readonly<Record<string, string>>; kind: "invalid" }>
+  | Readonly<{ kind: "photo-limit"; maxPhotos: number; photoCount: number }>
+  | Readonly<{ kind: "plan-unavailable" }>
   | Readonly<{ kind: "published"; publication: GiftPublicationDto }>
   | Readonly<{ kind: "rate-limited"; retryAfterSeconds: number | null }>
   | Readonly<{ kind: "reload" }>
@@ -33,6 +35,8 @@ export type RequestPublishInput = Readonly<{
   flush: () => Promise<FlushResult>;
   /** One UUID reused by every attempt until a `201`: keys are recorded only on success. */
   idempotencyKey: string;
+  /** The selected plan of a draft, or the entitlement's plan of a published gift. */
+  planId: PlanOfferDto["planId"];
   publicId: string;
 }>;
 
@@ -41,9 +45,16 @@ const UNPUBLISHABLE_REASONS: readonly string[] = [
   "TEMPLATE_VERSION_UNPUBLISHABLE",
 ];
 
+/** The gift was published, updated or expired elsewhere: the reload shows its current state. */
+const RELOAD_REASONS: readonly string[] = [
+  "NO_UNPUBLISHED_CHANGES",
+  "PLAN_CHANGE_UNSUPPORTED",
+  "GIFT_EXPIRED",
+];
+
 /**
- * A `409` without details, or `NO_UNPUBLISHED_CHANGES`: the gift was published or updated
- * elsewhere, so the page reloads to show its current state.
+ * A `409` without details, or with a reason of `RELOAD_REASONS`: the page reloads to show the
+ * gift's current state.
  */
 export function reloadStudioPage(): void {
   window.location.reload();
@@ -69,7 +80,14 @@ function classifyConflict(payload: unknown): PublishOutcome {
     return { kind: "unpublishable" };
   }
   if (reason === "ACCESS_POLICY_UNSUPPORTED") return { kind: "access-unsupported" };
-  if (reason === "NO_UNPUBLISHED_CHANGES") return { kind: "reload" };
+  if (reason === "PLAN_NOT_AVAILABLE") return { kind: "plan-unavailable" };
+  if (reason === "PLAN_PHOTO_LIMIT_EXCEEDED") {
+    const { maxPhotos, photoCount } = details;
+    return typeof maxPhotos === "number" && typeof photoCount === "number"
+      ? { kind: "photo-limit", maxPhotos, photoCount }
+      : { kind: "failed" };
+  }
+  if (typeof reason === "string" && RELOAD_REASONS.includes(reason)) return { kind: "reload" };
   return { kind: "failed" };
 }
 
@@ -81,6 +99,7 @@ export async function requestPublish({
   fetch: fetchImpl = fetch,
   flush,
   idempotencyKey,
+  planId,
   publicId,
 }: RequestPublishInput): Promise<PublishOutcome> {
   const flushed = await flush();
@@ -93,7 +112,7 @@ export async function requestPublish({
       fetchImpl,
       `/api/gifts/${encodeURIComponent(publicId)}/publish`,
       {
-        body: JSON.stringify({ expectedRevision: flushed.revision }),
+        body: JSON.stringify({ expectedRevision: flushed.revision, planId }),
         headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
         method: "POST",
       },
@@ -118,8 +137,6 @@ export async function requestPublish({
     }
     case 401:
       return { kind: "unauthenticated" };
-    case 403:
-      return { kind: "forbidden" };
     case 404:
       return { kind: "gone" };
     case 409:

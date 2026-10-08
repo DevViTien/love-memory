@@ -4,6 +4,9 @@ import { type GiftPublicationSummary } from "@love-memory/contracts";
 import { Button } from "@love-memory/ui";
 import { useState, useSyncExternalStore } from "react";
 
+import { formatExpiry } from "./plan-format";
+import { useNow } from "./use-now";
+
 type CopyState = "copied" | "failed" | "idle";
 
 function subscribeToNothing(): () => void {
@@ -15,15 +18,28 @@ export const PUBLISHED_STATUS_MESSAGES = {
   unpublished: "Có thay đổi chưa cập nhật. Người nhận vẫn đang xem bản đã gửi trước đó.",
 } as const;
 
+/** The plan line: until when recipients can open the gift, or that it has expired. */
+export function publishedPlanLine(planName: string, expiresAt: string, now: number): string {
+  const expiry = formatExpiry(expiresAt);
+  return Date.parse(expiresAt) <= now
+    ? `Món quà đã hết hạn lúc ${expiry}. Người nhận không còn mở được.`
+    : `Gói ${planName} · Người nhận mở được đến ${expiry}.`;
+}
+
 /**
- * Above the editor of a published gift: the share link, how to pass it on, and whether recipients
- * see the latest saved content. The server render shows the share path; the browser adds its own
- * origin after hydration, so the API never needs `APP_URL`.
+ * Above the editor of a published gift: the share link, how to pass it on, the plan and its
+ * expiry, and whether recipients see the latest saved content. The server render shows the share
+ * path; the browser adds its own origin after hydration, so the API never needs `APP_URL`.
  */
 export function PublishedPanel({
   hasUnpublishedChanges,
+  planName,
   publication,
-}: Readonly<{ hasUnpublishedChanges: boolean; publication: GiftPublicationSummary }>) {
+}: Readonly<{
+  hasUnpublishedChanges: boolean;
+  planName: string;
+  publication: GiftPublicationSummary;
+}>) {
   const origin = useSyncExternalStore(
     subscribeToNothing,
     () => window.location.origin,
@@ -31,6 +47,7 @@ export function PublishedPanel({
   );
   const shareUrl = origin ? new URL(publication.sharePath, origin).href : publication.sharePath;
   const [copyState, setCopyState] = useState<CopyState>("idle");
+  const now = useNow();
 
   async function copyLink() {
     try {
@@ -78,6 +95,9 @@ export function PublishedPanel({
           Mở món quà
         </a>
       </div>
+      <p className="text-sm font-semibold text-stone-800">
+        {publishedPlanLine(planName, publication.expiresAt, now)}
+      </p>
       {copyState === "failed" ? (
         <p className="text-sm font-semibold text-rose-700" role="alert">
           Không sao chép được — hãy chọn đường dẫn và sao chép thủ công.

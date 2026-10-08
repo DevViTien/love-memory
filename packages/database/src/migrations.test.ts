@@ -1,3 +1,4 @@
+import { currentPlan } from "@love-memory/domain";
 import { type Db } from "mongodb";
 import { describe, expect, it, vi } from "vitest";
 
@@ -5,9 +6,17 @@ import { COLLECTIONS } from "./collections";
 import {
   CORE_COLLECTION_DEFINITIONS,
   DATABASE_SCHEMA_VERSION,
+  LEGACY_ENTITLEMENT,
   runDatabaseMigrations,
   verifyDatabaseSchema,
 } from "./migrations";
+
+const publishedAt = new Date("2026-10-01T00:00:00.000Z");
+const entitled = {
+  entitlement: { ...LEGACY_ENTITLEMENT, grantedAt: publishedAt, planId: "free", source: "free" },
+  expiresAt: new Date("2026-10-15T00:00:00.000Z"),
+  publishedAt,
+};
 
 class FakeCollection {
   readonly indexDefinitions: Array<Readonly<Record<string, unknown>>> = [
@@ -19,8 +28,26 @@ class FakeCollection {
   readonly updateMany = vi.fn(
     (
       filter: Readonly<Record<string, unknown>>,
-      pipeline: ReadonlyArray<Readonly<{ $set: Readonly<Record<string, string>> }>>,
+      pipeline: ReadonlyArray<Readonly<{ $set: Readonly<Record<string, unknown>> }>>,
     ) => {
+      // Field paths, `$dateAdd` in days, and object expressions: what the backfills use.
+      const evaluate = (expression: unknown, document: Record<string, unknown>): unknown => {
+        if (typeof expression === "string" && expression.startsWith("$")) {
+          return document[expression.slice(1)];
+        }
+        if (typeof expression !== "object" || expression === null) return expression;
+        if ("$dateAdd" in expression) {
+          const { amount, startDate, unit } = (
+            expression as { $dateAdd: { amount: number; startDate: string; unit: string } }
+          ).$dateAdd;
+          if (unit !== "day") throw new Error(`Unsupported unit ${unit}`);
+          const start = evaluate(startDate, document) as Date;
+          return new Date(start.getTime() + amount * 86_400_000);
+        }
+        return Object.fromEntries(
+          Object.entries(expression).map(([key, value]) => [key, evaluate(value, document)]),
+        );
+      };
       const matches = (document: Record<string, unknown>) =>
         Object.entries(filter).every(([key, condition]) =>
           typeof condition === "object" && condition !== null && "$exists" in condition
@@ -31,7 +58,7 @@ class FakeCollection {
       for (const document of this.documents.filter(matches)) {
         for (const stage of pipeline) {
           for (const [key, source] of Object.entries(stage.$set)) {
-            document[key] = document[source.slice(1)];
+            document[key] = evaluate(source, document);
           }
         }
         modifiedCount += 1;
@@ -122,7 +149,7 @@ describe("database schema migration", () => {
       CORE_COLLECTION_DEFINITIONS.map((definition) => [definition.name, definition]),
     );
 
-    expect(DATABASE_SCHEMA_VERSION).toBe(10);
+    expect(DATABASE_SCHEMA_VERSION).toBe(11);
     expect(definitions.has(COLLECTIONS.users)).toBe(true);
     expect(definitions.has(COLLECTIONS.apiRateLimits)).toBe(true);
     expect(definitions.has(COLLECTIONS.templates)).toBe(true);
@@ -341,7 +368,7 @@ describe("database schema migration", () => {
       fake.collection(COLLECTIONS.gifts).indexDefinitions.map((index) => index["name"]),
     ).toContain("gifts_share_id_unique");
     expect(fake.collections.has(COLLECTIONS.analyticsEvents)).toBe(true);
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(10);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(11);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
   });
 
@@ -371,7 +398,7 @@ describe("database schema migration", () => {
       fake.collection(COLLECTIONS.giftPublications).indexDefinitions.map((index) => index["name"]),
     ).toEqual(["_id_", "gift_publications_gift_revision_unique"]);
     expect(fake.collections.has(COLLECTIONS.analyticsEvents)).toBe(true);
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(10);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(11);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
   });
 
@@ -387,7 +414,7 @@ describe("database schema migration", () => {
     fake
       .collection(COLLECTIONS.gifts)
       .documents.push(
-        { _id: "published", revision: 7, status: "published" },
+        { _id: "published", publishedAt, revision: 7, status: "published" },
         { _id: "draft", revision: 2, status: "draft" },
       );
     fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 9;
@@ -401,19 +428,31 @@ describe("database schema migration", () => {
       fake.collection(COLLECTIONS.giftPublications).indexDefinitions.map((index) => index["name"]),
     ).not.toContain("gift_publications_share_id_unique");
     expect(fake.collection(COLLECTIONS.gifts).documents).toEqual([
-      { _id: "published", publishedRevision: 7, revision: 7, status: "published" },
+      {
+        _id: "published",
+        entitlement: { ...LEGACY_ENTITLEMENT, grantedAt: publishedAt },
+        expiresAt: new Date("2027-10-01T00:00:00.000Z"),
+        publishedAt,
+        publishedRevision: 7,
+        revision: 7,
+        status: "published",
+      },
       { _id: "draft", revision: 2, status: "draft" },
     ]);
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(10);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(11);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
   });
 
   it("backfills only published gifts without a pointer, and changes nothing on a second run", async () => {
     const fake = new FakeDatabase();
     const database = fake as unknown as Db;
-    fake
-      .collection(COLLECTIONS.gifts)
-      .documents.push({ _id: "edited", publishedRevision: 7, revision: 9, status: "published" });
+    fake.collection(COLLECTIONS.gifts).documents.push({
+      _id: "edited",
+      ...entitled,
+      publishedRevision: 7,
+      revision: 9,
+      status: "published",
+    });
 
     await runDatabaseMigrations(database);
     await runDatabaseMigrations(database);
@@ -424,8 +463,118 @@ describe("database schema migration", () => {
       [{ $set: { publishedRevision: "$revision" } }],
     );
     expect(gifts.documents).toEqual([
-      { _id: "edited", publishedRevision: 7, revision: 9, status: "published" },
+      { _id: "edited", ...entitled, publishedRevision: 7, revision: 9, status: "published" },
     ]);
+  });
+
+  it("gives legacy published gifts the Standard entitlement once, and nothing else", async () => {
+    const fake = new FakeDatabase();
+    const database = fake as unknown as Db;
+    fake
+      .collection(COLLECTIONS.gifts)
+      .documents.push(
+        { _id: "legacy", publishedAt, publishedRevision: 7, revision: 7, status: "published" },
+        { _id: "free", ...entitled, publishedRevision: 2, revision: 2, status: "published" },
+        { _id: "draft", revision: 1, status: "draft" },
+      );
+
+    await runDatabaseMigrations(database);
+    const afterFirstRun = structuredClone(fake.collection(COLLECTIONS.gifts).documents);
+    await runDatabaseMigrations(database);
+
+    const gifts = fake.collection(COLLECTIONS.gifts);
+    expect(gifts.updateMany).toHaveBeenCalledWith(
+      { entitlement: { $exists: false }, status: "published" },
+      [
+        {
+          $set: {
+            entitlement: { ...LEGACY_ENTITLEMENT, grantedAt: "$publishedAt" },
+            expiresAt: { $dateAdd: { amount: 365, startDate: "$publishedAt", unit: "day" } },
+          },
+        },
+      ],
+    );
+    expect(gifts.documents).toEqual(afterFirstRun);
+    expect(gifts.documents).toEqual([
+      {
+        _id: "legacy",
+        entitlement: { ...LEGACY_ENTITLEMENT, grantedAt: publishedAt },
+        expiresAt: new Date("2027-10-01T00:00:00.000Z"),
+        publishedAt,
+        publishedRevision: 7,
+        revision: 7,
+        status: "published",
+      },
+      { _id: "free", ...entitled, publishedRevision: 2, revision: 2, status: "published" },
+      { _id: "draft", revision: 1, status: "draft" },
+    ]);
+  });
+
+  it("pins the legacy entitlement to Standard version 1 of the plan catalog", () => {
+    const { name: _name, ...standard } = currentPlan("standard");
+    expect(standard.planVersion).toBe(1);
+    expect(LEGACY_ENTITLEMENT).toEqual({ ...standard, source: "legacy" });
+  });
+
+  it("validates the entitlement and the expiry of a gift", () => {
+    const gifts = CORE_COLLECTION_DEFINITIONS.find(
+      (definition) => definition.name === COLLECTIONS.gifts,
+    )?.validator as {
+      $jsonSchema: {
+        properties: Record<string, { properties?: Record<string, unknown>; required?: string[] }>;
+        required: string[];
+      };
+    };
+    const { properties, required } = gifts.$jsonSchema;
+
+    expect(properties["expiresAt"]).toEqual({ bsonType: "date" });
+    expect(properties["entitlement"]?.required).toEqual([
+      "planId",
+      "planVersion",
+      "priceVnd",
+      "maxPhotos",
+      "watermark",
+      "retentionDays",
+      "passwordAccess",
+      "scheduledAccess",
+      "source",
+      "grantedAt",
+    ]);
+    expect(properties["entitlement"]?.properties).toMatchObject({
+      grantedAt: { bsonType: "date" },
+      maxPhotos: { bsonType: ["int", "null"], minimum: 1 },
+      planId: { enum: ["free", "standard"] },
+      priceVnd: { bsonType: "int", minimum: 0 },
+      source: { enum: ["free", "internal", "legacy"] },
+    });
+    expect(required).not.toContain("entitlement");
+    expect(required).not.toContain("expiresAt");
+  });
+
+  it("detects a database not yet migrated to version 11", async () => {
+    const fake = new FakeDatabase();
+    const database = fake as unknown as Db;
+    await runDatabaseMigrations(database);
+    const gifts = CORE_COLLECTION_DEFINITIONS.find(
+      (definition) => definition.name === COLLECTIONS.gifts,
+    )?.validator as { $jsonSchema: { properties: Record<string, unknown> } };
+    const previous = structuredClone(gifts);
+    delete previous.$jsonSchema.properties["entitlement"];
+    delete previous.$jsonSchema.properties["expiresAt"];
+    fake.validators.set(COLLECTIONS.gifts, previous);
+    fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 10;
+
+    await expect(verifyDatabaseSchema(database)).rejects.toThrow(
+      "MongoDB validator mismatch: gifts",
+    );
+    fake.validators.set(COLLECTIONS.gifts, gifts);
+    await expect(verifyDatabaseSchema(database)).rejects.toThrow(
+      "MongoDB schema version mismatch: expected 11, received 10.",
+    );
+
+    await runDatabaseMigrations(database);
+    await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(11);
   });
 
   it("validates the publication pointer and the detach time", () => {
@@ -530,7 +679,7 @@ describe("database schema migration", () => {
       expect.arrayContaining(["analytics_events_expiry_ttl", "analytics_events_name_occurred"]),
     );
     expect(JSON.stringify(publications.indexDefinitions)).toBe(indexesBefore);
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(10);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(11);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
   });
 
@@ -676,7 +825,7 @@ describe("database schema migration", () => {
     await runDatabaseMigrations(database);
     fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 1;
     await expect(verifyDatabaseSchema(database)).rejects.toThrow(
-      "MongoDB schema version mismatch: expected 10, received 1.",
+      "MongoDB schema version mismatch: expected 11, received 1.",
     );
 
     await runDatabaseMigrations(database);

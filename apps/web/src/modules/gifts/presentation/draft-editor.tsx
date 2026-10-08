@@ -4,6 +4,7 @@ import {
   type AnalyticsContext,
   type GiftDraftDto,
   type LicensedAudioTrackDto,
+  type PlanOfferDto,
 } from "@love-memory/contracts";
 import { type TemplateManifest } from "@love-memory/template-sdk";
 import { Button } from "@love-memory/ui";
@@ -23,6 +24,7 @@ import {
   selectShouldWarnOnLeave,
   selectTemplateStepsComplete,
 } from "./studio/draft-editor-store";
+import { planName } from "./studio/plan-format";
 import { PublishedPanel } from "./studio/published-panel";
 import { ReadinessStep } from "./studio/readiness-step";
 import { SaveStatusBar } from "./studio/save-status-bar";
@@ -38,6 +40,9 @@ import {
   studioStepHeadingId,
 } from "./studio/studio-steps";
 
+/** A stable empty default, so a page without offers never re-creates the Studio context. */
+const NO_PLAN_OFFERS: readonly PlanOfferDto[] = [];
+
 type DraftEditorProps = Readonly<{
   /** The funnel analytics context from the page; `null` (analytics disabled) sends nothing. */
   analytics?: AnalyticsContext | null;
@@ -46,8 +51,8 @@ type DraftEditorProps = Readonly<{
   manifest: TemplateManifest;
   /** Whether the bound template version has a registered artifact, so it can be published. */
   publishable?: boolean;
-  /** The internal publish entitlement; off unless the page says otherwise. */
-  publishEnabled?: boolean;
+  /** The plans offered for a first publish (`gift-plans`), rendered by the page from the server. */
+  planOffers?: readonly PlanOfferDto[];
   signedIn?: boolean;
 }>;
 
@@ -80,8 +85,8 @@ export function DraftEditor({
   audioTracks,
   gift,
   manifest,
+  planOffers = NO_PLAN_OFFERS,
   publishable = true,
-  publishEnabled = false,
   signedIn = false,
 }: DraftEditorProps) {
   const router = useRouter();
@@ -243,13 +248,13 @@ export function DraftEditor({
       controller,
       navigation,
       publish: {
-        enabled: publishEnabled,
         onPublished: () => {
           setFunnelOpen(false);
           // The server page re-renders the aside for a published gift; this editor keeps its state.
           router.refresh();
         },
         ownerKind: gift.ownerKind,
+        planOffers,
         publishable,
         signedIn,
       },
@@ -262,8 +267,8 @@ export function DraftEditor({
       controller,
       gift.ownerKind,
       navigation,
+      planOffers,
       publishable,
-      publishEnabled,
       router,
       signedIn,
       store,
@@ -275,7 +280,11 @@ export function DraftEditor({
     <StudioContext.Provider value={context}>
       {publication ? (
         <div className="mb-8">
-          <PublishedPanel hasUnpublishedChanges={hasUnpublishedChanges} publication={publication} />
+          <PublishedPanel
+            hasUnpublishedChanges={hasUnpublishedChanges}
+            planName={planName(planOffers, publication.planId)}
+            publication={publication}
+          />
         </div>
       ) : null}
       {publishable ? null : (

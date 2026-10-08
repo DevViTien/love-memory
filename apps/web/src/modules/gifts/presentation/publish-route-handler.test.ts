@@ -20,6 +20,8 @@ const publicId = "q1w2e3r4t5y6u7i8";
 const key = "9c1b2f0e-6a7d-4c90-8d7a-4a559c1b2f0e";
 const shareId = "Ab0_-cdefghijklmnopqrs";
 const publication: GiftPublicationDto = {
+  expiresAt: "2026-10-15T08:00:00.000Z",
+  planId: "free",
   publicId,
   publishedAt: "2026-10-01T08:00:00.000Z",
   revision: 7,
@@ -32,6 +34,7 @@ type PublishFn = (
   input: Readonly<{
     expectedRevision: number;
     idempotencyKey: string;
+    planId: "free" | "standard";
     publicId: string;
     requestId?: string;
     userId: string | null;
@@ -48,7 +51,7 @@ function publishRequest(
 ): Request {
   const idempotencyKey = init.idempotencyKey === undefined ? key : init.idempotencyKey;
   return new Request(`https://love.example/api/gifts/${publicId}/publish`, {
-    body: init.body ?? JSON.stringify({ expectedRevision: 7 }),
+    body: init.body ?? JSON.stringify({ expectedRevision: 7, planId: "free" }),
     headers: {
       "content-type": init.contentType ?? "application/json",
       "x-request-id": "request-1",
@@ -105,6 +108,7 @@ describe("publish route handler", () => {
     expect(publishGift).toHaveBeenCalledWith({
       expectedRevision: 7,
       idempotencyKey: key,
+      planId: "free",
       publicId,
       requestId: "request-1",
       userId: "user-1",
@@ -153,16 +157,34 @@ describe("publish route handler", () => {
     expect(publishGift).toHaveBeenCalledWith(expect.objectContaining({ userId: null }));
   });
 
-  it("answers 403 when publishing is not enabled", async () => {
-    publishGift.mockResolvedValue({ error: { code: "FORBIDDEN" }, ok: false });
+  it("answers 400 for a missing or unknown plan (Missing or unknown plan)", async () => {
+    for (const body of [{ expectedRevision: 3 }, { expectedRevision: 3, planId: "premium" }]) {
+      const response = await handlePublishGift(
+        publishRequest({ body: JSON.stringify(body) }),
+        params(),
+        dependencies(),
+      );
+      expect(response.status).toBe(400);
+      expect((await errorBody(response)).code).toBe("VALIDATION_ERROR");
+    }
+    expect(publishGift).not.toHaveBeenCalled();
+  });
 
-    const response = await handlePublishGift(publishRequest(), params(), dependencies());
+  it("passes the plan through and answers a plan refusal with 409 and its reason", async () => {
+    publishGift.mockResolvedValue({ error: { code: "PLAN_NOT_AVAILABLE" }, ok: false });
 
-    expect(response.status).toBe(403);
+    const response = await handlePublishGift(
+      publishRequest({ body: JSON.stringify({ expectedRevision: 7, planId: "standard" }) }),
+      params(),
+      dependencies(),
+    );
+
+    expect(response.status).toBe(409);
     expect(await errorBody(response)).toMatchObject({
-      code: "FORBIDDEN",
-      message: "Publishing is not enabled for this account.",
+      code: "CONFLICT",
+      details: { reason: "PLAN_NOT_AVAILABLE" },
     });
+    expect(publishGift).toHaveBeenCalledWith(expect.objectContaining({ planId: "standard" }));
   });
 
   it("answers the same opaque 404 for a malformed id and for a non-owner", async () => {

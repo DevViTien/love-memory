@@ -1,10 +1,13 @@
 import {
   createGiftDraft,
+  currentPlan,
   type Gift,
   GiftSchema,
+  grantEntitlement,
   type GiftPublication,
   type MediaAsset,
 } from "@love-memory/domain";
+import { GiftDraftDtoSchema } from "@love-memory/contracts";
 import { parseTemplateManifest } from "@love-memory/template-sdk";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -238,7 +241,7 @@ describe("gift application service", () => {
           artifacts: { resolve: () => (registered ? { contentHash: "a".repeat(64) } : null) },
           assets: { listByGiftId: () => Promise.resolve([]) },
           createShareId: () => "unused",
-          entitlement: { canPublish: () => true },
+          plans: { grantFor: () => ({ kind: "grant", source: "free" }) },
         },
         templates: {
           findCreatableManifest: () => Promise.resolve(manifest),
@@ -612,6 +615,7 @@ describe("gift application service", () => {
       await createAnonymousDraft();
       repository.current = GiftSchema.parse({
         ...repository.current,
+        ...grantEntitlement(currentPlan("free"), "free", publishedAt),
         ownership: { anonymousDraftId: null, claimTokenHash: null, ownerId: "owner-1" },
         publishedAt,
         publishedRevision: 0,
@@ -638,6 +642,25 @@ describe("gift application service", () => {
         },
         ok: true,
       });
+    });
+
+    it("carries the entitlement values the Studio needs, never the source or price (Entitlement in the summary)", async () => {
+      await publishedGift();
+
+      const result = await service.getDraft({ accessors: owner, publicId: "q1w2e3r4t5y6u7i8" });
+
+      if (!result.ok) throw new Error("Expected the published gift.");
+      expect(result.data.publication).toEqual({
+        expiresAt: "2026-10-15T00:00:00.000Z",
+        maxPhotos: 3,
+        planId: "free",
+        publishedAt: publishedAt.toISOString(),
+        revision: 0,
+        shareId,
+        sharePath: `/g/${shareId}`,
+        watermark: true,
+      });
+      expect(GiftDraftDtoSchema.safeParse(result.data).success).toBe(true);
     });
 
     it("saves the working copy and keeps the current publication (Owner saves a published gift's working copy)", async () => {
@@ -708,7 +731,7 @@ describe("gift publishing", () => {
   let assets: MediaAsset[];
   let publications: GiftPublication[];
   let keys: Map<string, StoredKey>;
-  let publishEnabled: boolean;
+  let standardAvailable: boolean;
   let editable: boolean;
   let publishInputs: GiftPublishInput[];
   let beforeWrite: (() => GiftPublishPersistenceResult | null) | null;
@@ -733,6 +756,22 @@ describe("gift publishing", () => {
       revision: 7,
       ...overrides,
     });
+  }
+
+  /** Photo ids: the fixture's four, then more of the same shape. */
+  const photoIds = Array.from(
+    { length: 8 },
+    (_, index) =>
+      assetIds[index] ?? `550e8400-e29b-41d4-a716-4466554400${String(index).padStart(2, "0")}`,
+  );
+
+  /** Complete content with `count` photos, and their ready assets. */
+  function withPhotos(count: number): Record<string, unknown> {
+    assets = photoIds.slice(0, count).map((id) => mediaAsset(id));
+    return {
+      ...completeContent(),
+      memories: photoIds.slice(0, count).map((assetId) => ({ assetId })),
+    };
   }
 
   function replayOf(stored: StoredKey | undefined, request: ReplayRequest) {
@@ -791,7 +830,9 @@ describe("gift publishing", () => {
         precondition.status === "draft"
           ? gift.status === "draft"
           : gift.status === "published" &&
-            gift.publishedRevision === precondition.publishedRevision;
+            gift.publishedRevision === precondition.publishedRevision &&
+            gift.expiresAt !== undefined &&
+            gift.expiresAt.getTime() > precondition.now.getTime();
       if (
         !matchesPrecondition ||
         gift.access.mode !== "unlisted" ||
@@ -844,7 +885,14 @@ describe("gift publishing", () => {
         },
         assets: { listByGiftId: () => Promise.resolve(assets) },
         createShareId: () => shareId,
-        entitlement: { canPublish: () => publishEnabled },
+        plans: {
+          grantFor: (planId) =>
+            planId === "free"
+              ? { kind: "grant", source: "free" }
+              : standardAvailable
+                ? { kind: "grant", source: "internal" }
+                : { kind: "unavailable" },
+        },
       },
       templates: {
         findCreatableManifest: () => Promise.resolve(null),
@@ -867,7 +915,7 @@ describe("gift publishing", () => {
     assets = assetIds.slice(0, 3).map((id) => mediaAsset(id));
     publications = [];
     keys = new Map();
-    publishEnabled = true;
+    standardAvailable = false;
     editable = true;
     publishInputs = [];
     beforeWrite = null;
@@ -878,12 +926,14 @@ describe("gift publishing", () => {
     input: Partial<{
       expectedRevision: number;
       idempotencyKey: string;
+      planId: "free" | "standard";
       userId: string | null;
     }> = {},
   ) {
     return service.publishGift({
       expectedRevision: 7,
       idempotencyKey: key,
+      planId: "free",
       publicId,
       userId: ownerId,
       ...input,
@@ -919,18 +969,8 @@ describe("gift publishing", () => {
       expect(gift.status).toBe("draft");
     });
 
-    it("answers FORBIDDEN to the owner while the flag is off (Flag off for the owner)", async () => {
-      publishEnabled = false;
-
-      await expect(publish()).resolves.toEqual({ error: { code: "FORBIDDEN" }, ok: false });
-      expect(gift.status).toBe("draft");
-      expect(publishInputs).toHaveLength(0);
-    });
-
-    it("answers NOT_FOUND before the flag to a non-owner (Flag off for a non-owner)", async () => {
-      publishEnabled = false;
-
-      await expect(publish({ userId: "someone-else" })).resolves.toEqual({
+    it("answers NOT_FOUND before any plan check to a non-owner (Plan refusal hidden from non-owners)", async () => {
+      await expect(publish({ planId: "standard", userId: "someone-else" })).resolves.toEqual({
         error: { code: "NOT_FOUND" },
         ok: false,
       });
@@ -1067,12 +1107,144 @@ describe("gift publishing", () => {
     });
   });
 
+  describe("plan checks", () => {
+    const later = new Date("2026-10-02T09:00:00.000Z");
+
+    async function publishedAndEdited(data: Record<string, unknown>) {
+      await publish();
+      gift = GiftSchema.parse({ ...gift, content: { ...gift.content, data }, revision: 9 });
+    }
+
+    it("refuses Standard while the internal grant is off (Paid plan not available)", async () => {
+      await expect(publish({ planId: "standard" })).resolves.toEqual({
+        error: { code: "PLAN_NOT_AVAILABLE" },
+        ok: false,
+      });
+      expect(gift.status).toBe("draft");
+      expect(publishInputs).toHaveLength(0);
+    });
+
+    it("grants Standard through the internal grant (Grant on outside Production)", async () => {
+      standardAvailable = true;
+
+      await expect(publish({ planId: "standard" })).resolves.toMatchObject({
+        data: { expiresAt: "2027-10-01T08:00:00.000Z", planId: "standard" },
+        ok: true,
+      });
+      expect(gift.entitlement).toMatchObject({
+        maxPhotos: null,
+        planId: "standard",
+        priceVnd: 49_000,
+        source: "internal",
+        watermark: false,
+      });
+    });
+
+    it("publishes on Free whatever the internal grant says (Free in Production)", async () => {
+      standardAvailable = false;
+
+      await expect(publish({ planId: "free" })).resolves.toMatchObject({
+        data: { planId: "free" },
+        ok: true,
+      });
+    });
+
+    it("refuses more photos than Free allows (Too many photos for the Free plan)", async () => {
+      gift = ownedGift({ content: { ...gift.content, data: withPhotos(5) } });
+
+      await expect(publish()).resolves.toEqual({
+        error: { code: "PLAN_PHOTO_LIMIT_EXCEEDED", maxPhotos: 3, photoCount: 5 },
+        ok: false,
+      });
+      expect(gift.status).toBe("draft");
+    });
+
+    it("answers content issues before the photo limit", async () => {
+      const data = withPhotos(5);
+      delete data["receiver-name"];
+      gift = ownedGift({ content: { ...gift.content, data } });
+
+      await expect(publish()).resolves.toMatchObject({
+        error: { code: "INVALID_CONTENT" },
+        ok: false,
+      });
+    });
+
+    it("limits an update by the entitlement (Update over the entitlement's photo limit)", async () => {
+      await publishedAndEdited(withPhotos(4));
+      service = createService({ clock: () => later });
+
+      await expect(
+        publish({ expectedRevision: 9, idempotencyKey: "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed" }),
+      ).resolves.toEqual({
+        error: { code: "PLAN_PHOTO_LIMIT_EXCEEDED", maxPhotos: 3, photoCount: 4 },
+        ok: false,
+      });
+      expect(gift.publishedRevision).toBe(7);
+    });
+
+    it("refuses another plan for an update (Plan change on update refused)", async () => {
+      standardAvailable = true;
+      await publishedAndEdited({ ...completeContent(), "final-letter": "Thư mới" });
+
+      await expect(
+        publish({
+          expectedRevision: 9,
+          idempotencyKey: "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed",
+          planId: "standard",
+        }),
+      ).resolves.toEqual({ error: { code: "PLAN_CHANGE_UNSUPPORTED" }, ok: false });
+      expect(gift.entitlement?.planId).toBe("free");
+    });
+
+    it("refuses an update after expiry (Update of an expired gift)", async () => {
+      await publishedAndEdited({ ...completeContent(), "final-letter": "Thư mới" });
+      service = createService({ clock: () => new Date("2026-10-15T08:00:00.000Z") });
+
+      await expect(
+        publish({ expectedRevision: 9, idempotencyKey: "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed" }),
+      ).resolves.toEqual({ error: { code: "GIFT_EXPIRED" }, ok: false });
+      expect(publishInputs).toHaveLength(1);
+    });
+
+    it("answers GIFT_EXPIRED when the write finds the gift expired (Expiry reached during an update)", async () => {
+      await publishedAndEdited({ ...completeContent(), "final-letter": "Thư mới" });
+      const justBefore = new Date("2026-10-15T07:59:59.999Z");
+      service = createService({ clock: () => justBefore });
+      beforeWrite = () => {
+        // The gift expires between the checks and the write.
+        gift = GiftSchema.parse({
+          ...gift,
+          ...grantEntitlement(currentPlan("free"), "free", new Date("2026-10-01T07:59:59.999Z")),
+        });
+        return null;
+      };
+
+      await expect(
+        publish({ expectedRevision: 9, idempotencyKey: "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed" }),
+      ).resolves.toEqual({ error: { code: "GIFT_EXPIRED" }, ok: false });
+      expect(publications).toHaveLength(1);
+    });
+
+    it("replays a first publish after expiry with its entitlement", async () => {
+      await publish();
+      service = createService({ clock: () => new Date("2026-11-01T00:00:00.000Z") });
+
+      await expect(publish()).resolves.toMatchObject({
+        data: { expiresAt: "2026-10-15T08:00:00.000Z", planId: "free", revision: 7 },
+        ok: true,
+      });
+    });
+  });
+
   describe("the publish transaction", () => {
     it("publishes a complete gift with a pinned snapshot (Owner publishes a complete gift)", async () => {
       const result = await publish();
 
       expect(result).toEqual({
         data: {
+          expiresAt: "2026-10-15T08:00:00.000Z",
+          planId: "free",
           publicId,
           publishedAt: now.toISOString(),
           revision: 7,
@@ -1083,6 +1255,20 @@ describe("gift publishing", () => {
         ok: true,
       });
       expect(gift).toMatchObject({ publishedAt: now, revision: 7, shareId, status: "published" });
+      // Free entitlement granted (gift-plans "Free entitlement granted").
+      expect(gift.entitlement).toEqual({
+        grantedAt: now,
+        maxPhotos: 3,
+        passwordAccess: false,
+        planId: "free",
+        planVersion: 1,
+        priceVnd: 0,
+        retentionDays: 14,
+        scheduledAccess: false,
+        source: "free",
+        watermark: true,
+      });
+      expect(gift.expiresAt).toEqual(new Date("2026-10-15T08:00:00.000Z"));
       expect(publications).toEqual([
         expect.objectContaining({
           artifactContentHash: contentHash,
@@ -1102,7 +1288,7 @@ describe("gift publishing", () => {
           actorKey: `user:${ownerId}`,
           expiresAt: new Date("2026-10-02T08:00:00.000Z"),
           key,
-          requestFingerprint: JSON.stringify(["publish", publicId, 7]),
+          requestFingerprint: JSON.stringify(["publish", publicId, 7, "free"]),
           scope: "gift-publish",
         },
         ownerId,
@@ -1136,6 +1322,7 @@ describe("gift publishing", () => {
       beforeWrite = () => {
         gift = GiftSchema.parse({
           ...gift,
+          ...grantEntitlement(currentPlan("free"), "free", now),
           publishedAt: now,
           publishedRevision: 7,
           shareId,
@@ -1209,18 +1396,22 @@ describe("gift publishing", () => {
     });
 
     it("returns the publication a concurrent same-key request stored (Double click)", async () => {
-      const stored = {
-        ...(await (async () => {
-          await publish();
-          return publications[0]!;
-        })()),
-      };
+      await publish();
+      const stored = publications[0]!;
+      const publishedByTheOther = gift;
       gift = ownedGift();
-      beforeWrite = () => ({ publication: stored, status: "replayed" });
+      beforeWrite = () => {
+        // The other request committed first, with its own grant time.
+        gift = publishedByTheOther;
+        return { publication: stored, status: "replayed" };
+      };
 
       await expect(
         publish({ idempotencyKey: "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed" }),
-      ).resolves.toMatchObject({ data: { shareId }, ok: true });
+      ).resolves.toMatchObject({
+        data: { expiresAt: "2026-10-15T08:00:00.000Z", planId: "free", shareId },
+        ok: true,
+      });
     });
   });
 
@@ -1246,6 +1437,8 @@ describe("gift publishing", () => {
 
       expect(result).toEqual({
         data: {
+          expiresAt: "2026-10-15T08:00:00.000Z",
+          planId: "free",
           publicId,
           publishedAt: later.toISOString(),
           revision: 9,
@@ -1261,7 +1454,14 @@ describe("gift publishing", () => {
       ]);
       expect(publications[0]?.publishedAt).toEqual(now);
       expect(gift).toMatchObject({ publishedAt: later, publishedRevision: 9, shareId });
-      expect(publishInputs[1]?.precondition).toEqual({ publishedRevision: 7, status: "published" });
+      expect(publishInputs[1]?.precondition).toEqual({
+        now: later,
+        publishedRevision: 7,
+        status: "published",
+      });
+      // Update keeps the entitlement (gift-plans).
+      expect(gift.entitlement?.grantedAt).toEqual(now);
+      expect(gift.expiresAt).toEqual(new Date("2026-10-15T08:00:00.000Z"));
     });
 
     it("answers NO_UNPUBLISHED_CHANGES to a concurrent update of the same revision (Concurrent updates of one revision)", async () => {
@@ -1312,6 +1512,25 @@ describe("gift publishing", () => {
         error: { code: "IDEMPOTENCY_CONFLICT" },
         ok: false,
       });
+      await expect(publish({ planId: "standard" })).resolves.toEqual({
+        error: { code: "IDEMPOTENCY_CONFLICT" },
+        ok: false,
+      });
+    });
+
+    it("accepts the same key on another plan after a refusal (Retry with another plan after a refusal)", async () => {
+      standardAvailable = true;
+      gift = ownedGift({ content: { ...gift.content, data: withPhotos(4) } });
+
+      const refused = await publish({ planId: "free" });
+      const retried = await publish({ planId: "standard" });
+
+      expect(refused).toEqual({
+        error: { code: "PLAN_PHOTO_LIMIT_EXCEEDED", maxPhotos: 3, photoCount: 4 },
+        ok: false,
+      });
+      expect(retried).toMatchObject({ data: { planId: "standard" }, ok: true });
+      expect(gift.entitlement).toMatchObject({ planId: "standard", source: "internal" });
     });
 
     it("accepts the same key after a failed attempt (Retry after a validation failure)", async () => {
@@ -1444,6 +1663,7 @@ describe("gift publishing", () => {
       const result = await service.publishGift({
         expectedRevision: 7,
         idempotencyKey: key,
+        planId: "free",
         publicId,
         requestId: "request-9",
         userId: ownerId,
@@ -1484,9 +1704,9 @@ describe("gift publishing", () => {
       await expect(publish({ userId: "someone-else" })).resolves.toMatchObject({
         error: { code: "NOT_FOUND" },
       });
-      publishEnabled = false;
-      await expect(publish()).resolves.toMatchObject({ error: { code: "FORBIDDEN" } });
-      publishEnabled = true;
+      await expect(publish({ planId: "standard" })).resolves.toMatchObject({
+        error: { code: "PLAN_NOT_AVAILABLE" },
+      });
       assets = [];
       await expect(publish()).resolves.toMatchObject({ error: { code: "INVALID_CONTENT" } });
       expect(giftPublished).not.toHaveBeenCalled();

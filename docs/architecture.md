@@ -203,20 +203,22 @@ opens it at `/g/{shareId}` without an account. Behavior is specified in
   never a mix. Superseded records are kept and never served.
 
 - **Publish checks.** `POST /api/gifts/{publicId}/publish` takes an `Idempotency-Key` and
-  `{ expectedRevision }`. `giftService.publishGift` finds the gift with the owner filter only (the
-  anonymous cookie and preview tokens never authorize it), then checks the entitlement, replays a
-  stored key (looked up by `{ giftId, revision }`), and requires status `draft` or `published`, the
-  expected revision, for a published gift a revision newer than its current publication
-  (`NO_UNPUBLISHED_CHANGES` otherwise), access mode `unlisted`, an editable version with a
-  registered artifact, and no content issue. Content issues come from
+  `{ expectedRevision, planId }`. `giftService.publishGift` finds the gift with the owner filter
+  only (the anonymous cookie and preview tokens never authorize it), then replays a stored key
+  (looked up by `{ giftId, revision }`), and requires status `draft` or `published`, the expected
+  revision, for a published gift a revision newer than its current publication
+  (`NO_UNPUBLISHED_CHANGES` otherwise) and an unexpired entitlement on the same plan, for a draft a
+  plan the `PlanGrantPolicy` can grant, access mode `unlisted`, an editable version with a
+  registered artifact, no content issue, and finally a photo count within the plan's `maxPhotos`. Content issues come from
   `collectContentIssues` (`modules/viewer/application/content-issues.ts`), the same function
   `buildViewerPayload` uses for the preview's server issues, so a revision whose preview lists no
   issue is exactly a publishable revision.
 - **One transaction.** `mongoGiftRepository.publish` runs, in one MongoDB transaction: a replay
   check of the `gift-publish` key; the conditional write to `published` filtered by owner, access
   mode, revision and the state the checks saw (`draft`, or `published` with the same
-  `publishedRevision`), setting `publishedRevision` and `publishedAt` (and `shareId` on a first
-  publish only), keeping the revision; an `updateMany` with `$currentDate` on every referenced
+  `publishedRevision` and an `expiresAt` after the write time), setting `publishedRevision` and
+  `publishedAt` (and `shareId`, `entitlement` and `expiresAt` on a first publish only), keeping
+  the revision; an `updateMany` with `$currentDate` on every referenced
   `ready`, non-detached asset of the gift and field, aborting when fewer match; the insert of the
   immutable `giftPublications` record; and the idempotency record. A failed condition aborts
   through a private sentinel, so nothing is written. A duplicate `{ giftId, revision }` from a
@@ -237,11 +239,26 @@ opens it at `/g/{shareId}` without an account. Behavior is specified in
   from listings, reads, retries, deletions and save references. The `DELETE` answers `200` with
   `deleted: false`. Detached photos and those referenced only by superseded publications stay in
   storage until a cleanup job exists (risk register).
-- **Entitlement.** The application port `PublishEntitlement` is backed by
-  `config/internal-publish.ts`: on only when `INTERNAL_PUBLISH_ENABLED` is exactly `true`, and
-  always off when `VERCEL_ENV` is `production`. It is read per request and never throws. A
-  non-owner gets the opaque `404` before the flag's `403`. Sprint 4 replaces the implementation
-  with a verified-payment entitlement ([ADR-0009](./adr/0009-billing-provider-boundary.md)).
+- **Plans and entitlement.** Plans are the versioned catalog `PLAN_CATALOG` in
+  `packages/domain/src/billing` (`free@1`, `standard@1`;
+  [ADR-0011](./adr/0011-versioned-plan-catalog.md)). The details are as follows:
+  - **The grant.** A first publish grants the gift an `entitlement` snapshot of the current
+    version of the requested plan (`grantEntitlement`). The snapshot is written in the same
+    transaction, with `expiresAt = grantedAt + retentionDays`. Updates keep both, and every later
+    check reads the snapshot, never the catalog.
+  - **Who may grant what.** The port `PlanGrantPolicy` (wired in `composition/gifts.ts`) decides
+    which plans can be granted. Free is always granted (`source: "free"`). Standard is granted only
+    by the internal paid-plan grant (`config/internal-plan-grant.ts`,
+    `INTERNAL_PLAN_GRANT_ENABLED`, `source: "internal"`), which is never on in Production. The
+    checkout change adds the paid outcome
+    ([ADR-0009](./adr/0009-billing-provider-boundary.md)).
+  - **The Studio.** The Studio page renders the same policy's offers (`listPlanOffers`) into the
+    editor, so the browser never holds plan constants.
+  - **Expiry.** It is decided by server time on every request: the share lookup filters
+    `expiresAt > now`, and an update write is conditional on it. A job only moves the stored status
+    later.
+  - **Watermark.** For a Free gift the `/g` page draws the host-level mark `Tạo bằng LoveMemory`
+    over the frame, outside the template iframe. The template and the payload are unchanged.
 - **Snapshot and pinning.** The publication stores `templateId`, `templateVersion`, the registered
   artifact's `contentHash` (`artifactContentHash`), the content, the asset ids and the audio track.
   No API updates or deletes it. `GET /api/public-gifts/{shareId}` calls `buildViewerPayload` with
@@ -250,7 +267,7 @@ opens it at `/g/{shareId}` without an account. Behavior is specified in
   ([ADR-0004](./adr/0004-template-artifact-isolation.md)). The response drops `issues`.
 - **Share links are bearer secrets.** A share id is 16 random bytes in base64url, assigned at the
   first publish and kept by every later publication of the gift, unique across `gifts`. Page and
-  endpoint share one liveness check (format, published and `unlisted` gift found through
+  endpoint share one liveness check (format, published, `unlisted` and unexpired gift found through
   `gifts_share_id_unique`, the current publication by `publishedRevision` with the same share id,
   manifest) and answer one opaque not-found. The application never logs share ids, payloads or signed URLs; `/g/` sends
   `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex` and `Cache-Control: private, no-store`;
@@ -293,6 +310,19 @@ or `stg` breaks published test gifts (see the
 [deployment runbook](./runbooks/preview-deploy-and-rollback.md#rolling-back-past-schema-version-10-editable-published-gifts)).
 The old `db:migrate` restores the version-7 validators and ledger and leaves the extra index in
 place; re-deploying version 8 restores access without data repair.
+
+**Schema version 11 rollout and rollback.** The migration adds `entitlement` and `expiresAt` to
+the `gifts` validator. It backfills every published gift without an entitlement with `standard@1`
+(`source: "legacy"`, the pinned `LEGACY_ENTITLEMENT`), granted at its `publishedAt` and expiring
+365 days later.
+
+- **Before the migration runs.** The repository reads such a gift with exactly that entitlement, so
+  its Studio keeps working. Its share link answers `404`, because the lookup filters on the stored
+  `expiresAt`.
+- **Rollback.** From this version on, Production can publish Free gifts. The previous build's strict
+  schema fails on both new fields, so a rollback breaks published gifts on every tier, Production
+  included. Prefer a roll forward, and soak on `stg` before `main` (see the
+  [deployment runbook](./runbooks/preview-deploy-and-rollback.md#rolling-back-past-schema-version-11-plans-and-entitlements)).
 
 ## Funnel analytics
 

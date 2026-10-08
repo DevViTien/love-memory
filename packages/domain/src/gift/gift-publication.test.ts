@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { grantEntitlement } from "../billing/gift-entitlement";
+import { currentPlan } from "../billing/plan";
 import { updateGiftDraft } from "./gift-draft";
 import { createGiftPublication, publishGiftDraft, republishGift } from "./gift-publication";
 import { GiftSchema, type Gift } from "./gift-schema";
@@ -9,6 +11,7 @@ const now = new Date("2026-10-01T08:00:00.000Z");
 const shareId = "Ab0_-cdefghijklmnopqrs";
 const hash = "a".repeat(64);
 const publicationId = "0f8fad5b-d9cb-469f-a165-70867728950e";
+const grant = grantEntitlement(currentPlan("free"), "free", now);
 
 function draft(overrides: Partial<Gift> = {}): Gift {
   return GiftSchema.parse({
@@ -31,7 +34,7 @@ function draft(overrides: Partial<Gift> = {}): Gift {
 }
 
 function published(): Gift {
-  const result = publishGiftDraft(draft(), { expectedRevision: 7, now, shareId });
+  const result = publishGiftDraft(draft(), { expectedRevision: 7, grant, now, shareId });
   if (!result.ok) throw new Error("Expected a published gift.");
   return result.data;
 }
@@ -51,15 +54,22 @@ describe("publishGiftDraft", () => {
     expect(gift.content).toEqual(draft().content);
   });
 
+  it("grants the entitlement and its expiry at the first publish", () => {
+    const gift = published();
+
+    expect(gift.entitlement).toEqual(grant.entitlement);
+    expect(gift.expiresAt).toEqual(new Date("2026-10-15T08:00:00.000Z"));
+  });
+
   it("refuses a gift that is not a draft", () => {
-    expect(publishGiftDraft(published(), { expectedRevision: 7, now, shareId })).toEqual({
+    expect(publishGiftDraft(published(), { expectedRevision: 7, grant, now, shareId })).toEqual({
       error: { code: "GIFT_NOT_DRAFT" },
       ok: false,
     });
   });
 
   it("refuses a stale revision", () => {
-    expect(publishGiftDraft(draft(), { expectedRevision: 6, now, shareId })).toEqual({
+    expect(publishGiftDraft(draft(), { expectedRevision: 6, grant, now, shareId })).toEqual({
       error: { actualRevision: 7, code: "GIFT_REVISION_CONFLICT", expectedRevision: 6 },
       ok: false,
     });
@@ -74,7 +84,7 @@ describe("publishGiftDraft", () => {
       },
     });
 
-    expect(publishGiftDraft(anonymous, { expectedRevision: 7, now, shareId })).toEqual({
+    expect(publishGiftDraft(anonymous, { expectedRevision: 7, grant, now, shareId })).toEqual({
       error: { code: "GIFT_NOT_OWNED" },
       ok: false,
     });
@@ -112,6 +122,8 @@ describe("republishGift", () => {
       status: "published",
       updatedAt: later,
     });
+    expect(result.data.entitlement).toEqual(grant.entitlement);
+    expect(result.data.expiresAt).toEqual(grant.expiresAt);
   });
 
   it("refuses a draft", () => {

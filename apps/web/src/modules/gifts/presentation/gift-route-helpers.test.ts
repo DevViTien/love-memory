@@ -123,14 +123,23 @@ describe("gift route helpers", () => {
     });
   });
 
-  it("maps the publish refusals to 403 and to 409 with a reason", async () => {
-    const forbidden = giftServiceErrorResponse({ code: "FORBIDDEN" }, "request-1");
-    expect(forbidden.status).toBe(403);
-    await expect(forbidden.json()).resolves.toMatchObject({
-      error: { code: "FORBIDDEN", message: "Publishing is not enabled for this account." },
+  it("maps the publish refusals to 409 with a reason", async () => {
+    const photoLimit = giftServiceErrorResponse(
+      { code: "PLAN_PHOTO_LIMIT_EXCEEDED", maxPhotos: 3, photoCount: 5 },
+      "request-1",
+    );
+    expect(photoLimit.status).toBe(409);
+    await expect(photoLimit.json()).resolves.toMatchObject({
+      error: {
+        code: "CONFLICT",
+        details: { maxPhotos: 3, photoCount: 5, reason: "PLAN_PHOTO_LIMIT_EXCEEDED" },
+      },
     });
 
     for (const [code, reason] of [
+      ["GIFT_EXPIRED", "GIFT_EXPIRED"],
+      ["PLAN_NOT_AVAILABLE", "PLAN_NOT_AVAILABLE"],
+      ["PLAN_CHANGE_UNSUPPORTED", "PLAN_CHANGE_UNSUPPORTED"],
       ["ACCESS_POLICY_UNSUPPORTED", "ACCESS_POLICY_UNSUPPORTED"],
       ["TEMPLATE_NOT_EDITABLE", "TEMPLATE_VERSION_NOT_EDITABLE"],
       ["TEMPLATE_UNPUBLISHABLE", "TEMPLATE_VERSION_UNPUBLISHABLE"],

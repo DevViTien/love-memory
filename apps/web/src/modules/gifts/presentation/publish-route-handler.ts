@@ -22,7 +22,7 @@ import {
   requestId,
 } from "./gift-route-helpers";
 
-/** `{ "expectedRevision": n }` needs a few bytes; anything above 1 KiB is refused unread. */
+/** `{ "expectedRevision": n, "planId": … }` needs a few bytes; above 1 KiB is refused unread. */
 export const PUBLISH_BODY_MAX_BYTES = 1024;
 
 export type PublishRouteDependencies = Readonly<{
@@ -33,7 +33,7 @@ type PublishRouteContext = Readonly<{ params: Promise<{ publicId: string }> }>;
 
 /**
  * `POST /api/gifts/{publicId}/publish`: media type and origin, path, `Idempotency-Key`, rate
- * limit, body (at most 1 KiB), then the session, ownership and entitlement inside the service.
+ * limit, body (at most 1 KiB), then the session, ownership and the plan checks inside the service.
  * Failures log only the operation, the error class name and the request id.
  */
 export async function handlePublishGift(
@@ -75,6 +75,7 @@ export async function handlePublishGift(
     const result = await getService().publishGift({
       expectedRevision: body.data.expectedRevision,
       idempotencyKey: idempotencyKey.data,
+      planId: body.data.planId,
       publicId: publicId.data,
       requestId: id,
       userId: context.userId,

@@ -6,6 +6,7 @@ import {
   PublicGiftIdSchema,
   ShareIdSchema,
 } from "./gift-identity";
+import { entitlementExpiry, GiftEntitlementSchema } from "../billing/gift-entitlement";
 import { GiftStatusSchema } from "./gift-status";
 
 export const GiftAccessPolicySchema = z.discriminatedUnion("mode", [
@@ -72,6 +73,10 @@ export const GiftSchema = z
     access: GiftAccessPolicySchema,
     content: GiftContentSnapshotSchema,
     createdAt: z.coerce.date(),
+    /** The plan values granted at the first publish (`gift-plans`); a draft has none. */
+    entitlement: GiftEntitlementSchema.optional(),
+    /** The end of the share link: the entitlement's `grantedAt` plus its `retentionDays`. */
+    expiresAt: z.coerce.date().optional(),
     id: z.uuid(),
     ownership: GiftOwnershipSchema,
     publicId: PublicGiftIdSchema,
@@ -107,6 +112,32 @@ export const GiftSchema = z
       context.addIssue({
         code: "custom",
         message: "A draft has no share id, no publication time and no published revision.",
+      });
+    }
+    const hasEntitlement = gift.entitlement !== undefined;
+    const hasExpiresAt = gift.expiresAt !== undefined;
+    if (gift.status === "published" && (!hasEntitlement || !hasExpiresAt)) {
+      context.addIssue({
+        code: "custom",
+        message: "A published gift requires an entitlement and an expiry.",
+      });
+    }
+    if (gift.status === "draft" && (hasEntitlement || hasExpiresAt)) {
+      context.addIssue({
+        code: "custom",
+        message: "A draft has no entitlement and no expiry.",
+      });
+    }
+    if (
+      hasEntitlement !== hasExpiresAt ||
+      (gift.entitlement &&
+        gift.expiresAt &&
+        entitlementExpiry(gift.entitlement).getTime() !== gift.expiresAt.getTime())
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "The expiry must be the entitlement's grant time plus its retention.",
+        path: ["expiresAt"],
       });
     }
   });

@@ -29,12 +29,12 @@ export default async function PublicGiftPage({ params }: PublicGiftPageProps) {
     notFound();
   }
 
-  // Only the share id and the analytics context (a pseudonym and the template version, never
-  // content) cross to the client; the content loads after the recipient's tap.
+  // Only the share id, the analytics context (a pseudonym and the template version, never
+  // content) and the plan's watermark flag cross to the client; the content loads after the tap.
   return (
     <main>
       <Container className="py-6 sm:py-10">
-        <PublicGiftScreen analytics={page.analytics} shareId={shareId} />
+        <PublicGiftScreen analytics={page.analytics} shareId={shareId} watermark={page.watermark} />
       </Container>
     </main>
   );

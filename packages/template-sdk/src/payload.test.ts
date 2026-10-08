@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { parseTemplateManifest } from "./manifest";
 import {
+  countImageItems,
   createTemplateDraftPayloadSchema,
   listImageFieldReferences,
   parseTemplateDraftPayload,
@@ -255,5 +256,26 @@ describe("listImageFieldReferences", () => {
       { assetIds: [otherAssetId], fieldId: "photos" },
     ]);
     expect(listImageFieldReferences(storyManifest, { memories: [null] })).toEqual([]);
+  });
+});
+
+describe("countImageItems", () => {
+  it("counts image items across every image field", () => {
+    expect(countImageItems(storyManifest, {})).toBe(0);
+    expect(
+      countImageItems(storyManifest, {
+        memories: [{ assetId }, { assetId: otherAssetId }, { assetId }, { assetId }, { assetId }],
+      }),
+    ).toBe(5);
+    expect(
+      countImageItems(storyManifest, {
+        memories: [{ assetId, caption: "A" }, { assetId: otherAssetId }],
+        photos: [otherAssetId],
+      }),
+    ).toBe(3);
+  });
+
+  it("does not count malformed items", () => {
+    expect(countImageItems(storyManifest, { memories: [null, { assetId }], photos: [7] })).toBe(1);
   });
 });
