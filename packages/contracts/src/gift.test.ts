@@ -82,6 +82,7 @@ describe("gift API contracts", () => {
         createdAt: "2026-09-16T00:00:00.000Z",
         ownerKind: "anonymous",
         publicId: "q1w2e3r4t5y6u7i8",
+        publication: null,
         revision: 0,
         status: "draft",
         templateId: "memory-box",
@@ -89,6 +90,47 @@ describe("gift API contracts", () => {
         updatedAt: "2026-09-16T00:00:00.000Z",
       }),
     ).not.toHaveProperty("_id");
+  });
+
+  describe("published gift summary", () => {
+    const shareId = "Ab0_-cdefghijklmnopqrs";
+    const working = {
+      content: {},
+      createdAt: "2026-09-16T00:00:00.000Z",
+      ownerKind: "user",
+      publicId: "q1w2e3r4t5y6u7i8",
+      revision: 9,
+      status: "published",
+      templateId: "memory-box",
+      templateVersion: "1.1.0",
+      updatedAt: "2026-10-02T00:00:00.000Z",
+    } as const;
+    const summary = {
+      publishedAt: "2026-10-01T08:00:00.000Z",
+      revision: 7,
+      shareId,
+      sharePath: `/g/${shareId}`,
+    };
+
+    it("accepts a published gift's working copy with its publication summary", () => {
+      expect(GiftDraftDtoSchema.parse({ ...working, publication: summary }).publication).toEqual(
+        summary,
+      );
+    });
+
+    it("rejects a summary with extra keys or another share path, and a DTO without one", () => {
+      expect(
+        GiftDraftDtoSchema.safeParse({ ...working, publication: { ...summary, content: {} } })
+          .success,
+      ).toBe(false);
+      expect(
+        GiftDraftDtoSchema.safeParse({
+          ...working,
+          publication: { ...summary, sharePath: `/s/${shareId}` },
+        }).success,
+      ).toBe(false);
+      expect(GiftDraftDtoSchema.safeParse(working).success).toBe(false);
+    });
   });
 
   describe("publish", () => {

@@ -86,8 +86,12 @@ describe("preview service", () => {
               ? gift
               : null,
           ),
-        findDraftById: (id) =>
-          Promise.resolve(gift?.id === id && gift.status === "draft" ? gift : null),
+        findEditableById: (id) =>
+          Promise.resolve(
+            gift?.id === id && (gift.status === "draft" || gift.status === "published")
+              ? gift
+              : null,
+          ),
       },
       payload: {
         clock: () => now,
@@ -155,16 +159,19 @@ describe("preview service", () => {
       expect(records).toEqual([]);
     });
 
-    it.each(["published", "deleted"] as const)("refuses a %s gift", async (status) => {
-      gift = draftGift({ status });
+    it("issues a link for a published gift and refuses a deleted one (Published or deleted gift)", async () => {
+      const service = createPreviewService(dependencies);
+      gift = draftGift({ status: "published" });
 
       await expect(
-        createPreviewService(dependencies).createPreviewLink({
-          accessors: [owner],
-          publicId: "q1w2e3r4t5y6u7i8",
-        }),
+        service.createPreviewLink({ accessors: [owner], publicId: "q1w2e3r4t5y6u7i8" }),
+      ).resolves.toMatchObject({ data: { url: `/preview/${token}` }, ok: true });
+
+      gift = draftGift({ status: "deleted" });
+      await expect(
+        service.createPreviewLink({ accessors: [owner], publicId: "q1w2e3r4t5y6u7i8" }),
       ).resolves.toEqual({ error: { code: "NOT_FOUND" }, ok: false });
-      expect(records).toEqual([]);
+      expect(records).toHaveLength(1);
     });
 
     it("reports an unresolved template version as an invalid state", async () => {
@@ -228,10 +235,21 @@ describe("preview service", () => {
       expect(records).toHaveLength(1);
     });
 
-    it("answers null once the gift is no longer a draft", async () => {
+    it("renders a published gift's working copy and answers null for another status (Gift no longer a draft)", async () => {
       const service = await issue();
-      gift = draftGift({ status: "published" });
+      // Published after the link was issued, then edited (Preview link survives the first publish).
+      gift = draftGift({
+        content: {
+          ...draftGift().content,
+          data: { ...completeContent(), "final-letter": "Bản sửa" },
+        },
+        status: "published",
+      });
 
+      const opened = await service.openPreview(token);
+      expect(opened?.viewer.payload).toMatchObject({ "final-letter": "Bản sửa" });
+
+      gift = draftGift({ status: "paused" });
       await expect(service.openPreview(token)).resolves.toBeNull();
     });
 
@@ -257,7 +275,7 @@ describe("preview service", () => {
   });
 
   describe("edit rights", () => {
-    it("lets only the draft's credentials edit it", async () => {
+    it("lets only the owner's credentials edit a draft or a published gift", async () => {
       const service = createPreviewService(dependencies);
 
       await expect(
@@ -270,6 +288,10 @@ describe("preview service", () => {
         service.canEditDraft({ accessors: [], publicId: "q1w2e3r4t5y6u7i8" }),
       ).resolves.toBe(false);
       gift = draftGift({ status: "published" });
+      await expect(
+        service.canEditDraft({ accessors: [owner], publicId: "q1w2e3r4t5y6u7i8" }),
+      ).resolves.toBe(true);
+      gift = draftGift({ status: "paused" });
       await expect(
         service.canEditDraft({ accessors: [owner], publicId: "q1w2e3r4t5y6u7i8" }),
       ).resolves.toBe(false);

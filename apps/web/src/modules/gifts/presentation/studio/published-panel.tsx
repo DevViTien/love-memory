@@ -1,6 +1,6 @@
 "use client";
 
-import { type GiftPublicationDto } from "@love-memory/contracts";
+import { type GiftPublicationSummary } from "@love-memory/contracts";
 import { Button } from "@love-memory/ui";
 import { useState, useSyncExternalStore } from "react";
 
@@ -10,11 +10,20 @@ function subscribeToNothing(): () => void {
   return () => undefined;
 }
 
+export const PUBLISHED_STATUS_MESSAGES = {
+  latest: "Người nhận đang xem bản mới nhất.",
+  unpublished: "Có thay đổi chưa cập nhật. Người nhận vẫn đang xem bản đã gửi trước đó.",
+} as const;
+
 /**
- * The Studio of a published gift: the share link and how to pass it on. The server render shows the
- * share path; the browser adds its own origin after hydration, so the API never needs `APP_URL`.
+ * Above the editor of a published gift: the share link, how to pass it on, and whether recipients
+ * see the latest saved content. The server render shows the share path; the browser adds its own
+ * origin after hydration, so the API never needs `APP_URL`.
  */
-export function PublishedPanel({ publication }: Readonly<{ publication: GiftPublicationDto }>) {
+export function PublishedPanel({
+  hasUnpublishedChanges,
+  publication,
+}: Readonly<{ hasUnpublishedChanges: boolean; publication: GiftPublicationSummary }>) {
   const origin = useSyncExternalStore(
     subscribeToNothing,
     () => window.location.origin,
@@ -74,10 +83,21 @@ export function PublishedPanel({ publication }: Readonly<{ publication: GiftPubl
           Không sao chép được — hãy chọn đường dẫn và sao chép thủ công.
         </p>
       ) : null}
+      <p
+        className={
+          hasUnpublishedChanges
+            ? "text-sm font-semibold text-amber-800"
+            : "text-sm font-semibold text-emerald-800"
+        }
+        role="status"
+      >
+        {hasUnpublishedChanges
+          ? PUBLISHED_STATUS_MESSAGES.unpublished
+          : PUBLISHED_STATUS_MESSAGES.latest}
+      </p>
       <p className="text-sm leading-6 text-stone-700">
         Ai có đường dẫn này đều mở được món quà. Chỉ chia sẻ với người nhận.
       </p>
-      <p className="text-sm leading-6 text-stone-700">Món quà đã xuất bản không thể chỉnh sửa.</p>
     </section>
   );
 }

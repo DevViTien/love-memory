@@ -10,7 +10,7 @@ import {
 
 import { COLLECTIONS, type CollectionName } from "./collections";
 
-export const DATABASE_SCHEMA_VERSION = 9;
+export const DATABASE_SCHEMA_VERSION = 10;
 
 type DatabaseMigrationDocument = Readonly<{
   _id: string;
@@ -50,6 +50,8 @@ const timestampsValidator = {
 
 const LEGACY_INDEX_NAMES: Readonly<Partial<Record<CollectionName, readonly string[]>>> = {
   [COLLECTIONS.assets]: ["assets_storage_key_unique"],
+  // A gift's later publications keep its share id, so share ids are unique per gift, not per record.
+  [COLLECTIONS.giftPublications]: ["gift_publications_share_id_unique"],
 };
 
 export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
@@ -221,6 +223,7 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
           },
           publicId: { bsonType: "string" },
           publishedAt: { bsonType: "date" },
+          publishedRevision: { bsonType: "int", minimum: 0 },
           revision: { bsonType: "int", minimum: 0 },
           shareId: { bsonType: "string", pattern: SHARE_ID_PATTERN },
           status: {
@@ -337,6 +340,7 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
           declaredContentType: { enum: ["image/jpeg", "image/png", "image/webp"] },
           declaredSizeBytes: { bsonType: ["int", "long"], minimum: 1 },
           derivatives: { bsonType: "array" },
+          detachedAt: { bsonType: ["date", "null"] },
           expiresAt: { bsonType: ["date", "null"] },
           failureCode: { bsonType: ["string", "null"] },
           fieldId: { bsonType: "string" },
@@ -475,10 +479,7 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
   {
     indexes: [
       {
-        key: { shareId: 1 },
-        options: { name: "gift_publications_share_id_unique", unique: true },
-      },
-      {
+        // Also serves the lookup of a gift's current publication by `publishedRevision`.
         key: { giftId: 1, revision: 1 },
         options: { name: "gift_publications_gift_revision_unique", unique: true },
       },
@@ -614,6 +615,19 @@ async function ensureCollection(database: Db, definition: CollectionDefinition):
   }
 }
 
+/**
+ * Points every published gift that predates editing after publish at its only publication. Such a
+ * gift could not be edited, so its revision is the published one. Idempotent: it matches nothing
+ * once every published gift has `publishedRevision`.
+ */
+export async function backfillPublishedRevisions(database: Db): Promise<void> {
+  await database
+    .collection(COLLECTIONS.gifts)
+    .updateMany({ publishedRevision: { $exists: false }, status: "published" }, [
+      { $set: { publishedRevision: "$revision" } },
+    ]);
+}
+
 export async function runDatabaseMigrations(
   database: Db,
   onProgress: (collection: CollectionName, phase: "complete" | "start") => void = () => undefined,
@@ -623,6 +637,8 @@ export async function runDatabaseMigrations(
     await ensureCollection(database, definition);
     onProgress(definition.name, "complete");
   }
+
+  await backfillPublishedRevisions(database);
 
   await database.collection<DatabaseMigrationDocument>(COLLECTIONS.databaseMigrations).updateOne(
     { _id: "core" },

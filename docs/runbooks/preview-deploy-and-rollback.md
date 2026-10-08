@@ -47,6 +47,21 @@ read-only diagnostics or an explicitly documented recovery.
 If a feature branch must be pushed for collaboration or a pull request, it still runs the applicable
 GitHub checks but does not create a Vercel deployment.
 
+### Database migrations during promotion
+
+When a promotion raises `DATABASE_SCHEMA_VERSION`, run `pnpm db:migrate` against that tier's
+database as soon as its deployment is `Ready`, then `pnpm db:verify` and `pnpm db:verify-gifts`.
+
+Schema version `10` (`change-gift-publication-revisions`):
+
+- adds `publishedRevision` to `gifts` and `detachedAt` to `assets`;
+- drops the legacy index `giftPublications.gift_publications_share_id_unique`;
+- backfills `publishedRevision = revision` on every published gift that has none.
+
+Until it runs, the new build serves published gifts normally, but an update of a published gift
+(`Cập nhật món quà`) answers `500`: the legacy unique index rejects a second publication with the
+same share id. Recipients keep the first publication.
+
 ## Environment variables
 
 Configure shared Preview secrets once and override environment identity per branch:
@@ -121,8 +136,9 @@ request paths:
   the plan changes.
 - No log drain may be configured until it strips `/g/` and `/api/public-gifts/` paths (or the share
   id segment) before storage.
-- Links cannot be revoked or re-issued until Sprint 4 (plan.md §13.1–13.2). In Sprint 3 only `dev`
-  and `stg` can publish, so only test gifts are exposed.
+- Links cannot be revoked or re-issued until the pause and delete work of Sprint 4 (plan.md
+  §13.1–13.2). Editing a published gift keeps its link: an update changes what the link shows, not
+  the link. Only `dev` and `stg` can publish, so only test gifts are exposed.
 
 ## Deployment Protection and template artifacts
 
@@ -197,6 +213,31 @@ forward, and `/g/` does not exist. In order of preference:
 The old `db:verify` reports drift after a rollback; running the old `db:migrate` restores the
 version `7` validators and ledger and leaves the extra `gifts_share_id_unique` index harmlessly in
 place. Re-deploying version `8` later restores access without data repair.
+
+### Rolling back past schema version 10 (editable published gifts)
+
+Schema version `10` gives every published gift a `publishedRevision` (the backfill) and can give
+assets a `detachedAt`. The previous build parses `gifts` and `assets` strictly and fails on both
+fields. Production cannot publish (the flag is forced off), so a Production rollback is clean. On
+`dev` and `stg`, after a rollback:
+
+- `/studio/{publicId}` and `/g/{shareId}` of every published gift answer `500`;
+- the media routes of a gift with a detached photo answer `500`.
+
+In order of preference:
+
+1. roll forward with a fix instead of rolling back;
+2. roll back and accept those `500`s for the test gifts until the roll forward;
+3. for a clean rollback, first set `INTERNAL_PUBLISH_ENABLED=false`, then run a one-off script that
+   is written and reviewed at that time. For example, it can `$unset` `publishedRevision` on gifts
+   whose `revision` equals it, and move gifts with unpublished changes out of the way, keeping
+   every `giftPublications` record. Never run it ad hoc. Detached assets stay `ready`; unsetting
+   their `detachedAt` would put them back into the working copy's quota.
+
+The old `db:verify` reports drift after a rollback. The old `db:migrate` recreates the unique
+`gift_publications_share_id_unique` index, which fails while any gift has two publications; do not
+run it until those extra publications are dealt with by the reviewed script. Re-deploying version
+`10` later restores access without data repair.
 
 ## Escalation
 

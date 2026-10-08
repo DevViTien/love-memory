@@ -140,6 +140,14 @@ function mapGiftServiceError(error: GiftServiceError, id: string): Response {
         requestId: id,
         status: 409,
       });
+    case "NO_UNPUBLISHED_CHANGES":
+      return createApiErrorResponse({
+        code: API_ERROR_CODES.conflict,
+        details: { reason: "NO_UNPUBLISHED_CHANGES" },
+        message: "Recipients already receive this revision.",
+        requestId: id,
+        status: 409,
+      });
     case "TEMPLATE_NOT_EDITABLE":
       return createApiErrorResponse({
         code: API_ERROR_CODES.conflict,

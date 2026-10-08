@@ -3,7 +3,6 @@
 import {
   type AnalyticsContext,
   type GiftDraftDto,
-  type GiftPublicationDto,
   type LicensedAudioTrackDto,
 } from "@love-memory/contracts";
 import { type TemplateManifest } from "@love-memory/template-sdk";
@@ -19,6 +18,7 @@ import { createAutosaveController } from "./studio/autosave-controller";
 import { ConflictBanner, ReadOnlyAlert } from "./studio/conflict-banner";
 import {
   createDraftEditorStore,
+  selectHasUnpublishedChanges,
   selectIsDirty,
   selectShouldWarnOnLeave,
   selectTemplateStepsComplete,
@@ -72,7 +72,8 @@ function focusElement({ elementId, scroll, stepId }: PendingFocus) {
 
 /**
  * The Studio editor shell: one store and one autosave controller per mount, steps addressed by
- * `?step=` (with `?field=` deep links), and the browser events that keep a draft safe.
+ * `?step=` (with `?field=` deep links), and the browser events that keep a draft safe. A published
+ * gift gets the published panel above the same editor, which then edits its working copy.
  */
 export function DraftEditor({
   analytics = null,
@@ -84,7 +85,8 @@ export function DraftEditor({
   signedIn = false,
 }: DraftEditorProps) {
   const router = useRouter();
-  const [publication, setPublication] = useState<GiftPublicationDto | null>(null);
+  // The creator funnel ends at the first publish: no Studio event for a published gift.
+  const [funnelOpen, setFunnelOpen] = useState(gift.status === "draft");
   const [store] = useState(() =>
     createDraftEditorStore({
       gift,
@@ -101,9 +103,9 @@ export function DraftEditor({
     }),
   );
   // Keyed on the values, not the prop object: an equal context keeps the client and tracker.
-  const analyticsGiftRef = analytics?.giftRef;
-  const analyticsTemplateId = analytics?.templateId;
-  const analyticsTemplateVersion = analytics?.templateVersion;
+  const analyticsGiftRef = funnelOpen ? analytics?.giftRef : undefined;
+  const analyticsTemplateId = funnelOpen ? analytics?.templateId : undefined;
+  const analyticsTemplateVersion = funnelOpen ? analytics?.templateVersion : undefined;
   const analyticsClient = useMemo(
     () =>
       createAnalyticsClient({
@@ -221,6 +223,8 @@ export function DraftEditor({
   );
 
   const shouldWarnOnLeave = useStore(store, selectShouldWarnOnLeave);
+  const publication = useStore(store, (state) => state.publication);
+  const hasUnpublishedChanges = useStore(store, selectHasUnpublishedChanges);
   useEffect(() => {
     if (!shouldWarnOnLeave) return;
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -240,9 +244,9 @@ export function DraftEditor({
       navigation,
       publish: {
         enabled: publishEnabled,
-        onPublished: (published) => {
-          setPublication(published);
-          // The server page then renders the published gift as a whole: no draft ownership aside.
+        onPublished: () => {
+          setFunnelOpen(false);
+          // The server page re-renders the aside for a published gift; this editor keeps its state.
           router.refresh();
         },
         ownerKind: gift.ownerKind,
@@ -267,13 +271,13 @@ export function DraftEditor({
   );
   const openStep = useCallback((stepId: string) => navigation.openStep(stepId), [navigation]);
 
-  // Published in this page: the editor is gone and autosave was disposed by the publish step.
-  if (publication) {
-    return <PublishedPanel publication={publication} />;
-  }
-
   return (
     <StudioContext.Provider value={context}>
+      {publication ? (
+        <div className="mb-8">
+          <PublishedPanel hasUnpublishedChanges={hasUnpublishedChanges} publication={publication} />
+        </div>
+      ) : null}
       {publishable ? null : (
         <p
           className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900"

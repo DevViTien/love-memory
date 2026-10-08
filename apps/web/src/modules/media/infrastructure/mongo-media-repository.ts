@@ -1,7 +1,12 @@
 import "server-only";
 
 import { COLLECTIONS, getDatabase, getMongoClient } from "@love-memory/database";
-import { MEDIA_ASSET_LIMITS, MediaAssetSchema, type MediaAsset } from "@love-memory/domain";
+import {
+  EDITABLE_GIFT_STATUSES,
+  MEDIA_ASSET_LIMITS,
+  MediaAssetSchema,
+  type MediaAsset,
+} from "@love-memory/domain";
 import { MongoServerError } from "mongodb";
 import { randomUUID } from "node:crypto";
 
@@ -90,7 +95,8 @@ export const mongoMediaAssetRepository: MediaAssetRepository = {
             // enforces) and instead of parallel reads, which one transaction does not support.
             const occupied = await collection
               .find(
-                { giftId: asset.giftId, status: { $in: activeStatuses } },
+                // A detached asset no longer holds a quota slot (`null` also matches legacy ones).
+                { detachedAt: null, giftId: asset.giftId, status: { $in: activeStatuses } },
                 { projection: { _id: 0, fieldId: 1, fieldSlot: 1, giftSlot: 1 }, session },
               )
               .toArray();
@@ -134,7 +140,7 @@ export const mongoMediaAssetRepository: MediaAssetRepository = {
     const database = await getDatabase();
     const documents = await database
       .collection<MediaAssetDocument>(COLLECTIONS.assets)
-      .find({ giftId, status: { $ne: "deleted" } })
+      .find({ detachedAt: null, giftId, status: { $ne: "deleted" } })
       .sort({ createdAt: 1 })
       .toArray();
     return documents.map(toDomain);
@@ -188,16 +194,46 @@ export const mongoMediaAssetRepository: MediaAssetRepository = {
         // Read in the same transaction as the asset write. A publish writes every asset it
         // references, so the two transactions conflict and the retried one sees the other's state.
         const gift = await database
-          .collection<{ _id: string; status: string }>(COLLECTIONS.gifts)
-          .findOne({ _id: giftId, status: "draft" }, { projection: { _id: 1 }, session });
+          .collection<{
+            _id: string;
+            publishedRevision?: number;
+            revision: number;
+            status: string;
+          }>(COLLECTIONS.gifts)
+          .findOne(
+            { _id: giftId, status: { $in: [...EDITABLE_GIFT_STATUSES] } },
+            { projection: { _id: 1, publishedRevision: 1, revision: 1, status: 1 }, session },
+          );
         if (!gift) {
-          result = { kind: "gift-not-draft" };
+          result = { kind: "gift-not-editable" };
           return;
+        }
+        if (gift.status === "published") {
+          // A gift published before the pointer existed has only the publication of its revision.
+          const publication = await database
+            .collection<{ assetIds: string[] }>(COLLECTIONS.giftPublications)
+            .findOne(
+              { giftId, revision: gift.publishedRevision ?? gift.revision },
+              { projection: { _id: 0, assetIds: 1 }, session },
+            );
+          if (publication?.assetIds.includes(assetId)) {
+            // Recipients still see it: keep the objects, leave the working copy and its quotas.
+            const detached = await database
+              .collection<MediaAssetDocument>(COLLECTIONS.assets)
+              .updateOne(
+                { _id: assetId, detachedAt: null, giftId, status: "ready" },
+                { $set: { detachedAt: now, fieldSlot: null, giftSlot: null, updatedAt: now } },
+                { session },
+              );
+            result =
+              detached.modifiedCount === 1 ? { kind: "detached" } : { kind: "asset-unavailable" };
+            return;
+          }
         }
         const document = await database
           .collection<MediaAssetDocument>(COLLECTIONS.assets)
           .findOneAndUpdate(
-            { _id: assetId, giftId, status: { $ne: "deleted" } },
+            { _id: assetId, detachedAt: null, giftId, status: { $ne: "deleted" } },
             {
               $set: {
                 expiresAt: new Date(now.getTime() + 60_000),

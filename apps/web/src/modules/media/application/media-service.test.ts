@@ -65,6 +65,7 @@ function asset(status: MediaAsset["status"] = "initiated"): MediaAsset {
     declaredContentType: "image/jpeg",
     declaredSizeBytes: 3,
     derivatives: [],
+    detachedAt: null,
     expiresAt: new Date(now.getTime() + 600_000),
     failureCode: status === "failed" ? "PROCESSING_FAILED" : null,
     fieldId: "photos",
@@ -408,9 +409,9 @@ describe("media service", () => {
     expect(repository.markDeleting).toHaveBeenCalledWith(current.id, gift.id, now);
   });
 
-  it("answers 404 when the gift is published before the delete reaches the asset", async () => {
+  it("answers 404 when the gift leaves the editable statuses before the delete reaches the asset", async () => {
     current = asset("ready");
-    vi.mocked(repository.markDeleting).mockResolvedValueOnce({ kind: "gift-not-draft" });
+    vi.mocked(repository.markDeleting).mockResolvedValueOnce({ kind: "gift-not-editable" });
 
     await expect(
       service().deleteAsset({ accessors: [], assetId: current.id, giftPublicId: gift.publicId }),
@@ -433,8 +434,88 @@ describe("media service", () => {
     const published: Gift = {
       ...gift,
       publishedAt: now,
+      publishedRevision: 0,
       shareId: "Ab0_-cdefghijklmnopqrs",
       status: "published",
+    };
+    const readyDerivatives = [
+      {
+        contentType: "image/webp" as const,
+        height: 240,
+        key: "private/derivative.webp",
+        width: 320,
+      },
+    ];
+
+    beforeEach(() => {
+      current = { ...asset("ready"), derivatives: readyDerivatives };
+    });
+
+    it("lists, reads and uploads for the working copy as for a draft (Assets of a published gift)", async () => {
+      const media = service(true, published);
+      const single = { accessors: [], assetId: current!.id, giftPublicId: gift.publicId };
+
+      await expect(
+        media.listAssets({ accessors: [], giftPublicId: gift.publicId }),
+      ).resolves.toMatchObject({ data: [{ assetId: current!.id }], ok: true });
+      await expect(media.getAsset(single)).resolves.toMatchObject({ ok: true });
+      await expect(
+        media.initializeUpload({
+          accessors: [],
+          contentType: "image/jpeg",
+          fieldId: "memories",
+          giftPublicId: gift.publicId,
+          sizeBytes: 3,
+        }),
+      ).resolves.toMatchObject({ ok: true });
+    });
+
+    it("keeps a photo of the current publication (Photo of the current publication detached)", async () => {
+      vi.mocked(repository.markDeleting).mockResolvedValueOnce({ kind: "detached" });
+
+      await expect(
+        service(true, published).deleteAsset({
+          accessors: [],
+          assetId: current!.id,
+          giftPublicId: gift.publicId,
+        }),
+      ).resolves.toEqual({ data: { assetId: current!.id, deleted: false }, ok: true });
+      expect(storage.deleteObject).not.toHaveBeenCalled();
+      expect(repository.markDeleted).not.toHaveBeenCalled();
+    });
+
+    it("deletes a photo added after publishing (Photo added after publishing)", async () => {
+      await expect(
+        service(true, published).deleteAsset({
+          accessors: [],
+          assetId: current!.id,
+          giftPublicId: gift.publicId,
+        }),
+      ).resolves.toEqual({ data: { assetId: current!.id, deleted: true }, ok: true });
+      expect(storage.deleteObject).toHaveBeenCalled();
+    });
+
+    it("answers 404 for every operation on a detached photo", async () => {
+      current = { ...current!, detachedAt: now, fieldSlot: null, giftSlot: null };
+      const media = service(true, published);
+      const single = { accessors: [], assetId: current.id, giftPublicId: gift.publicId };
+      const notFound = { error: { code: "NOT_FOUND" }, ok: false };
+
+      await expect(media.getAsset(single)).resolves.toEqual(notFound);
+      await expect(media.deleteAsset(single)).resolves.toEqual(notFound);
+      await expect(media.retryAsset(single)).resolves.toEqual(notFound);
+      await expect(media.completeUpload(single)).resolves.toEqual(notFound);
+      expect(repository.markDeleting).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("a gift in another status", () => {
+    const paused: Gift = {
+      ...gift,
+      publishedAt: now,
+      publishedRevision: 0,
+      shareId: "Ab0_-cdefghijklmnopqrs",
+      status: "paused",
     };
 
     beforeEach(() => {
@@ -446,8 +527,8 @@ describe("media service", () => {
       };
     });
 
-    it("answers 404 to list, read, delete, retry and completion without signing a URL", async () => {
-      const media = service(true, published);
+    it("answers 404 to list, read, delete, retry and completion without signing a URL (Gift in another status)", async () => {
+      const media = service(true, paused);
       const single = { accessors: [], assetId: current!.id, giftPublicId: gift.publicId };
       const notFound = { error: { code: "NOT_FOUND" }, ok: false };
 
@@ -467,9 +548,9 @@ describe("media service", () => {
       expect(repository.markUploadedAndEnqueue).not.toHaveBeenCalled();
     });
 
-    it("answers 404 to a new upload", async () => {
+    it("answers 404 to a new upload (Gift that is not a draft)", async () => {
       await expect(
-        service(true, published).initializeUpload({
+        service(true, paused).initializeUpload({
           accessors: [],
           contentType: "image/jpeg",
           fieldId: "photos",

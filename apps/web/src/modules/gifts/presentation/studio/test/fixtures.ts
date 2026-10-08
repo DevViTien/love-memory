@@ -100,6 +100,7 @@ export function draftGift(
     createdAt: "2026-10-01T00:00:00.000Z",
     ownerKind: "anonymous",
     publicId: "q1w2e3r4t5y6u7i8",
+    publication: null,
     revision: 0,
     status: "draft",
     templateId: "memory-box",

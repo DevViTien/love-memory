@@ -134,7 +134,9 @@ describe("Xuất bản step: availability", () => {
     expect(publishButton().disabled).toBe(false);
     expect(publishStep().queryByRole("button", { name: "Lưu bản nháp vào tài khoản" })).toBeNull();
     expect(
-      publishStep().getByText("Sau khi xuất bản, bạn không thể chỉnh sửa món quà này."),
+      publishStep().getByText(
+        "Sau khi xuất bản, bạn vẫn có thể chỉnh sửa và cập nhật món quà tại cùng đường dẫn.",
+      ),
     ).toBeTruthy();
   });
 
@@ -168,7 +170,7 @@ describe("Xuất bản step: confirmation", () => {
     expect(document.activeElement).toBe(heading);
     expect(
       publishStep().getByText(
-        "Sau khi xuất bản, bạn chưa thể chỉnh sửa hay thu hồi món quà. Ai có đường dẫn đều mở được món quà.",
+        "Ai có đường dẫn đều mở được món quà. Bạn có thể chỉnh sửa và cập nhật sau, nhưng chưa thể thu hồi đường dẫn.",
       ),
     ).toBeTruthy();
     expect(publishPosts(fetchMock)).toHaveLength(0);
@@ -346,13 +348,21 @@ describe("Xuất bản step: publishing", () => {
     respond(published(0));
     expect(await screen.findByRole("heading", { name: "Đã xuất bản" })).toBeTruthy();
     expect(publishPosts(fetchMock)).toHaveLength(1);
+    // The editor stays and is editable again: the owner keeps editing the working copy.
+    expect(
+      screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Lá thư", hidden: true }).disabled,
+    ).toBe(false);
   });
 
-  it("reloads when the gift was published elsewhere (Gift published in another tab)", async () => {
-    stubStudioFetch({
-      assets: readyAssets,
-      publish: () => jsonResponse(apiError("CONFLICT"), 409),
-    });
+  it.each([
+    ["without details", () => jsonResponse(apiError("CONFLICT"), 409)],
+    [
+      "with NO_UNPUBLISHED_CHANGES",
+      () =>
+        jsonResponse(apiError("CONFLICT", { details: { reason: "NO_UNPUBLISHED_CHANGES" } }), 409),
+    ],
+  ])("reloads for a 409 %s (Gift published in another tab)", async (_name, publish) => {
+    stubStudioFetch({ assets: readyAssets, publish });
     const user = userEvent.setup();
     await openReadyPublishStep();
 
@@ -480,6 +490,169 @@ describe("Xuất bản step: publishing", () => {
   });
 });
 
+describe("Cập nhật món quà step: a published gift", () => {
+  const publication = {
+    publishedAt: "2026-10-01T08:00:00.000Z",
+    revision: 0,
+    shareId,
+    sharePath: `/g/${shareId}`,
+  };
+  const publishedOwner: RenderEditorOptions = { ...owner, publication };
+
+  function updateButton() {
+    return publishStep().getByRole<HTMLButtonElement>("button", { name: "Cập nhật món quà" });
+  }
+
+  function confirmUpdateButton() {
+    return publishStep().getByRole<HTMLButtonElement>("button", {
+      name: /Xác nhận cập nhật|Đang cập nhật…/,
+    });
+  }
+
+  async function editLetter(user: UserEvent) {
+    await user.click(screen.getByRole("button", { name: /^4\. Lá thư/ }));
+    await user.type(screen.getByRole("textbox", { name: "Lá thư" }), " Thật nhiều.");
+    await user.click(screen.getByRole("button", { name: /^7\. Xuất bản/ }));
+  }
+
+  it("shows the panel above the editor and nothing to update (Nothing to update)", async () => {
+    stubStudioFetch({ assets: readyAssets, publication });
+    await openReadyPublishStep(publishedOwner);
+
+    expect(screen.getByRole("heading", { name: "Đã xuất bản" })).toBeTruthy();
+    expect(screen.getByText("Người nhận đang xem bản mới nhất.")).toBeTruthy();
+    expect(updateButton().disabled).toBe(true);
+    expect(
+      publishStep().getByText(
+        "Người nhận đang xem bản mới nhất. Hãy chỉnh sửa trước khi cập nhật.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("saves, updates that revision and shows the latest status (Owner updates a published gift)", async () => {
+    const fetchMock = stubStudioFetch({
+      assets: readyAssets,
+      publication,
+      publish: (init) => {
+        const body = JSON.parse(init.body as string) as { expectedRevision: number };
+        return published(body.expectedRevision);
+      },
+    });
+    const user = userEvent.setup();
+    setStudioUrl("?step=publish");
+    renderEditor(publishedOwner);
+    await screen.findAllByText("3/8 ảnh");
+
+    await editLetter(user);
+    expect(updateButton().disabled).toBe(false);
+    expect(
+      publishStep().getByText("Người nhận sẽ thấy nội dung mới tại đường dẫn hiện tại."),
+    ).toBeTruthy();
+    await user.click(updateButton());
+    expect(publishStep().getByRole("heading", { name: "Cập nhật món quà đã gửi?" })).toBeTruthy();
+    await user.click(confirmUpdateButton());
+
+    expect(await publishStep().findByText("Đã cập nhật món quà.")).toBeTruthy();
+    expect(screen.getByText("Người nhận đang xem bản mới nhất.")).toBeTruthy();
+    const [, init] = publishPosts(fetchMock)[0]!;
+    expect(JSON.parse(init?.body as string)).toEqual({ expectedRevision: 1 });
+    expect(updateButton().disabled).toBe(true);
+  });
+
+  it("shows unpublished changes in the panel after a save (Unpublished changes shown after a save)", async () => {
+    stubStudioFetch({ assets: readyAssets, publication });
+    const user = userEvent.setup();
+    setStudioUrl("?step=letter");
+    renderEditor(publishedOwner);
+    await screen.findAllByText("3/8 ảnh");
+
+    await user.type(screen.getByRole("textbox", { name: "Lá thư" }), "!");
+    await user.click(screen.getByRole("button", { name: "Lưu ngay" }));
+
+    expect(
+      await screen.findByText(
+        "Có thay đổi chưa cập nhật. Người nhận vẫn đang xem bản đã gửi trước đó.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("keeps the key for a retry and says the update failed (Update request fails)", async () => {
+    let attempt = 0;
+    const fetchMock = stubStudioFetch({
+      assets: readyAssets,
+      publication,
+      publish: () => {
+        attempt += 1;
+        if (attempt === 1) throw new TypeError("Failed to fetch");
+        return published(1);
+      },
+    });
+    const user = userEvent.setup();
+    setStudioUrl("?step=publish");
+    renderEditor(publishedOwner);
+    await screen.findAllByText("3/8 ảnh");
+
+    await editLetter(user);
+    await user.click(updateButton());
+    await user.click(confirmUpdateButton());
+    expect(await publishStep().findByText("Chưa cập nhật được — thử lại.")).toBeTruthy();
+    await user.click(updateButton());
+    await user.click(confirmUpdateButton());
+
+    expect(await publishStep().findByText("Đã cập nhật món quà.")).toBeTruthy();
+    const keys = publishPosts(fetchMock).map(([, init]) =>
+      new Headers(init?.headers).get("Idempotency-Key"),
+    );
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBe(keys[1]);
+  });
+
+  it("uses a new key for the update after a first publish (New key after a success)", async () => {
+    const fetchMock = stubStudioFetch({
+      assets: readyAssets,
+      publish: (init) => {
+        const body = JSON.parse(init.body as string) as { expectedRevision: number };
+        return published(body.expectedRevision);
+      },
+    });
+    const user = userEvent.setup();
+    await openReadyPublishStep();
+
+    await publishNow(user);
+    expect(await screen.findByRole("heading", { name: "Đã xuất bản" })).toBeTruthy();
+    await editLetter(user);
+    await user.click(updateButton());
+    await user.click(confirmUpdateButton());
+    expect(await publishStep().findByText("Đã cập nhật món quà.")).toBeTruthy();
+
+    const keys = publishPosts(fetchMock).map(([, init]) =>
+      new Headers(init?.headers).get("Idempotency-Key"),
+    );
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  it("sends no analytics event while a published gift is edited and updated (Editing a published gift)", async () => {
+    window.sessionStorage.clear();
+    const fetchMock = stubStudioFetch({
+      assets: readyAssets,
+      publication,
+      publish: () => published(1),
+    });
+    const user = userEvent.setup();
+    setStudioUrl("?step=publish");
+    renderEditor({ ...publishedOwner, analytics: studioAnalytics });
+    await screen.findAllByText("3/8 ảnh");
+
+    await editLetter(user);
+    await user.click(updateButton());
+    await user.click(confirmUpdateButton());
+    expect(await publishStep().findByText("Đã cập nhật món quà.")).toBeTruthy();
+
+    expect(analyticsEventNames(fetchMock)).toEqual([]);
+  });
+});
+
 describe("Xuất bản step: funnel analytics", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
@@ -518,5 +691,31 @@ describe("Xuất bản step: funnel analytics", () => {
     expect(analyticsEventNames(fetchMock).filter((name) => name === "publish_clicked")).toEqual([
       "publish_clicked",
     ]);
+  });
+
+  it("sends nothing after the first publish in the same page", async () => {
+    const fetchMock = stubStudioFetch({
+      assets: readyAssets,
+      publish: (init) => {
+        const body = JSON.parse(init.body as string) as { expectedRevision: number };
+        return published(body.expectedRevision);
+      },
+    });
+    const user = userEvent.setup();
+    await openReadyPublishStep({ ...owner, analytics: studioAnalytics });
+
+    await publishNow(user);
+    expect(await screen.findByRole("heading", { name: "Đã xuất bản" })).toBeTruthy();
+    const before = analyticsEventNames(fetchMock).length;
+    await user.click(screen.getByRole("button", { name: /^4\. Lá thư/ }));
+    await user.type(screen.getByRole("textbox", { name: "Lá thư" }), "!");
+    await user.click(screen.getByRole("button", { name: "Lưu ngay" }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH").length,
+      ).toBeGreaterThan(0),
+    );
+
+    expect(analyticsEventNames(fetchMock)).toHaveLength(before);
   });
 });

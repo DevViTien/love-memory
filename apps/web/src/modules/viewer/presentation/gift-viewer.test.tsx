@@ -4,7 +4,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { type ViewerPayload } from "../application/viewer-payload";
-import { completeContent, viewerPayload } from "../test/viewer-fixtures";
+import { completeContent, FIXTURE_NOW, viewerPayload } from "../test/viewer-fixtures";
 import { GiftViewer } from "./gift-viewer";
 
 function staticViewer(overrides: Partial<ViewerPayload> = {}): ViewerPayload {
@@ -12,12 +12,17 @@ function staticViewer(overrides: Partial<ViewerPayload> = {}): ViewerPayload {
 }
 
 beforeEach(() => {
+  // The component reads the real clock; the fixture URLs expire 300 s after `FIXTURE_NOW`. Only
+  // `Date` is faked, so timers (and user events) still run in real time.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(FIXTURE_NOW);
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockReturnValue(undefined);
   vi.spyOn(HTMLMediaElement.prototype, "load").mockReturnValue(undefined);
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   vi.restoreAllMocks();
 });

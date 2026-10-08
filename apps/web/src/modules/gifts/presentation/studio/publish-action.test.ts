@@ -129,6 +129,14 @@ describe("requestPublish", () => {
     });
   });
 
+  it("maps a 409 with NO_UNPUBLISHED_CHANGES to a reload: published or updated elsewhere", async () => {
+    const fetchMock = stubFetch(
+      json(409, apiError("CONFLICT", { details: { reason: "NO_UNPUBLISHED_CHANGES" } })),
+    );
+
+    await expect(publish(fetchMock)).resolves.toEqual({ kind: "reload" });
+  });
+
   it("treats a 409 with unknown details or an unreadable body as a failure", async () => {
     await expect(
       publish(stubFetch(json(409, apiError("CONFLICT", { details: { reason: "OTHER" } })))),

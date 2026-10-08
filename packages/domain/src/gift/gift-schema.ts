@@ -76,6 +76,8 @@ export const GiftSchema = z
     ownership: GiftOwnershipSchema,
     publicId: PublicGiftIdSchema,
     publishedAt: z.coerce.date().optional(),
+    /** The revision of the current publication, the one recipients receive. */
+    publishedRevision: z.number().int().nonnegative().optional(),
     revision: z.number().int().nonnegative(),
     shareId: ShareIdSchema.optional(),
     status: GiftStatusSchema,
@@ -85,17 +87,26 @@ export const GiftSchema = z
   .superRefine((gift, context) => {
     const hasShareId = gift.shareId !== undefined;
     const hasPublishedAt = gift.publishedAt !== undefined;
+    const hasPublishedRevision = gift.publishedRevision !== undefined;
     // Other statuses stay unconstrained until pause, expiry and deletion are specified.
-    if (gift.status === "published" && (!hasShareId || !hasPublishedAt)) {
+    if (gift.status === "published" && (!hasShareId || !hasPublishedAt || !hasPublishedRevision)) {
       context.addIssue({
         code: "custom",
-        message: "A published gift requires a share id and a publication time.",
+        message: "A published gift requires a share id, a publication time and revision.",
       });
     }
-    if (gift.status === "draft" && (hasShareId || hasPublishedAt)) {
+    // The working copy only moves forward from the publication it started from.
+    if (hasPublishedRevision && gift.publishedRevision! > gift.revision) {
       context.addIssue({
         code: "custom",
-        message: "A draft has no share id and no publication time.",
+        message: "The published revision cannot be newer than the gift's revision.",
+        path: ["publishedRevision"],
+      });
+    }
+    if (gift.status === "draft" && (hasShareId || hasPublishedAt || hasPublishedRevision)) {
+      context.addIssue({
+        code: "custom",
+        message: "A draft has no share id, no publication time and no published revision.",
       });
     }
   });

@@ -1,5 +1,6 @@
 import {
   type AnalyticsContext,
+  type GiftPublicationSummary,
   type LicensedAudioTrackDto,
   type MediaAssetDto,
 } from "@love-memory/contracts";
@@ -29,6 +30,8 @@ type StudioFetchOptions = Readonly<{
   patch?: (body: PatchBody, init: RequestInit) => Response | Promise<Response>;
   preview?: (init: RequestInit) => Response | Promise<Response>;
   publish?: (init: RequestInit) => Response | Promise<Response>;
+  /** A published gift: the default save answers with its working copy and this publication. */
+  publication?: GiftPublicationSummary;
 }>;
 
 export function readyAsset(assetId: string, fieldId = "memories"): MediaAssetDto {
@@ -68,7 +71,12 @@ export function stubStudioFetch(options: StudioFetchOptions = {}) {
         options.patch?.(body, init) ??
           jsonResponse({
             data: {
-              gift: draftGift(body.content, { revision: body.expectedRevision + 1 }),
+              gift: draftGift(body.content, {
+                ...(options.publication
+                  ? { ownerKind: "user", publication: options.publication, status: "published" }
+                  : {}),
+                revision: body.expectedRevision + 1,
+              }),
             },
           }),
       );
@@ -114,6 +122,8 @@ export type RenderEditorOptions = Readonly<{
   ownerKind?: "anonymous" | "user";
   publishable?: boolean;
   publishEnabled?: boolean;
+  /** Renders a published gift whose working copy the editor edits. */
+  publication?: GiftPublicationSummary;
   revision?: number;
   signedIn?: boolean;
 }>;
@@ -125,6 +135,9 @@ export function editorElement(options: RenderEditorOptions = {}) {
       audioTracks={options.audioTracks ?? [track]}
       gift={draftGift(options.content ?? {}, {
         ownerKind: options.ownerKind ?? "anonymous",
+        ...(options.publication
+          ? { publication: options.publication, status: "published" as const }
+          : {}),
         revision: options.revision ?? 0,
       })}
       manifest={options.manifest ?? steppedManifest}

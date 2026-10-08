@@ -1,6 +1,7 @@
 import { failure, type Result, success } from "@love-memory/shared";
 
 import { GiftSchema, type Gift, type GiftContentSnapshot } from "./gift-schema";
+import { isEditableGiftStatus } from "./gift-status";
 
 export type GiftDraftError = Readonly<
   | { code: "GIFT_NOT_DRAFT" }
@@ -37,6 +38,10 @@ export function createGiftDraft(
   });
 }
 
+/**
+ * Saves the editable content: a draft's, or the working copy of a published gift. A published
+ * gift keeps its current publication; only a later publish makes the new revision visible.
+ */
 export function updateGiftDraft(
   gift: Gift,
   input: Readonly<{
@@ -45,7 +50,7 @@ export function updateGiftDraft(
     now: Date;
   }>,
 ): Result<Gift, GiftDraftError> {
-  if (gift.status !== "draft") {
+  if (!isEditableGiftStatus(gift.status)) {
     return failure({ code: "GIFT_NOT_DRAFT" });
   }
 

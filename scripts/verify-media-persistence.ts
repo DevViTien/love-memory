@@ -36,6 +36,7 @@ function newAsset(): MediaAsset {
     declaredContentType: "image/jpeg",
     declaredSizeBytes: 3,
     derivatives: [],
+    detachedAt: null,
     expiresAt: at(10),
     failureCode: null,
     fieldId: "photos",

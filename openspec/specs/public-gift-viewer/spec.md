@@ -20,15 +20,18 @@ holds:
 - it is not exactly 22 base64url characters (then without any database access);
 - no gift has that `shareId`;
 - the gift is not `published`, or its access policy is not `unlisted`;
-- the gift's publication record or its template version can no longer be read.
+- the gift's current publication record, the one whose revision equals the gift's
+  `publishedRevision`, or its template version can no longer be read.
 
 The page SHALL answer every not-found case with HTTP status `404`; the liveness check runs before
 any part of the response is streamed, so a missing gift is never answered `200`.
 
 The gift lookup SHALL filter by the share id (as an exact string), the `published` status and the
 `unlisted` access mode inside the database query, and SHALL be served by the unique share id
-index. Access policies other than `unlisted` fail closed until they are specified. The page and the
-payload endpoint SHALL apply the same liveness check, including the publication record and the
+index. The current publication SHALL be read by the gift's id and `publishedRevision`, and its
+share id SHALL equal the gift's. Superseded publications of the gift MUST NOT be served. Access
+policies other than `unlisted` fail closed until they are specified. The page and the payload
+endpoint SHALL apply the same liveness check, including the current publication record and the
 template version, so that they never disagree on whether a share link exists.
 
 #### Scenario: Anonymous recipient
@@ -59,9 +62,10 @@ template version, so that they never disagree on whether a share link exists.
 
 #### Scenario: Missing publication record
 
-- **WHEN** a `published` gift has a `shareId` but no matching publication record
+- **WHEN** a `published` gift has a `shareId` but no publication record for its
+  `publishedRevision`
 - **THEN** the page renders the not-found page and the payload endpoint answers `404`, never an
-  envelope that cannot be opened
+  envelope that cannot be opened, and never an older publication
 
 ### Requirement: Public gift page
 
@@ -119,11 +123,12 @@ The system SHALL answer `GET /api/public-gifts/{shareId}` for a live share link 
 `fields`. It MUST NOT include `issues`. The value SHALL be the output of the viewer payload
 transformation of `viewer-payload`, built at request time from:
 
-- the manifest of the publication's `templateId` and `templateVersion`;
-- the publication's stored content, not the gift's current fields;
-- the gift's asset records, so only `ready` assets of the gift and field get signed URLs;
+- the manifest of the current publication's `templateId` and `templateVersion`;
+- the current publication's stored content, not the gift's working copy;
+- the gift's asset records, so only `ready` assets of the gift and field that the current
+  publication references get signed URLs, including assets detached from the working copy;
 - the audio catalog;
-- the publication's `artifactContentHash` as the expected `contentHash`.
+- the current publication's `artifactContentHash` as the expected `contentHash`.
 
 When the registered artifact no longer matches that hash, `artifactUrl` SHALL be `null`, and the
 gift viewer shows the static rendering. The response SHALL use the standard envelope of
@@ -137,7 +142,7 @@ URLs.
 
 - **WHEN** a published `memory-box` `1.1.0` gift is requested
 - **THEN** the response is `200`, `data.viewer.artifactUrl` is the artifact of `1.1.0` with the
-  stored `artifactContentHash`, `data.viewer.payload` equals the publication's content,
+  stored `artifactContentHash`, `data.viewer.payload` equals the current publication's content,
   `data.viewer.assets` maps each photo's asset id to a signed URL, and there is no `issues` key
 
 #### Scenario: Same as the preview
@@ -145,6 +150,22 @@ URLs.
 - **WHEN** a draft is previewed and then published without further edits
 - **THEN** the public `payload`, `fields`, `artifactUrl`, `audioUrl` and the set of `assets` keys
   equal those of the preview built for the same revision
+
+#### Scenario: Working copy is not served
+
+- **WHEN** the owner of a gift published at revision `7` has saved its working copy at revision
+  `10`
+- **THEN** `data.viewer.payload` equals the content of the publication of revision `7`
+
+#### Scenario: Updated gift
+
+- **WHEN** a gift published at revision `7` is updated to revision `10`
+- **THEN** the next request returns the content and asset URLs of the publication of revision `10`
+
+#### Scenario: Detached photo still signed
+
+- **WHEN** a photo of the current publication was detached from the working copy
+- **THEN** `data.viewer.assets` still maps that photo's asset id to a signed URL
 
 #### Scenario: Artifact bytes changed
 

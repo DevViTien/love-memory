@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { createGiftPublication, publishGiftDraft } from "./gift-publication";
+import { updateGiftDraft } from "./gift-draft";
+import { createGiftPublication, publishGiftDraft, republishGift } from "./gift-publication";
 import { GiftSchema, type Gift } from "./gift-schema";
 
 const created = new Date("2026-09-16T00:00:00.000Z");
@@ -41,6 +42,7 @@ describe("publishGiftDraft", () => {
 
     expect(gift).toMatchObject({
       publishedAt: now,
+      publishedRevision: 7,
       revision: 7,
       shareId,
       status: "published",
@@ -75,6 +77,81 @@ describe("publishGiftDraft", () => {
     expect(publishGiftDraft(anonymous, { expectedRevision: 7, now, shareId })).toEqual({
       error: { code: "GIFT_NOT_OWNED" },
       ok: false,
+    });
+  });
+});
+
+const later = new Date("2026-10-02T09:00:00.000Z");
+
+/** A gift published at revision 7 whose working copy was saved twice, to revision 9. */
+function edited(): Gift {
+  let gift = published();
+  for (const revision of [7, 8]) {
+    const saved = updateGiftDraft(gift, {
+      content: { ...gift.content, data: { "receiver-name": `Minh Thư ${revision}` } },
+      expectedRevision: revision,
+      now,
+    });
+    if (!saved.ok) throw new Error("Expected the working copy to save.");
+    gift = saved.data;
+  }
+  return gift;
+}
+
+describe("republishGift", () => {
+  it("publishes a newer revision under the same share id", () => {
+    const result = republishGift(edited(), { expectedRevision: 9, now: later });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toMatchObject({
+      publishedAt: later,
+      publishedRevision: 9,
+      revision: 9,
+      shareId,
+      status: "published",
+      updatedAt: later,
+    });
+  });
+
+  it("refuses a draft", () => {
+    expect(republishGift(draft(), { expectedRevision: 7, now: later })).toEqual({
+      error: { code: "GIFT_NOT_PUBLISHED" },
+      ok: false,
+    });
+  });
+
+  it("refuses a stale revision", () => {
+    expect(republishGift(edited(), { expectedRevision: 8, now: later })).toEqual({
+      error: { actualRevision: 9, code: "GIFT_REVISION_CONFLICT", expectedRevision: 8 },
+      ok: false,
+    });
+  });
+
+  it("refuses a revision that is already the current publication", () => {
+    expect(republishGift(published(), { expectedRevision: 7, now: later })).toEqual({
+      error: { code: "GIFT_NO_UNPUBLISHED_CHANGES" },
+      ok: false,
+    });
+  });
+
+  it("snapshots the new revision with the gift's share id", () => {
+    const result = republishGift(edited(), { expectedRevision: 9, now: later });
+    if (!result.ok) throw new Error("Expected a republished gift.");
+
+    const publication = createGiftPublication({
+      artifactContentHash: hash,
+      assetIds: [],
+      audioTrackId: null,
+      gift: result.data,
+      id: publicationId,
+    });
+
+    expect(publication).toMatchObject({
+      content: { "receiver-name": "Minh Thư 8" },
+      publishedAt: later,
+      revision: 9,
+      shareId,
     });
   });
 });

@@ -37,7 +37,9 @@ function publishedGift(overrides: Partial<Gift> = {}): Gift {
     ownership: { anonymousDraftId: null, claimTokenHash: null, ownerId: "owner-1" },
     publicId: "q1w2e3r4t5y6u7i8",
     publishedAt,
-    revision: 7,
+    publishedRevision: 7,
+    // The working copy is ahead of the current publication.
+    revision: 10,
     shareId,
     status: "published",
     updatedAt: publishedAt,
@@ -77,6 +79,11 @@ function recipientSample(): ViewerPayloadDto {
 describe("public gift service", () => {
   let gift: Gift | null;
   let publication: GiftPublication | null;
+  /** Earlier publications of the gift, kept but never served. */
+  let superseded: GiftPublication[];
+  let findByGiftRevision: ReturnType<
+    typeof vi.fn<PublicGiftServiceDependencies["publications"]["findByGiftRevision"]>
+  >;
   let registeredHash: string;
   let manifestAvailable: boolean;
   let dependencies: PublicGiftServiceDependencies;
@@ -87,6 +94,17 @@ describe("public gift service", () => {
   beforeEach(() => {
     gift = publishedGift();
     publication = snapshot();
+    superseded = [];
+    findByGiftRevision = vi.fn((requestedGiftId: string, revision: number) =>
+      Promise.resolve(
+        [...superseded, ...(publication ? [publication] : [])].find(
+          (candidate) =>
+            candidate.revision === revision &&
+            // The fake keeps a publication of another gift reachable, to test the guard.
+            (candidate.giftId === requestedGiftId || candidate === publication),
+        ) ?? null,
+      ),
+    );
     registeredHash = contentHash;
     manifestAvailable = true;
     findPublishedByShareId = vi.fn(() => Promise.resolve(gift));
@@ -108,7 +126,7 @@ describe("public gift service", () => {
           id === "memory-box" && version === "1.1.0" ? { contentHash: registeredHash } : null,
         signDownloadUrl: (key) => Promise.resolve(`https://blob.example/${key}?sig=1`),
       },
-      publications: { findByShareId: () => Promise.resolve(publication) },
+      publications: { findByGiftRevision },
       templates: {
         findEditableManifest: (templateId, version) =>
           Promise.resolve(
@@ -132,6 +150,48 @@ describe("public gift service", () => {
     expect(viewer?.audioUrl).toBe(activeTrack.url);
     expect(viewer).not.toHaveProperty("issues");
     expect(ViewerPayloadDtoSchema.safeParse(viewer).success).toBe(true);
+  });
+
+  it("serves the current publication, never the working copy (Working copy is not served)", async () => {
+    await createPublicGiftService(dependencies).openPublicGift(shareId);
+
+    expect(findByGiftRevision).toHaveBeenCalledWith(giftId, 7);
+  });
+
+  it("serves the newer publication after an update (Updated gift)", async () => {
+    superseded = [snapshot()];
+    publication = snapshot({
+      content: { ...completeContent(), "final-letter": "Thư đã sửa" },
+      id: "1f8fad5b-d9cb-469f-a165-70867728950e",
+      revision: 10,
+    });
+    gift = publishedGift({ publishedRevision: 10 });
+
+    const viewer = await createPublicGiftService(dependencies).openPublicGift(shareId);
+
+    expect(viewer?.payload).toMatchObject({ "final-letter": "Thư đã sửa" });
+    expect(findByGiftRevision).toHaveBeenCalledWith(giftId, 10);
+  });
+
+  it("still signs a photo detached from the working copy (Detached photo still signed)", async () => {
+    const detachedAt = new Date("2026-10-02T00:00:00.000Z");
+    dependencies = {
+      ...dependencies,
+      assets: {
+        listByIdsForGift: (_giftId, ids) =>
+          Promise.resolve(
+            ids.map((id, index) =>
+              index === 0
+                ? mediaAsset(id, { detachedAt, fieldSlot: null, giftSlot: null })
+                : mediaAsset(id),
+            ),
+          ),
+      },
+    };
+
+    const viewer = await createPublicGiftService(dependencies).openPublicGift(shareId);
+
+    expect(Object.keys(viewer?.assets ?? {})).toContain(assetIds[0]);
   });
 
   it("reads exactly the snapshot's asset ids for the gift", async () => {
@@ -179,6 +239,21 @@ describe("public gift service", () => {
     ],
     ["a gift whose share id differs", () => (gift = publishedGift({ shareId: "Z".repeat(22) }))],
     ["a missing publication record (Missing publication record)", () => (publication = null)],
+    [
+      "no publication for the pointer while an older one exists",
+      () => {
+        superseded = [snapshot({ revision: 5 })];
+        publication = null;
+      },
+    ],
+    [
+      "a publication with another share id",
+      () => (publication = snapshot({ shareId: "Y".repeat(22) })),
+    ],
+    [
+      "a published gift without a pointer",
+      () => (gift = publishedGift({ publishedRevision: undefined })),
+    ],
     [
       "a publication of another gift",
       () => (publication = snapshot({ giftId: "9b2f3c1e-0d7a-4a55-9c1b-2f0e6a7d8c90" })),

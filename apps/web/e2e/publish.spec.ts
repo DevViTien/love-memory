@@ -29,7 +29,7 @@ import {
   waitForHydration,
 } from "./support/gift-journey";
 import { assignOwnAuthClientAddress, expect, test } from "./test";
-import { captureViewerScreenshot } from "./viewer-harness";
+import { captureViewerScreenshot, pressTemplateNext } from "./viewer-harness";
 
 // Requires the earlier Sprint 3 changes: memory-box@1.1.0, the step-based Studio, local object
 // storage (STORAGE_DRIVER=local on the Playwright web server) and the preview. The web server also
@@ -237,7 +237,7 @@ async function playScenes(
     await onScene(current);
     if (current === "finale") break;
     const previous = current;
-    await frame.getByRole("button", { name: "Tiếp" }).click();
+    await pressTemplateNext(frame);
     await expect.poll(() => currentSceneId(frame)).not.toBe(previous);
     current = await currentSceneId(frame);
   }
@@ -403,8 +403,11 @@ async function runPublishJourney(page: Page, testInfo: TestInfo, journey: Journe
   const requestBody = request.postData() ?? "";
   expect(idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
   await expect(page.getByRole("heading", { name: "Đã xuất bản" })).toBeVisible();
-  // The refreshed page shows the published gift alone: no draft ownership aside or claim action.
-  await expect(page.getByText("Quyền sở hữu")).toHaveCount(0);
+  // The refreshed page shows the published panel above the editor of the working copy.
+  await expect(
+    page.getByText("Món quà đã được bảo vệ bởi tài khoản của bạn. Chỉ bạn sửa được nội dung."),
+  ).toBeVisible();
+  await expect(page.getByText("Người nhận đang xem bản mới nhất.", { exact: true })).toBeVisible();
   const shareField = page.getByRole("textbox", { name: "Đường dẫn món quà" });
   await expect(shareField).toHaveValue(/\/g\/[A-Za-z0-9_-]{22}$/);
   const shareUrl = await shareField.inputValue();
@@ -463,16 +466,20 @@ async function runPublishJourney(page: Page, testInfo: TestInfo, journey: Journe
   const settled = await readAnalyticsEvents(giftRef);
   expect(settled.filter((event) => event.name === "gift_published")).toHaveLength(1);
 
-  // 7. Draft access has ended: no draft read and no photo deletion.
+  // 7. The owner keeps editing the working copy; a photo of the publication is only detached.
   const draftRead = await ownerFetch(page, { method: "GET", path: `/api/gifts/${publicId}` });
-  expect(draftRead.status).toBe(404);
+  expect(draftRead.status).toBe(200);
+  expect(draftRead.body).toMatchObject({
+    data: { gift: { publication: { revision: expectedRevision, shareId }, status: "published" } },
+  });
   const photoDelete = await ownerFetch(page, {
     body: JSON.stringify({ giftPublicId: publicId }),
     headers: { "Content-Type": "application/json" },
     method: "DELETE",
     path: `/api/media/assets/${assetIds[0]}`,
   });
-  expect(photoDelete.status).toBe(404);
+  expect(photoDelete.status).toBe(200);
+  expect(photoDelete.body).toMatchObject({ data: { assetId: assetIds[0], deleted: false } });
 
   // 8. A recipient without cookies: protected headers, generic title, no content before the tap.
   const recipient = await recipientContext(page);

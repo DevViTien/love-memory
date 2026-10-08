@@ -145,10 +145,10 @@ A creator previews a draft at `/preview/{token}` before publishing. Behavior is 
   scope `gift-preview`: 30 per 600 s) returns `/preview/{token}`. The token is 32 random bytes in
   base64url, a read-only bearer capability for one draft. Only its SHA-256 hash is stored, in
   `previewTokens` with a TTL index; expiry (30 minutes) is enforced in the lookup filter, and the
-  gift is read only while it is a `draft`. Links cannot be revoked before they expire; leaving
-  `draft` ends them. Tokens are not deleted then, so if a gift returns to `draft` (a failed
-  publish), its unexpired links become valid again. The token never unlocks the draft API, media
-  or the Studio.
+  gift is read only while its content is editable (`draft`, or the working copy of a `published`
+  gift). Links cannot be revoked before they expire; any other status ends them. Tokens are not
+  deleted then, so if a gift returns to an editable status, its unexpired links become valid again.
+  The token never unlocks the draft API, media or the Studio.
 - **Private route.** `/preview/` is a nonce CSP route whose layout calls `connection()`
   ([ADR-0005](./adr/0005-route-specific-csp.md)). `next.config.ts` adds `Referrer-Policy:
 no-referrer`, `X-Robots-Tag: noindex` and `Cache-Control: private, no-store`, and the development
@@ -189,32 +189,54 @@ unaffected, and leftover preview tokens expire through their TTL index.
 
 ## Publishing and the public Viewer
 
-A signed-in owner publishes a draft once, and a recipient opens it at `/g/{shareId}` without an
-account. Behavior is specified in `openspec/specs/gift-publishing` and `public-gift-viewer`.
+A signed-in owner publishes a draft, keeps editing it and publishes newer revisions, and a recipient
+opens it at `/g/{shareId}` without an account. Behavior is specified in
+`openspec/specs/gift-publishing` and `public-gift-viewer`.
+
+- **Working copy and current publication.** A published gift keeps `content` and `revision` as its
+  working copy, edited through the same draft API, autosave, preview and media routes as a draft.
+  `publishedRevision` points at the current publication, the `giftPublications` record
+  `{ giftId, revision }` that recipients receive (found through
+  `gift_publications_gift_revision_unique`). The gift has unpublished changes exactly when
+  `revision > publishedRevision`. Publishing again inserts a new record with the same `shareId` and
+  moves the pointer in the same transaction, so recipients see the old publication or the new one,
+  never a mix. Superseded records are kept and never served.
 
 - **Publish checks.** `POST /api/gifts/{publicId}/publish` takes an `Idempotency-Key` and
   `{ expectedRevision }`. `giftService.publishGift` finds the gift with the owner filter only (the
   anonymous cookie and preview tokens never authorize it), then checks the entitlement, replays a
-  stored key, and requires status `draft`, the expected revision, access mode `unlisted`, an
-  editable version with a registered artifact, and no content issue. Content issues come from
+  stored key (looked up by `{ giftId, revision }`), and requires status `draft` or `published`, the
+  expected revision, for a published gift a revision newer than its current publication
+  (`NO_UNPUBLISHED_CHANGES` otherwise), access mode `unlisted`, an editable version with a
+  registered artifact, and no content issue. Content issues come from
   `collectContentIssues` (`modules/viewer/application/content-issues.ts`), the same function
   `buildViewerPayload` uses for the preview's server issues, so a revision whose preview lists no
   issue is exactly a publishable revision.
-- **One transaction.** `mongoGiftRepository.publishDraft` runs, in one MongoDB transaction: a
-  replay check of the `gift-publish` key; the conditional `draft → published` write filtered by
-  owner, status, access mode and revision (setting `shareId` and `publishedAt`, keeping the
-  revision); an `updateMany` with `$currentDate` on every referenced `ready` asset of the gift and
-  field, aborting when fewer match; the insert of the immutable `giftPublications` record; and the
-  idempotency record. A failed condition aborts through a private sentinel, so nothing is written.
-  The domain passes `draft → publishing → published` in memory; only the final state is stored.
+- **One transaction.** `mongoGiftRepository.publish` runs, in one MongoDB transaction: a replay
+  check of the `gift-publish` key; the conditional write to `published` filtered by owner, access
+  mode, revision and the state the checks saw (`draft`, or `published` with the same
+  `publishedRevision`), setting `publishedRevision` and `publishedAt` (and `shareId` on a first
+  publish only), keeping the revision; an `updateMany` with `$currentDate` on every referenced
+  `ready`, non-detached asset of the gift and field, aborting when fewer match; the insert of the
+  immutable `giftPublications` record; and the idempotency record. A failed condition aborts
+  through a private sentinel, so nothing is written. A duplicate `{ giftId, revision }` from a
+  concurrent update under another key answers `NO_UNPUBLISHED_CHANGES`. The domain passes
+  `draft → publishing → published` (or `published → publishing → published`) in memory; only the
+  final state is stored.
 - **Why publish writes the assets.** Transactions use snapshot isolation and detect only
-  write-write conflicts. Asset deletion moves an asset to `deleting` in a transaction that first
-  reads its gift with `status: "draft"`. Without a write of its own to the asset, a publish checking
-  "asset is ready" and a delete checking "gift is draft" could both commit (write skew). Because
-  both transactions write the same asset document (`$currentDate` always changes it, and the move
-  to `deleting` does too), one of them aborts with a write conflict and is retried by
-  `withTransaction`; the retry sees the committed state and refuses. A published gift can therefore
-  never reference a deleted photo, and every media route answers `404` for a non-draft gift.
+  write-write conflicts. Asset deletion reads its gift (editable status) and, for a published gift,
+  the current publication's `assetIds` in the same transaction as its asset write. Without a write
+  of its own to the asset, a publish checking "asset is ready" and a delete checking "no current
+  publication uses it" could both commit (write skew). Because both transactions write the same
+  asset document (`$currentDate` always changes it, and the delete's write does too), one of them
+  aborts with a write conflict and is retried by `withTransaction`; the retry sees the committed
+  state. The current publication can therefore never reference a deleted photo.
+- **Detach instead of delete.** Deleting a photo that the current publication references detaches
+  it from the working copy: it stays `ready` with its storage objects for recipients, its quota
+  slots are released (`giftSlot`/`fieldSlot` become `null`, `detachedAt` is set), and it disappears
+  from listings, reads, retries, deletions and save references. The `DELETE` answers `200` with
+  `deleted: false`. Detached photos and those referenced only by superseded publications stay in
+  storage until a cleanup job exists (risk register).
 - **Entitlement.** The application port `PublishEntitlement` is backed by
   `config/internal-publish.ts`: on only when `INTERNAL_PUBLISH_ENABLED` is exactly `true`, and
   always off when `VERCEL_ENV` is `production`. It is read per request and never throws. A
@@ -226,16 +248,18 @@ account. Behavior is specified in `openspec/specs/gift-publishing` and `public-g
   the publication's content and `expectedContentHash`, so a changed artifact gives
   `artifactUrl: null` and the static rendering instead of different code
   ([ADR-0004](./adr/0004-template-artifact-isolation.md)). The response drops `issues`.
-- **Share links are bearer secrets.** A share id is 16 random bytes in base64url, unique in `gifts`
-  and `giftPublications`. Page and endpoint share one liveness check (format, published and
-  `unlisted` gift found through `gifts_share_id_unique`, publication record, manifest) and answer
-  one opaque not-found. The application never logs share ids, payloads or signed URLs; `/g/` sends
+- **Share links are bearer secrets.** A share id is 16 random bytes in base64url, assigned at the
+  first publish and kept by every later publication of the gift, unique across `gifts`. Page and
+  endpoint share one liveness check (format, published and `unlisted` gift found through
+  `gifts_share_id_unique`, the current publication by `publishedRevision` with the same share id,
+  manifest) and answer one opaque not-found. The application never logs share ids, payloads or signed URLs; `/g/` sends
   `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex` and `Cache-Control: private, no-store`;
   the payload endpoint is `no-store`; the envelope is rendered without content, and the payload is
   fetched only on `Mở quà`. The residual risk is the hosting platform's request logs, which keep
   `/g/{shareId}` paths: who can read them, their retention and the log-drain rule are recorded in
   the [deployment runbook](./runbooks/preview-deploy-and-rollback.md#share-links-in-platform-logs).
-  Links cannot be revoked until Sprint 4 (plan.md §13.1–13.2).
+  Links cannot be revoked until the pause and delete work of Sprint 4 (plan.md §13.1–13.2); an
+  update changes what a link shows, never the link.
 - **Public read limits.** Each public read is charged to `public-gift-read` (network subject plus
   share id, 60 per 600 s) and `public-gift-read-ip` (network subject, 600 per 600 s). The subject
   is the trusted IPv4 address, or the `/64` prefix of an IPv6 address; sessions and cookies are
@@ -257,6 +281,16 @@ build's strict gift schema fails on published gifts: their Studio page and media
 test gifts, or first set `INTERNAL_PUBLISH_ENABLED=false` and move the published test gifts aside
 with a reviewed one-off script (see the
 [deployment runbook](./runbooks/preview-deploy-and-rollback.md#rolling-back-past-schema-version-8-published-gifts)).
+
+**Schema version 10 rollout and rollback.** The migration adds `publishedRevision` to the `gifts`
+validator and `detachedAt` to the `assets` validator, drops the legacy unique index
+`gift_publications_share_id_unique` (a gift's later publications share its share id), and
+backfills `publishedRevision = revision` on published gifts that predate it. Until it runs, the
+repository reads a published gift without a pointer as `publishedRevision = revision`, a save
+writes the pointer, and an update fails on the legacy index while recipients keep the first
+publication. The previous build's strict schemas fail on both new fields, so a rollback on `dev`
+or `stg` breaks published test gifts (see the
+[deployment runbook](./runbooks/preview-deploy-and-rollback.md#rolling-back-past-schema-version-10-editable-published-gifts)).
 The old `db:migrate` restores the version-7 validators and ledger and leaves the extra index in
 place; re-deploying version 8 restores access without data repair.
 

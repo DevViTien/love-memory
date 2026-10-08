@@ -877,6 +877,22 @@ describe("MediaImageListField failures and labels", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("removes a photo that the live publication keeps (deleted: false) without an error", async () => {
+    stubFetch(
+      (_url, init) =>
+        init?.method === "DELETE" ? jsonResponse({ data: { assetId, deleted: false } }) : undefined,
+      [asset("ready")],
+    );
+    const user = userEvent.setup();
+    const { onChange } = renderField({ initialAssetIds: [assetId] });
+
+    await user.click(await screen.findByRole("button", { name: "Xóa" }));
+
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith("photos", []));
+    expect(screen.getByText("0/3 ảnh")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("sends one DELETE for a double click (Double click on delete)", async () => {
     let answerDelete: (response: Response) => void = () => undefined;
     const fetchMock = stubFetch(

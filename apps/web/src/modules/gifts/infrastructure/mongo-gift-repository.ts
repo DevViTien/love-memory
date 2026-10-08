@@ -1,5 +1,10 @@
 import { COLLECTIONS, getDatabase, getMongoClient } from "@love-memory/database";
-import { GiftSchema, type Gift, type GiftRevision } from "@love-memory/domain";
+import {
+  EDITABLE_GIFT_STATUSES,
+  GiftSchema,
+  type Gift,
+  type GiftRevision,
+} from "@love-memory/domain";
 import { type ClientSession, type Db, type Filter, MongoServerError } from "mongodb";
 
 import {
@@ -8,6 +13,7 @@ import {
   type GiftCreatePersistenceResult,
   type GiftPublishIdempotency,
   type GiftPublishPersistenceResult,
+  type GiftPublishPrecondition,
   type GiftPublishReplay,
   type GiftRepository,
 } from "../application/gift-service";
@@ -59,7 +65,13 @@ function toDocument(gift: Gift): GiftDocument {
 
 function toDomain(document: GiftDocument): Gift {
   const { _id, ...gift } = document;
-  return GiftSchema.parse({ ...gift, id: _id });
+  // A gift published before editing after publish existed has no pointer until `db:migrate`
+  // backfills it; it could not be edited, so its revision is its only publication's.
+  const publishedRevision =
+    gift.status === "published" && gift.publishedRevision === undefined
+      ? gift.revision
+      : gift.publishedRevision;
+  return GiftSchema.parse({ ...gift, id: _id, publishedRevision });
 }
 
 function singleAccessFilter(accessor: GiftAccessor): Filter<GiftDocument> {
@@ -134,6 +146,7 @@ async function findPublishReplay(
   database: Db,
   idempotency: GiftPublishIdempotency,
   giftId: string,
+  revision: number,
   session?: ClientSession,
 ): Promise<GiftPublishReplay | null> {
   const options = session ? { session } : undefined;
@@ -149,12 +162,33 @@ async function findPublishReplay(
     return { status: "idempotency-conflict" };
   }
 
+  // By revision: a gift has one publication per revision, and the fingerprint matched, so the
+  // stored key named exactly this one (served by `gift_publications_gift_revision_unique`).
   const publication = await database
     .collection<GiftPublicationDocument>(COLLECTIONS.giftPublications)
-    .findOne({ giftId: record.giftId }, options);
+    .findOne({ giftId: record.giftId, revision }, options);
   return publication
     ? { publication: toPublicationDomain(publication), status: "replayed" }
     : { status: "idempotency-conflict" };
+}
+
+/** The gift write's condition: exactly the state the publish checks saw. */
+function publishPreconditionFilter(precondition: GiftPublishPrecondition): Filter<GiftDocument> {
+  if (precondition.status === "draft") return { status: "draft" };
+  return {
+    publishedRevision:
+      precondition.publishedRevision === undefined
+        ? { $exists: false }
+        : precondition.publishedRevision,
+    status: "published",
+  };
+}
+
+function isDuplicatePublicationRevision(error: unknown): boolean {
+  return (
+    isDuplicateKeyError(error) &&
+    (error as MongoServerError).message.includes("gift_publications_gift_revision_unique")
+  );
 }
 
 /** Thrown inside the publish transaction to abort it; never escapes the repository. */
@@ -259,12 +293,20 @@ export const mongoGiftRepository: GiftRepository = {
     return document ? toDomain(document) : null;
   },
 
-  async findPublishReplay(idempotency, giftId) {
+  async findPublishReplay(idempotency, giftId, revision) {
     const database = await getDatabase();
-    return findPublishReplay(database, idempotency, giftId);
+    return findPublishReplay(database, idempotency, giftId, revision);
   },
 
-  async publishDraft({ assetRefs, expectedRevision, gift, idempotency, ownerId, publication }) {
+  async publish({
+    assetRefs,
+    expectedRevision,
+    gift,
+    idempotency,
+    ownerId,
+    precondition,
+    publication,
+  }) {
     const database = await getDatabase();
     const client = await getMongoClient();
     let result: GiftPublishPersistenceResult | null = null;
@@ -279,7 +321,13 @@ export const mongoGiftRepository: GiftRepository = {
           // A retried callback must not keep the result of a rolled-back attempt.
           result = null;
           // A concurrent double click: the first commit wins, the other replays its record.
-          const replay = await findPublishReplay(database, idempotency, gift.id, session);
+          const replay = await findPublishReplay(
+            database,
+            idempotency,
+            gift.id,
+            expectedRevision,
+            session,
+          );
           if (replay) {
             result = replay;
             return;
@@ -289,16 +337,18 @@ export const mongoGiftRepository: GiftRepository = {
             .collection<GiftDocument>(COLLECTIONS.gifts)
             .findOneAndUpdate(
               {
+                ...publishPreconditionFilter(precondition),
                 _id: gift.id,
                 "access.mode": "unlisted",
                 "ownership.ownerId": ownerId,
                 revision: expectedRevision,
-                status: "draft",
               },
               {
                 $set: {
                   publishedAt: gift.publishedAt,
-                  shareId: gift.shareId,
+                  publishedRevision: gift.publishedRevision,
+                  // Set once by the first publish; an update keeps the recipient link.
+                  ...(precondition.status === "draft" ? { shareId: gift.shareId } : {}),
                   status: "published",
                   updatedAt: gift.updatedAt,
                 },
@@ -318,6 +368,8 @@ export const mongoGiftRepository: GiftRepository = {
                     _id: { $in: assetIds },
                     fieldId,
                   })),
+                  // `null` also matches assets stored before `detachedAt` existed.
+                  detachedAt: null,
                   giftId: gift.id,
                   status: "ready",
                 },
@@ -352,11 +404,13 @@ export const mongoGiftRepository: GiftRepository = {
     } catch (error) {
       if (error instanceof PublishAborted) return { status: error.outcome };
       if (!isDuplicateKeyError(error)) throw error;
-      // A concurrent request with the same key committed first. Anything else (such as a share
-      // id collision, about 2^-128 per pair) surfaces as an error.
-      const replay = await findPublishReplay(database, idempotency, gift.id);
-      if (!replay) throw error;
-      return replay;
+      // A concurrent request with the same key committed first.
+      const replay = await findPublishReplay(database, idempotency, gift.id, expectedRevision);
+      if (replay) return replay;
+      // Another key published this revision first. Anything else (such as a share id collision,
+      // about 2^-128 per pair) surfaces as an error.
+      if (isDuplicatePublicationRevision(error)) return { status: "revision-taken" };
+      throw error;
     }
 
     if (!result) {
@@ -365,11 +419,11 @@ export const mongoGiftRepository: GiftRepository = {
     return result;
   },
 
-  async findDraftById(giftId) {
+  async findEditableById(giftId) {
     const database = await getDatabase();
     const document = await database
       .collection<GiftDocument>(COLLECTIONS.gifts)
-      .findOne({ _id: giftId, status: "draft" });
+      .findOne({ _id: giftId, status: { $in: [...EDITABLE_GIFT_STATUSES] } });
 
     return document ? toDomain(document) : null;
   },
@@ -389,6 +443,8 @@ export const mongoGiftRepository: GiftRepository = {
             _id: { $in: [...assetIds] },
             fieldId,
           })),
+          // A photo detached from a published gift's working copy can no longer be referenced.
+          detachedAt: null,
           giftId,
           status: { $in: [...referenceableMediaStatuses] },
         },
@@ -411,10 +467,16 @@ export const mongoGiftRepository: GiftRepository = {
             ...accessFilter(accessors),
             _id: gift.id,
             revision: expectedRevision,
-            status: "draft",
+            status: { $in: [...EDITABLE_GIFT_STATUSES] },
           },
           {
-            $set: { content: gift.content, updatedAt: gift.updatedAt },
+            $set: {
+              content: gift.content,
+              // A published gift keeps pointing at its current publication; writing it also fixes
+              // the pointer of a gift published before `publishedRevision` existed.
+              ...(gift.status === "published" ? { publishedRevision: gift.publishedRevision } : {}),
+              updatedAt: gift.updatedAt,
+            },
             $inc: { revision: 1 },
           },
           { returnDocument: "after", session },

@@ -4,6 +4,7 @@ import {
   createGiftDraft,
   createGiftPublication,
   publishGiftDraft,
+  republishGift,
   updateGiftDraft,
 } from "@love-memory/domain";
 import { MongoServerError } from "mongodb";
@@ -32,8 +33,15 @@ function valueAtPath(document: StoredDocument, path: string): unknown {
   }, document);
 }
 
+/** Equality plus the `$in` operator the editable-status filters use. */
 function matches(document: StoredDocument, filter: Readonly<Record<string, unknown>>): boolean {
-  return Object.entries(filter).every(([key, value]) => valueAtPath(document, key) === value);
+  return Object.entries(filter).every(([key, value]) => {
+    const actual = valueAtPath(document, key);
+    if (typeof value === "object" && value !== null && "$in" in value) {
+      return (value as { $in: readonly unknown[] }).$in.includes(actual);
+    }
+    return actual === value;
+  });
 }
 
 class GiftCollection {
@@ -129,20 +137,56 @@ describe("Mongo gift repository", () => {
     });
   });
 
-  it("reads a gift by id only while it is a draft", async () => {
+  it("reads a gift by id only while its content is editable", async () => {
     const findOne = vi.spyOn(gifts, "findOne");
     await mongoGiftRepository.createDraft(draft, idempotency);
 
-    await expect(mongoGiftRepository.findDraftById(draft.id)).resolves.toMatchObject({
+    await expect(mongoGiftRepository.findEditableById(draft.id)).resolves.toMatchObject({
       id: draft.id,
       publicId: draft.publicId,
     });
-    expect(findOne).toHaveBeenLastCalledWith({ _id: draft.id, status: "draft" });
+    expect(findOne).toHaveBeenLastCalledWith({
+      _id: draft.id,
+      status: { $in: ["draft", "published"] },
+    });
 
-    gifts.documents[0]!["status"] = "published";
-    await expect(mongoGiftRepository.findDraftById(draft.id)).resolves.toBeNull();
-    await expect(mongoGiftRepository.findDraftById("missing")).resolves.toBeNull();
+    gifts.documents[0]!["status"] = "paused";
+    await expect(mongoGiftRepository.findEditableById(draft.id)).resolves.toBeNull();
+    await expect(mongoGiftRepository.findEditableById("missing")).resolves.toBeNull();
     findOne.mockRestore();
+  });
+
+  it("saves the working copy of a published gift and reads a legacy one with its pointer", async () => {
+    const owner = { kind: "user" as const, userId: "owner-1" };
+    gifts.documents.push({
+      _id: draft.id,
+      access: { mode: "unlisted" },
+      content: draft.content,
+      createdAt: draft.createdAt,
+      ownership: { anonymousDraftId: null, claimTokenHash: null, ownerId: "owner-1" },
+      publicId: draft.publicId,
+      publishedAt: draft.createdAt,
+      // Published before `publishedRevision` existed: no pointer until `db:migrate`.
+      revision: 0,
+      shareId: "Ab0_-cdefghijklmnopqrs",
+      status: "published",
+      updatedAt: draft.createdAt,
+    });
+
+    const legacy = await mongoGiftRepository.findAuthorized(draft.publicId, [owner]);
+    expect(legacy).toMatchObject({ publishedRevision: 0, revision: 0, status: "published" });
+
+    const updated = updateGiftDraft(legacy!, {
+      content: { ...draft.content, data: { headline: "Sửa sau khi gửi" } },
+      expectedRevision: 0,
+      now: new Date("2026-09-16T01:00:00.000Z"),
+    });
+    if (!updated.ok) throw new Error("Expected the working copy to save.");
+    await expect(mongoGiftRepository.updateDraft(updated.data, 0, [owner])).resolves.toMatchObject({
+      publishedRevision: 0,
+      revision: 1,
+      status: "published",
+    });
   });
 
   it("creates the initial immutable revision and enforces anonymous access", async () => {
@@ -340,8 +384,45 @@ describe("Mongo gift repository publishing", () => {
     gift: published,
     idempotency: publishIdempotency,
     ownerId,
+    precondition: { status: "draft" } as const,
     publication,
   };
+  const later = new Date("2026-10-02T09:00:00.000Z");
+  /** The same gift, its working copy saved to revision 2, published again. */
+  function updateInput(
+    precondition: Readonly<{ publishedRevision: number | undefined }> = { publishedRevision: 0 },
+  ) {
+    let gift = published;
+    for (const revision of [0, 1]) {
+      const saved = updateGiftDraft(gift, {
+        content: gift.content,
+        expectedRevision: revision,
+        now,
+      });
+      if (!saved.ok) throw new Error("Expected the working copy to save.");
+      gift = saved.data;
+    }
+    const republished = republishGift(gift, { expectedRevision: 2, now: later });
+    if (!republished.ok) throw new Error("Expected the update to be accepted.");
+    return {
+      ...input,
+      expectedRevision: 2,
+      gift: republished.data,
+      idempotency: {
+        ...publishIdempotency,
+        key: "5f1f2c6e-1e0b-4a5f-9a39-0d6c5f1f2c6e",
+        requestFingerprint: JSON.stringify(["publish", owned.publicId, 2]),
+      },
+      precondition: { ...precondition, status: "published" } as const,
+      publication: createGiftPublication({
+        artifactContentHash: "f".repeat(64),
+        assetIds: [assetA, assetB],
+        audioTrackId: null,
+        gift: republished.data,
+        id: "1f8fad5b-d9cb-469f-a165-70867728950e",
+      }),
+    };
+  }
 
   const collections = {
     assets: { updateMany: vi.fn() },
@@ -374,7 +455,7 @@ describe("Mongo gift repository publishing", () => {
   });
 
   it("publishes in one transaction with owner, status, access and revision filters", async () => {
-    await expect(mongoGiftRepository.publishDraft(input)).resolves.toEqual({
+    await expect(mongoGiftRepository.publish(input)).resolves.toEqual({
       publication,
       status: "published",
     });
@@ -387,7 +468,15 @@ describe("Mongo gift repository publishing", () => {
         revision: 0,
         status: "draft",
       },
-      { $set: { publishedAt: now, shareId, status: "published", updatedAt: now } },
+      {
+        $set: {
+          publishedAt: now,
+          publishedRevision: 0,
+          shareId,
+          status: "published",
+          updatedAt: now,
+        },
+      },
       expect.objectContaining({ returnDocument: "after", session: inSession }),
     );
     expect(collections.giftPublications.insertOne).toHaveBeenCalledWith(publicationDocument, {
@@ -410,11 +499,12 @@ describe("Mongo gift repository publishing", () => {
   });
 
   it("writes every referenced ready asset with $currentDate, never a no-op $set", async () => {
-    await mongoGiftRepository.publishDraft(input);
+    await mongoGiftRepository.publish(input);
 
     expect(collections.assets.updateMany).toHaveBeenCalledWith(
       {
         $or: [{ _id: { $in: [assetA, assetB] }, fieldId: "memories" }],
+        detachedAt: null,
         giftId: owned.id,
         status: "ready",
       },
@@ -426,7 +516,7 @@ describe("Mongo gift repository publishing", () => {
   });
 
   it("skips the asset write when the content references no image", async () => {
-    await mongoGiftRepository.publishDraft({ ...input, assetRefs: [] });
+    await mongoGiftRepository.publish({ ...input, assetRefs: [] });
 
     expect(collections.assets.updateMany).not.toHaveBeenCalled();
     expect(collections.giftPublications.insertOne).toHaveBeenCalled();
@@ -435,7 +525,7 @@ describe("Mongo gift repository publishing", () => {
   it("aborts with assets-changed when a referenced asset is no longer ready", async () => {
     collections.assets.updateMany.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
 
-    await expect(mongoGiftRepository.publishDraft(input)).resolves.toEqual({
+    await expect(mongoGiftRepository.publish(input)).resolves.toEqual({
       status: "assets-changed",
     });
     expect(collections.giftPublications.insertOne).not.toHaveBeenCalled();
@@ -445,7 +535,7 @@ describe("Mongo gift repository publishing", () => {
   it("aborts with stale when the conditional gift write matches nothing", async () => {
     collections.gifts.findOneAndUpdate.mockResolvedValue(null);
 
-    await expect(mongoGiftRepository.publishDraft(input)).resolves.toEqual({ status: "stale" });
+    await expect(mongoGiftRepository.publish(input)).resolves.toEqual({ status: "stale" });
     expect(collections.assets.updateMany).not.toHaveBeenCalled();
     expect(collections.giftPublications.insertOne).not.toHaveBeenCalled();
   });
@@ -457,7 +547,7 @@ describe("Mongo gift repository publishing", () => {
       requestFingerprint: publishIdempotency.requestFingerprint,
     });
 
-    await expect(mongoGiftRepository.publishDraft(input)).resolves.toEqual({
+    await expect(mongoGiftRepository.publish(input)).resolves.toEqual({
       publication,
       status: "replayed",
     });
@@ -466,7 +556,7 @@ describe("Mongo gift repository publishing", () => {
       { session: inSession },
     );
     expect(collections.giftPublications.findOne).toHaveBeenCalledWith(
-      { giftId: owned.id },
+      { giftId: owned.id, revision: 0 },
       { session: inSession },
     );
     expect(collections.gifts.findOneAndUpdate).not.toHaveBeenCalled();
@@ -484,7 +574,7 @@ describe("Mongo gift repository publishing", () => {
       ...difference,
     });
 
-    await expect(mongoGiftRepository.publishDraft(input)).resolves.toEqual({
+    await expect(mongoGiftRepository.publish(input)).resolves.toEqual({
       status: "idempotency-conflict",
     });
     expect(collections.gifts.findOneAndUpdate).not.toHaveBeenCalled();
@@ -499,7 +589,7 @@ describe("Mongo gift repository publishing", () => {
     collections.giftPublications.findOne.mockResolvedValue(null);
 
     await expect(
-      mongoGiftRepository.findPublishReplay(publishIdempotency, owned.id),
+      mongoGiftRepository.findPublishReplay(publishIdempotency, owned.id, 0),
     ).resolves.toEqual({ status: "idempotency-conflict" });
   });
 
@@ -513,7 +603,7 @@ describe("Mongo gift repository publishing", () => {
       requestFingerprint: publishIdempotency.requestFingerprint,
     });
 
-    await expect(mongoGiftRepository.publishDraft(input)).resolves.toEqual({
+    await expect(mongoGiftRepository.publish(input)).resolves.toEqual({
       publication,
       status: "replayed",
     });
@@ -527,13 +617,73 @@ describe("Mongo gift repository publishing", () => {
     });
     collections.giftPublications.insertOne.mockRejectedValue(duplicate);
 
-    await expect(mongoGiftRepository.publishDraft(input)).rejects.toBe(duplicate);
+    await expect(mongoGiftRepository.publish(input)).rejects.toBe(duplicate);
+  });
+
+  it("updates a published gift: same share id, new pointer, conditional on the current one", async () => {
+    const update = updateInput();
+    await expect(mongoGiftRepository.publish(update)).resolves.toEqual({
+      publication: update.publication,
+      status: "published",
+    });
+
+    expect(collections.gifts.findOneAndUpdate).toHaveBeenCalledWith(
+      {
+        _id: owned.id,
+        "access.mode": "unlisted",
+        "ownership.ownerId": ownerId,
+        publishedRevision: 0,
+        revision: 2,
+        status: "published",
+      },
+      {
+        $set: { publishedAt: later, publishedRevision: 2, status: "published", updatedAt: later },
+      },
+      expect.objectContaining({ returnDocument: "after", session: inSession }),
+    );
+    expect(update.publication).toMatchObject({ revision: 2, shareId });
+  });
+
+  it("updates a legacy published gift that has no pointer yet", async () => {
+    await mongoGiftRepository.publish(updateInput({ publishedRevision: undefined }));
+
+    const [filter] = collections.gifts.findOneAndUpdate.mock.lastCall as [object];
+    expect(filter).toMatchObject({ publishedRevision: { $exists: false }, status: "published" });
+  });
+
+  it("replays a key by the request's revision, even after a later update (D5)", async () => {
+    collections.idempotencyKeys.findOne.mockResolvedValue({
+      actorKey: `user:${ownerId}`,
+      giftId: owned.id,
+      requestFingerprint: publishIdempotency.requestFingerprint,
+    });
+
+    await mongoGiftRepository.findPublishReplay(publishIdempotency, owned.id, 0);
+
+    expect(collections.giftPublications.findOne).toHaveBeenLastCalledWith(
+      { giftId: owned.id, revision: 0 },
+      undefined,
+    );
+  });
+
+  it("answers revision-taken when another key published the same revision first", async () => {
+    collections.giftPublications.insertOne.mockRejectedValue(
+      new MongoServerError({
+        code: 11000,
+        errmsg: "E11000 duplicate key error index: gift_publications_gift_revision_unique",
+        message: "E11000 duplicate key error index: gift_publications_gift_revision_unique",
+      }),
+    );
+
+    await expect(mongoGiftRepository.publish(updateInput())).resolves.toEqual({
+      status: "revision-taken",
+    });
   });
 
   it("rethrows other errors", async () => {
     collections.gifts.findOneAndUpdate.mockRejectedValue(new Error("network"));
 
-    await expect(mongoGiftRepository.publishDraft(input)).rejects.toThrow("network");
+    await expect(mongoGiftRepository.publish(input)).rejects.toThrow("network");
   });
 
   it("looks a share id up as a string among published, unlisted gifts", async () => {
@@ -552,5 +702,38 @@ describe("Mongo gift repository publishing", () => {
       shareId,
       status: "published",
     });
+  });
+});
+
+describe("Mongo gift repository media references", () => {
+  const giftId = "7afd9fe9-d30d-41cc-8f9a-0fe907f7df89";
+  const assetA = "550e8400-e29b-41d4-a716-446655440000";
+  const find = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    databaseMocks.getDatabase.mockResolvedValue({ collection: () => ({ find }) });
+  });
+
+  it("accepts only referenceable assets that are not detached from the working copy", async () => {
+    find.mockReturnValue({ toArray: () => Promise.resolve([]) });
+
+    await expect(
+      mongoGiftRepository.validateMediaReferences(giftId, [
+        { assetIds: [assetA], fieldId: "memories" },
+      ]),
+    ).resolves.toBe(false);
+    expect(find).toHaveBeenCalledWith(expect.objectContaining({ detachedAt: null, giftId }), {
+      projection: { _id: 1, fieldId: 1 },
+    });
+
+    find.mockReturnValue({
+      toArray: () => Promise.resolve([{ _id: assetA, fieldId: "memories" }]),
+    });
+    await expect(
+      mongoGiftRepository.validateMediaReferences(giftId, [
+        { assetIds: [assetA], fieldId: "memories" },
+      ]),
+    ).resolves.toBe(true);
   });
 });

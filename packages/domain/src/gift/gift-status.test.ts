@@ -1,11 +1,28 @@
 import { describe, expect, it } from "vitest";
 
-import { canTransitionGift, GIFT_TRANSITIONS, transitionGift } from "./gift-status";
+import {
+  canTransitionGift,
+  EDITABLE_GIFT_STATUSES,
+  GIFT_TRANSITIONS,
+  isEditableGiftStatus,
+  transitionGift,
+} from "./gift-status";
 
 describe("gift lifecycle", () => {
   it("allows the supported publish path", () => {
     expect(canTransitionGift("draft", "publishing")).toBe(true);
     expect(canTransitionGift("publishing", "published")).toBe(true);
+  });
+
+  it("lets a published gift publish a newer revision through publishing", () => {
+    expect(transitionGift("published", "publishing")).toEqual({ data: "publishing", ok: true });
+  });
+
+  it("treats drafts and published gifts as editable, and nothing else", () => {
+    expect(EDITABLE_GIFT_STATUSES).toEqual(["draft", "published"]);
+    expect(isEditableGiftStatus("published")).toBe(true);
+    expect(isEditableGiftStatus("paused")).toBe(false);
+    expect(isEditableGiftStatus("deleted")).toBe(false);
   });
 
   it("rejects transitions out of deleted", () => {
@@ -29,7 +46,7 @@ describe("gift lifecycle", () => {
 
   it.each([
     ["draft", "published"],
-    ["published", "publishing"],
+    ["published", "published"],
     ["publishing", "publishing"],
     ["deleted", "publishing"],
   ] as const)("refuses %s -> %s", (from, to) => {

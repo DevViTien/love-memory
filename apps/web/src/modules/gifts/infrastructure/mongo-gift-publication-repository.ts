@@ -17,11 +17,12 @@ export function toPublicationDomain(document: GiftPublicationDocument): GiftPubl
 
 /** Publication records are written only by the publish transaction and never updated. */
 export const mongoGiftPublicationRepository: GiftPublicationRepository = {
-  async findByShareId(shareId) {
+  async findByGiftRevision(giftId, revision) {
     const database = await getDatabase();
+    // Served by `gift_publications_gift_revision_unique`.
     const document = await database
       .collection<GiftPublicationDocument>(COLLECTIONS.giftPublications)
-      .findOne({ shareId: { $eq: shareId } });
+      .findOne({ giftId: { $eq: giftId }, revision: { $eq: revision } });
     return document ? toPublicationDomain(document) : null;
   },
 };

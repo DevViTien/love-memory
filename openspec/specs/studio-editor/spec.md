@@ -169,31 +169,42 @@ While the action runs, the button SHALL be disabled and read `Đang mở bản x
 - for `404`: the non-editable alert `Bản nháp này không còn chỉnh sửa được. Hãy tải lại trang.`, with autosave stopped as for a `404` save;
 - for any other failure, including a network error or no answer within 15 seconds (the request is then aborted): `Chưa mở được bản xem trước — thử lại.`
 
-The `Xuất bản` step SHALL show a `Xuất bản` button. It SHALL be disabled, with one explanation, in the first of these cases that applies:
+For a draft, the `Xuất bản` step SHALL show a `Xuất bản` button. It SHALL be disabled, with one explanation, in the first of these cases that applies:
 
 - the bound template version cannot be published because no template artifact is registered for it (`template-artifact-delivery`): `Phiên bản mẫu của món quà này không hỗ trợ xuất bản.`;
 - the draft is anonymous: `Đăng nhập và lưu quà vào tài khoản để xuất bản.`, followed by the claim action of `gift-draft-ownership` when the viewer is signed in (the Studio normally claims such a draft automatically, so this is shown only when that claim did not succeed), or otherwise a link `Đăng nhập để xuất bản` to `/auth/sign-in?next=/studio/{publicId}`;
 - the internal publish entitlement of `gift-publishing` is off: `Xuất bản chưa được mở cho tài khoản này.`;
 - a template step is `Còn thiếu`: `Hoàn thiện các bước còn thiếu để xuất bản.`
 
-Otherwise the button SHALL be enabled, with the note `Sau khi xuất bản, bạn không thể chỉnh sửa món quà này.`. Choosing `Xuất bản` SHALL NOT send any request. It SHALL replace the button with a confirmation that has the heading `Xuất bản món quà này?`, the text `Sau khi xuất bản, bạn chưa thể chỉnh sửa hay thu hồi món quà. Ai có đường dẫn đều mở được món quà.`, and two actions, `Xác nhận xuất bản` and `Quay lại chỉnh sửa`. Keyboard focus SHALL move to the confirmation heading. `Quay lại chỉnh sửa` SHALL close the confirmation and show `Xuất bản` again. Choosing `Xác nhận xuất bản` SHALL work as follows:
+Otherwise the button SHALL be enabled, with the note `Sau khi xuất bản, bạn vẫn có thể chỉnh sửa và cập nhật món quà tại cùng đường dẫn.`. Choosing `Xuất bản` SHALL NOT send any request. It SHALL replace the button with a confirmation that has the heading `Xuất bản món quà này?`, the text `Ai có đường dẫn đều mở được món quà. Bạn có thể chỉnh sửa và cập nhật sau, nhưng chưa thể thu hồi đường dẫn.`, and two actions, `Xác nhận xuất bản` and `Quay lại chỉnh sửa`.
+
+For a published gift, the `Xuất bản` step SHALL show a `Cập nhật món quà` button instead. It SHALL be disabled, with one explanation, in the first of these cases that applies:
+
+- the first case of the list above (no registered template artifact), with the same explanation;
+- the internal publish entitlement is off: `Xuất bản chưa được mở cho tài khoản này.`;
+- a template step is `Còn thiếu`: `Hoàn thiện các bước còn thiếu để cập nhật.`;
+- the gift has no unpublished changes (`gift-publishing` "Editing a published gift") and no change is waiting to be saved: `Người nhận đang xem bản mới nhất. Hãy chỉnh sửa trước khi cập nhật.`
+
+Otherwise it SHALL be enabled, with the note `Người nhận sẽ thấy nội dung mới tại đường dẫn hiện tại.`. Choosing `Cập nhật món quà` SHALL NOT send any request. It SHALL replace the button with a confirmation that has the heading `Cập nhật món quà đã gửi?`, the text `Người nhận sẽ thấy nội dung mới ngay tại đường dẫn hiện tại. Bản đã gửi trước đó sẽ không còn hiển thị.`, and two actions, `Xác nhận cập nhật` and `Quay lại chỉnh sửa`.
+
+In both confirmations keyboard focus SHALL move to the confirmation heading, and `Quay lại chỉnh sửa` SHALL close the confirmation and show the button again. Choosing `Xác nhận xuất bản` or `Xác nhận cập nhật` SHALL work as follows:
 
 1. The Studio SHALL first settle pending saves as specified in `studio-autosave` ("Pending saves settled before dependent Studio actions").
-2. Only when the draft is saved at that point SHALL the Studio send `POST /api/gifts/{publicId}/publish` with the body `{ "expectedRevision": <revision of the last successful save> }` and an `Idempotency-Key` UUID. The Studio SHALL generate one key per page instance and reuse it for every publish attempt of that page.
-3. On `201` the Studio SHALL stop autosave and replace the editor with the published panel of `gift-publishing` ("Published gift in the Studio") for the returned `shareId`, without a page reload.
+2. Only when the draft is saved at that point SHALL the Studio send `POST /api/gifts/{publicId}/publish` with the body `{ "expectedRevision": <revision of the last successful save> }` and an `Idempotency-Key` UUID. The Studio SHALL generate a key per page instance and reuse it for every attempt until one is answered `201`; after each `201` it SHALL generate a new key for the next publish.
+3. On `201` for a draft, the Studio SHALL show the published panel of `gift-publishing` ("Published gift in the Studio") for the returned `shareId` above the editor, without a page reload, keep autosaving, and from then on offer `Cập nhật món quà`. On `201` for a published gift, the panel's status SHALL change to `Người nhận đang xem bản mới nhất.` and the step SHALL show `Đã cập nhật món quà.`
 
-While the action runs, `Xác nhận xuất bản` and `Quay lại chỉnh sửa` SHALL be disabled and `Xác nhận xuất bản` SHALL read `Đang xuất bản…`, so repeated clicks send at most one request, and the editor's fields SHALL be read-only as specified in "Read-only editor states". When the action ends without `201`, the confirmation SHALL close and `Xuất bản` is shown again with the outcome below. When the saves do not settle as saved, no publish request SHALL be sent, and the matching save status, invalid-content message, conflict banner or non-editable alert stays visible. When the publish request fails, the Studio SHALL stay on the page with the content unchanged and handle the response as follows:
+While the action runs, both confirmation actions SHALL be disabled, `Xác nhận xuất bản` SHALL read `Đang xuất bản…` and `Xác nhận cập nhật` SHALL read `Đang cập nhật…`, so repeated clicks send at most one request, and the editor's fields SHALL be read-only as specified in "Read-only editor states". When the action ends without `201`, the confirmation SHALL close and the button is shown again with the outcome below. When the saves do not settle as saved, no publish request SHALL be sent, and the matching save status, invalid-content message, conflict banner or non-editable alert stays visible. When the publish request fails, the Studio SHALL stay on the page with the content unchanged and handle the response as follows; for a published gift, the messages that say `xuất bản` use their update wording given in brackets:
 
-- `400`: show `Chưa xuất bản được: một số nội dung chưa sẵn sàng.`, list the label of each field named by the first path segment of an `error.fieldErrors` key, each with a `Sửa` link to `/studio/{publicId}?field={fieldId}`, and show the errors inline on those fields as for a rejected save;
+- `400`: show `Chưa xuất bản được: một số nội dung chưa sẵn sàng.` (`Chưa cập nhật được: một số nội dung chưa sẵn sàng.`), list the label of each field named by the first path segment of an `error.fieldErrors` key, each with a `Sửa` link to `/studio/{publicId}?field={fieldId}`, and show the errors inline on those fields as for a rejected save;
 - `401`: `Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại để xuất bản.`, with a link to `/auth/sign-in?next=/studio/{publicId}`;
 - `403`: `Xuất bản chưa được mở cho tài khoản này.`;
 - `404`: the non-editable alert `Bản nháp này không còn chỉnh sửa được. Hãy tải lại trang.`, with autosave stopped as for a `404` save;
 - `409` with `error.details.actualRevision`: the revision conflict banner of `studio-autosave` ("Explicit revision conflict resolution");
 - `409` with `error.details.reason` `TEMPLATE_VERSION_UNPUBLISHABLE` or `TEMPLATE_VERSION_NOT_EDITABLE`: `Phiên bản mẫu của món quà này không hỗ trợ xuất bản.`;
 - `409` with `error.details.reason` `ACCESS_POLICY_UNSUPPORTED`: `Chế độ truy cập của món quà này chưa hỗ trợ xuất bản.`;
-- `409` without `error.details`: reload the page, so that a gift published elsewhere shows its published panel;
-- `429`: `Bạn thử xuất bản quá nhiều lần. Hãy thử lại sau {retryAfterSeconds} giây.`;
-- any other failure, including a network error, an invalid `201` body, or no answer within 30 seconds (the request is then aborted; because the next attempt reuses the same `Idempotency-Key`, a publish that did succeed is answered as its replay): `Chưa xuất bản được — thử lại.`
+- `409` with `error.details.reason` `NO_UNPUBLISHED_CHANGES`, or without `error.details`: reload the page, so that a gift published or updated elsewhere shows its current state;
+- `429`: `Bạn thử xuất bản quá nhiều lần. Hãy thử lại sau {retryAfterSeconds} giây.` (`Bạn thử cập nhật quá nhiều lần. Hãy thử lại sau {retryAfterSeconds} giây.`);
+- any other failure, including a network error, an invalid `201` body, or no answer within 30 seconds (the request is then aborted; because the next attempt reuses the same `Idempotency-Key`, a publish that did succeed is answered as its replay): `Chưa xuất bản được — thử lại.` (`Chưa cập nhật được — thử lại.`)
 
 #### Scenario: Incomplete steps listed
 
@@ -278,7 +289,7 @@ While the action runs, `Xác nhận xuất bản` and `Quay lại chỉnh sửa`
 #### Scenario: Publish after a pending change
 
 - **WHEN** every step is `Đã xong`, a change is waiting for the autosave delay, and the owner chooses `Xuất bản` and then `Xác nhận xuất bản`
-- **THEN** the change is saved first, then exactly one publish request is sent with `expectedRevision` equal to the revision of that save, and on `201` the published panel with `Đã xuất bản` replaces the editor
+- **THEN** the change is saved first, then exactly one publish request is sent with `expectedRevision` equal to the revision of that save, and on `201` the published panel with `Đã xuất bản` appears above the editor, which stays editable
 
 #### Scenario: Publish rejected content
 
@@ -312,14 +323,34 @@ While the action runs, `Xác nhận xuất bản` and `Quay lại chỉnh sửa`
 
 #### Scenario: Gift published in another tab
 
-- **WHEN** the publish request is answered `409` without `error.details`
-- **THEN** the page reloads and shows the published panel of the gift
+- **WHEN** the publish request is answered `409` with `error.details.reason` `NO_UNPUBLISHED_CHANGES`, or `409` without `error.details`
+- **THEN** the page reloads and shows the published panel of the gift above the editor
+
+#### Scenario: Nothing to update
+
+- **WHEN** the owner opens step `Xuất bản` of a published gift without unpublished changes and with no change waiting to be saved
+- **THEN** `Cập nhật món quà` is disabled with `Người nhận đang xem bản mới nhất. Hãy chỉnh sửa trước khi cập nhật.`
+
+#### Scenario: Owner updates a published gift
+
+- **WHEN** the owner edits `final-letter` of a published gift, chooses `Cập nhật món quà` and then `Xác nhận cập nhật`
+- **THEN** the change is saved first, exactly one publish request is sent with the revision of that save, and on `201` the panel shows `Người nhận đang xem bản mới nhất.` and the step shows `Đã cập nhật món quà.`
+
+#### Scenario: New key after a success
+
+- **WHEN** the owner first publishes a draft and later, in the same page, updates it
+- **THEN** the update request carries an `Idempotency-Key` different from that of the first publish
+
+#### Scenario: Update request fails
+
+- **WHEN** the update request fails with a network error
+- **THEN** `Chưa cập nhật được — thử lại.` is shown, recipients still receive the earlier publication, and the next attempt carries the same `Idempotency-Key`
 
 ### Requirement: Read-only editor states
 
 The Studio SHALL make every field of the editor read-only, so that on-screen content cannot change, in two states:
 
-- while a publish request started by `Xác nhận xuất bản` is running. When it ends without `201`, the fields SHALL become editable again with the content unchanged;
+- while a publish request started by `Xác nhận xuất bản` or `Xác nhận cập nhật` is running. When it ends, with or without `201`, the fields SHALL become editable again with the content unchanged;
 - after the draft became non-editable, that is once the alert `Bản nháp này không còn chỉnh sửa được. Hãy tải lại trang.` is shown (`studio-autosave`). The fields stay read-only for the lifetime of the page.
 
 Read-only means: text, date and choice inputs are disabled; the image field disables its picker, captions, reorder, retry, complete-upload and delete actions; and a change that still reaches the editor (for example the order reported by an upload that finishes meanwhile) SHALL NOT change the on-screen content.
@@ -327,7 +358,7 @@ Read-only means: text, date and choice inputs are disabled; the image field disa
 #### Scenario: Typing while publishing
 
 - **WHEN** the publish request is in flight and the creator tries to type into `receiver-name`
-- **THEN** the input is disabled and its text does not change, and after a `201` the published panel shows the content that was published
+- **THEN** the input is disabled and its text does not change, and after a `201` the editor shows the content that was published and is editable again
 
 #### Scenario: Publish fails and editing resumes
 

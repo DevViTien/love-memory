@@ -11,7 +11,6 @@ import { getInternalPublishEnvironment } from "@/config/internal-publish";
 import { ClaimDraftButton } from "@/modules/gifts/presentation/claim-draft-button";
 import { DraftEditor } from "@/modules/gifts/presentation/draft-editor";
 import { getGiftRequestContextFromHeaders } from "@/modules/gifts/presentation/gift-route-helpers";
-import { PublishedPanel } from "@/modules/gifts/presentation/studio/published-panel";
 
 type StudioDraftPageProps = Readonly<{
   params: Promise<{ publicId: string }>;
@@ -29,19 +28,7 @@ export default async function StudioDraftPage({ params }: StudioDraftPageProps) 
     notFound();
   }
 
-  // A published gift is read-only: the share link instead of the editor, and no draft request.
-  if (result.data.kind === "published") {
-    return (
-      <main>
-        <Container className="py-10 sm:py-14">
-          <div className="mx-auto max-w-2xl">
-            <PublishedPanel publication={result.data.publication} />
-          </div>
-        </Container>
-      </main>
-    );
-  }
-
+  // A draft, or a published gift whose working copy the owner edits under the published panel.
   let draft = result.data.draft;
   // Back from the sign-in link in the browser that holds the draft: claim it now, so publishing
   // needs no second step. Same atomic, credential-filtered write as `POST .../claim`.
@@ -90,9 +77,11 @@ export default async function StudioDraftPage({ params }: StudioDraftPageProps) 
                 Quyền sở hữu
               </p>
               <p className="mt-2 text-sm leading-6 text-stone-700">
-                {draft.ownerKind === "user"
-                  ? "Bản nháp đã được bảo vệ bởi tài khoản của bạn."
-                  : "Bản nháp đang được bảo vệ bằng cookie bí mật trên trình duyệt này."}
+                {draft.status === "published"
+                  ? "Món quà đã được bảo vệ bởi tài khoản của bạn. Chỉ bạn sửa được nội dung."
+                  : draft.ownerKind === "user"
+                    ? "Bản nháp đã được bảo vệ bởi tài khoản của bạn."
+                    : "Bản nháp đang được bảo vệ bằng cookie bí mật trên trình duyệt này."}
               </p>
               <div className="mt-4">
                 {draft.ownerKind === "anonymous" ? (

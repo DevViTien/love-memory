@@ -17,6 +17,7 @@ export type StudioNavigation = Readonly<{
 export type StudioPublishContext = Readonly<{
   /** The internal publish entitlement, read by the page from the same server flag as the API. */
   enabled: boolean;
+  /** A first publish or an update succeeded; the store already holds the new publication. */
   onPublished: (publication: GiftPublicationDto) => void;
   /** A template artifact is registered for the draft's exact version (it can be published). */
   publishable: boolean;

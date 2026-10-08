@@ -1,4 +1,4 @@
-import { type MediaAsset } from "@love-memory/domain";
+import { isEditableGiftStatus, type MediaAsset } from "@love-memory/domain";
 
 import {
   type GiftAccessor,
@@ -47,7 +47,7 @@ export type PreviewServiceDependencies = Readonly<{
   assets: Readonly<{ listByGiftId: (giftId: string) => Promise<readonly MediaAsset[]> }>;
   clock: () => Date;
   generateToken?: () => string;
-  gifts: Pick<GiftRepository, "findAuthorized" | "findDraftById">;
+  gifts: Pick<GiftRepository, "findAuthorized" | "findEditableById">;
   payload: BuildViewerPayloadDependencies;
   templates: Pick<GiftTemplateRepository, "findEditableManifest">;
   tokens: PreviewTokenRepository;
@@ -57,24 +57,27 @@ export function createPreviewService(dependencies: PreviewServiceDependencies) {
   const generateToken = dependencies.generateToken ?? generatePreviewToken;
 
   return {
-    /** Whether these credentials may edit the draft, the Studio's own rule. It grants nothing. */
+    /**
+     * Whether these credentials may edit the gift (a draft or a published gift's working copy),
+     * the Studio's own rule. It grants nothing.
+     */
     async canEditDraft(
       input: Readonly<{ accessors: readonly GiftAccessor[]; publicId: string }>,
     ): Promise<boolean> {
       if (input.accessors.length === 0) return false;
       const gift = await dependencies.gifts.findAuthorized(input.publicId, input.accessors);
-      return gift?.status === "draft";
+      return gift !== null && isEditableGiftStatus(gift.status);
     },
 
     /**
-     * Issues a new 30-minute preview link for an authorized draft. The token exists only in the
-     * returned URL; only its hash is stored.
+     * Issues a new 30-minute preview link for an authorized draft or published gift (its working
+     * copy). The token exists only in the returned URL; only its hash is stored.
      */
     async createPreviewLink(
       input: Readonly<{ accessors: readonly GiftAccessor[]; publicId: string }>,
     ): Promise<GiftServiceResult<PreviewLink>> {
       const gift = await dependencies.gifts.findAuthorized(input.publicId, input.accessors);
-      if (gift?.status !== "draft") {
+      if (!gift || !isEditableGiftStatus(gift.status)) {
         return { error: { code: "NOT_FOUND" }, ok: false };
       }
 
@@ -100,8 +103,9 @@ export function createPreviewService(dependencies: PreviewServiceDependencies) {
     },
 
     /**
-     * Renders the current draft behind a valid, unexpired token. Every failure gives the same
-     * `null`, so the page answers with one opaque not-found page.
+     * Renders the current content (a draft, or a published gift's working copy, never what
+     * recipients receive) behind a valid, unexpired token. Every failure gives the same `null`, so
+     * the page answers with one opaque not-found page.
      */
     async openPreview(token: string): Promise<OpenedPreview | null> {
       if (!isPreviewTokenFormat(token)) return null;
@@ -112,7 +116,7 @@ export function createPreviewService(dependencies: PreviewServiceDependencies) {
       );
       if (!record) return null;
 
-      const gift = await dependencies.gifts.findDraftById(record.giftId);
+      const gift = await dependencies.gifts.findEditableById(record.giftId);
       if (!gift) return null;
 
       const manifest = await dependencies.templates.findEditableManifest(

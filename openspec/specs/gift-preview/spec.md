@@ -16,15 +16,18 @@ checks and responses are:
 
 - The request SHALL pass the guards of `mutation-request-guards` in their order: media type,
   origin, path, then the rate limit of scope `gift-preview`, then the body.
-- The draft SHALL be authorized with the draft access rules of `gift-draft-ownership`.
+- The gift SHALL be authorized with the draft access rules of `gift-draft-ownership`.
 - A malformed `publicId`, a request without credentials, a gift the caller cannot access, and a
-  gift whose status is not `draft` SHALL respond `404` with code `NOT_FOUND` and the message
-  `Gift draft was not found.`.
-- A draft whose bound template version can no longer be resolved for editing SHALL respond `409`
+  gift whose status is neither `draft` nor `published` SHALL respond `404` with code `NOT_FOUND`
+  and the message `Gift draft was not found.`.
+- A gift whose bound template version can no longer be resolved for editing SHALL respond `409`
   with code `CONFLICT`, as saving it does.
 - On success the system SHALL create a preview token and respond `201` with
   `data` `{ url, expiresAt }`. `url` is `/preview/{token}`, and `expiresAt` is an ISO 8601
   timestamp 1800 seconds after issuance.
+
+For a `published` gift the preview shows its working copy (`gift-publishing` "Editing a published
+gift"), so the owner can check unpublished changes before updating the gift.
 
 The token SHALL be 32 bytes from a cryptographically secure random source, encoded as unpadded
 base64url (43 characters). The system SHALL store only the token's SHA-256 hash (lowercase hex),
@@ -47,8 +50,10 @@ valid until they expire.
 
 #### Scenario: Published or deleted gift
 
-- **WHEN** the owner requests a preview link for a gift whose status is not `draft`
-- **THEN** the response is `404` with code `NOT_FOUND` and no token is created
+- **WHEN** the owner requests a preview link for a published gift, and for a gift whose status is
+  `deleted`
+- **THEN** the published gift gets `201` with a preview link of its working copy, and the deleted
+  gift gets `404` with code `NOT_FOUND` and no token is created
 
 #### Scenario: Rate limit exceeded
 
@@ -73,8 +78,10 @@ valid until they expire.
 The system SHALL serve `/preview/{token}` as follows. It SHALL look up the SHA-256 hash of the path
 token among the stored tokens whose `expiresAt` is later than the current time. The expiry is
 checked on read, whatever the database's TTL deletion has done. It SHALL then read the bound gift
-only when its status is `draft`, and render the gift's current draft content at the time of the
-request. That is the last saved content, not a snapshot taken when the link was issued.
+only when its status is `draft` or `published`, and render the gift's current content at the time
+of the request: the last saved content of a draft, or the working copy of a published gift. That
+is not a snapshot taken when the link was issued, and for a published gift it is not the content
+recipients receive.
 
 A valid token SHALL be the only credential the page needs. No session or cookie is required.
 
@@ -83,7 +90,7 @@ The page SHALL render the not-found page whenever any of these holds:
 - the token is not exactly 43 base64url characters (then without any database access);
 - no stored token matches;
 - the token has expired;
-- the gift no longer exists or is not a `draft`;
+- the gift no longer exists or its status is neither `draft` nor `published`;
 - its template version can no longer be resolved.
 
 The not-found page SHALL be identical in all these cases and SHALL be answered with HTTP status
@@ -94,6 +101,12 @@ The not-found page SHALL be identical in all these cases and SHALL be answered w
 - **WHEN** the creator issues a preview link, then changes `receiver-name` in the Studio and the
   change is saved, then opens the link
 - **THEN** the preview uses the changed `receiver-name`
+
+#### Scenario: Preview link survives the first publish
+
+- **WHEN** a preview link issued for a draft is opened, before it expires, after the draft was
+  published and its working copy changed
+- **THEN** the preview renders the working copy, not the published content
 
 #### Scenario: Unknown or malformed token
 
@@ -110,7 +123,8 @@ The not-found page SHALL be identical in all these cases and SHALL be answered w
 #### Scenario: Gift no longer a draft
 
 - **WHEN** a valid preview link is opened after the gift left the `draft` status
-- **THEN** the same not-found page is rendered
+- **THEN** the working copy is rendered when the gift is `published`, and the same not-found page is
+  rendered for any other status
 
 #### Scenario: Link opened on another device
 

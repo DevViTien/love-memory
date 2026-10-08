@@ -13,6 +13,7 @@ const asset: MediaAsset = {
   declaredContentType: "image/jpeg",
   declaredSizeBytes: 3,
   derivatives: [],
+  detachedAt: null,
   expiresAt: null,
   failureCode: null,
   fieldId: "photos",

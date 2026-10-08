@@ -54,22 +54,25 @@ describe("Mongo gift publication repository", () => {
     expect(toPublicationDomain(document)).toEqual(publication);
   });
 
-  it("finds a publication by share id with an exact-match filter", async () => {
+  it("finds one publication of a gift by its revision with exact-match filters", async () => {
     databaseMocks.findOne.mockResolvedValue(toPublicationDocument(publication));
 
     await expect(
-      mongoGiftPublicationRepository.findByShareId(publication.shareId),
+      mongoGiftPublicationRepository.findByGiftRevision(publication.giftId, publication.revision),
     ).resolves.toEqual(publication);
     expect(collectionName).toBe("giftPublications");
     expect(databaseMocks.findOne).toHaveBeenCalledWith({
-      shareId: { $eq: publication.shareId },
+      giftId: { $eq: publication.giftId },
+      revision: { $eq: publication.revision },
     });
   });
 
   it("returns null when nothing matches", async () => {
     databaseMocks.findOne.mockResolvedValue(null);
 
-    await expect(mongoGiftPublicationRepository.findByShareId("x".repeat(22))).resolves.toBeNull();
+    await expect(
+      mongoGiftPublicationRepository.findByGiftRevision(publication.giftId, 99),
+    ).resolves.toBeNull();
   });
 
   it("refuses a malformed stored record", () => {

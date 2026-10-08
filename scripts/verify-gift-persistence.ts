@@ -13,6 +13,7 @@ import {
   type Gift,
   type MediaAsset,
   publishGiftDraft,
+  republishGift,
   updateGiftDraft,
 } from "../packages/domain/src/index";
 import { type GiftPublishInput } from "../apps/web/src/modules/gifts/application/gift-service";
@@ -87,6 +88,7 @@ function readyAsset(id: string, owningGiftId: string): MediaAsset & { _id: strin
         width: 768,
       },
     ],
+    detachedAt: null,
     expiresAt: null,
     failureCode: null,
     fieldId: "memories",
@@ -122,11 +124,47 @@ function publishInputFor(gift: Gift, referencedAssetId: string, key: string): Gi
       scope: "gift-publish",
     },
     ownerId: verificationUserId,
+    precondition: { status: "draft" },
     publication: createGiftPublication({
       artifactContentHash: "f".repeat(64),
       assetIds: [referencedAssetId],
       audioTrackId: null,
       gift: published.data,
+      id: randomUUID(),
+    }),
+  };
+}
+
+/**
+ * An update of a published gift whose working copy is at `gift.revision`, conditional on the
+ * current publication `publishedRevision` (what the publish checks saw).
+ */
+function republishInputFor(
+  gift: Gift,
+  referencedAssetId: string,
+  key: string,
+  publishedRevision: number,
+): GiftPublishInput {
+  const republished = republishGift(gift, { expectedRevision: gift.revision, now: new Date() });
+  assert(republished.ok, "Domain republish failed.");
+  return {
+    assetRefs: [{ assetIds: [referencedAssetId], fieldId: "memories" }],
+    expectedRevision: gift.revision,
+    gift: republished.data,
+    idempotency: {
+      actorKey: `user:${verificationUserId}`,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      key,
+      requestFingerprint: JSON.stringify(["publish", gift.publicId, gift.revision]),
+      scope: "gift-publish",
+    },
+    ownerId: verificationUserId,
+    precondition: { publishedRevision, status: "published" },
+    publication: createGiftPublication({
+      artifactContentHash: "f".repeat(64),
+      assetIds: [referencedAssetId],
+      audioTrackId: null,
+      gift: republished.data,
       id: randomUUID(),
     }),
   };
@@ -152,19 +190,17 @@ function usesIndex(plan: Plan | undefined, indexName: string): boolean {
  * `explain` is not part of Stable API V1, which the application client enforces strictly, so the
  * query plan is read through a short-lived diagnostic client without it.
  */
-async function explainShareIdLookup(shareId: string): Promise<Plan | undefined> {
+async function explainLookup(
+  collection: string,
+  filter: Readonly<Record<string, unknown>>,
+): Promise<Plan | undefined> {
   const environment = parseMongoEnvironment(process.env);
   const explainClient = await connectDiagnosticMongoClient(environment);
   try {
     const explanation = (await explainClient
       .db(environment.databaseName)
-      .collection(COLLECTIONS.gifts)
-      // The exact filter of `findPublishedByShareId`.
-      .find({
-        "access.mode": "unlisted",
-        shareId: { $eq: shareId, $type: "string" },
-        status: "published",
-      })
+      .collection(collection)
+      .find(filter)
       .explain("queryPlanner")) as { queryPlanner?: { winningPlan?: Plan } };
     return explanation.queryPlanner?.winningPlan;
   } finally {
@@ -225,8 +261,8 @@ try {
   const firstInput = publishInputFor(claimed, assetId, publishKey);
   const secondInput = publishInputFor(claimed, assetId, publishKey);
   const concurrent = await Promise.all([
-    mongoGiftRepository.publishDraft(firstInput),
-    mongoGiftRepository.publishDraft(secondInput),
+    mongoGiftRepository.publish(firstInput),
+    mongoGiftRepository.publish(secondInput),
   ]);
   const shares = concurrent.map((result) =>
     result.status === "published" || result.status === "replayed"
@@ -256,13 +292,13 @@ try {
     "The published gift was not found by its share id.",
   );
 
-  const publishReplay = await mongoGiftRepository.publishDraft(publishInput);
+  const publishReplay = await mongoGiftRepository.publish(publishInput);
   assert(
     publishReplay.status === "replayed" && publishReplay.publication.shareId === shareId,
     "Replaying the publish key did not return the same publication.",
   );
 
-  const stalePublish = await mongoGiftRepository.publishDraft({
+  const stalePublish = await mongoGiftRepository.publish({
     ...publishInput,
     expectedRevision: 0,
     idempotency: {
@@ -273,19 +309,111 @@ try {
   });
   assert(stalePublish.status === "stale", "A publish at a stale revision was not rejected.");
 
-  const plan = await explainShareIdLookup(shareId);
+  // The exact filter of `findPublishedByShareId`.
+  const plan = await explainLookup(COLLECTIONS.gifts, {
+    "access.mode": "unlisted",
+    shareId: { $eq: shareId, $type: "string" },
+    status: "published",
+  });
   assert(
     usesIndex(plan, "gifts_share_id_unique"),
     "The share id lookup is not answered by an index scan of gifts_share_id_unique.",
   );
 
+  // Edit after publish: the working copy moves on while the current publication stays.
+  const ownerOfPublished = { kind: "user" as const, userId: verificationUserId };
+  const firstRevision = publishInput.expectedRevision;
+  const publishedWorkingCopy = await mongoGiftRepository.findAuthorized(publicId, [
+    ownerOfPublished,
+  ]);
+  assert(
+    publishedWorkingCopy?.status === "published" &&
+      publishedWorkingCopy.publishedRevision === firstRevision,
+    "The published gift does not point at its first publication.",
+  );
+  const edited = updateGiftDraft(publishedWorkingCopy, {
+    content: { ...publishedWorkingCopy.content, data: { headline: "Edited after publishing" } },
+    expectedRevision: firstRevision,
+    now: new Date(),
+  });
+  assert(edited.ok, "Domain update of the published gift failed.");
+  const savedWorkingCopy = await mongoGiftRepository.updateDraft(edited.data, firstRevision, [
+    ownerOfPublished,
+  ]);
+  assert(
+    savedWorkingCopy?.revision === firstRevision + 1 &&
+      savedWorkingCopy.publishedRevision === firstRevision,
+    "A save of the published gift did not keep its current publication.",
+  );
+
+  // Publish the working copy: a second publication with the same share id, and the pointer moves.
+  const updateKey = randomUUID();
+  const update = await mongoGiftRepository.publish(
+    republishInputFor(savedWorkingCopy, assetId, updateKey, firstRevision),
+  );
+  assert(
+    update.status === "published" &&
+      update.publication.shareId === shareId &&
+      update.publication.revision === firstRevision + 1,
+    `Publishing the working copy did not store a second publication: ${update.status}.`,
+  );
+  const updatedGift = await mongoGiftRepository.findPublishedByShareId(shareId);
+  assert(
+    updatedGift?.publishedRevision === firstRevision + 1 && updatedGift.shareId === shareId,
+    "The update did not move the pointer under the same share id.",
+  );
+  const publications = await database
+    .collection<{ giftId: string; revision: number; shareId: string }>(COLLECTIONS.giftPublications)
+    .find({ giftId })
+    .sort({ revision: 1 })
+    .toArray();
+  assert(
+    publications.length === 2 &&
+      publications.every((record) => record.shareId === shareId) &&
+      publications[0]?.revision === firstRevision,
+    "The first publication was not kept next to the second one.",
+  );
+  const currentPublicationPlan = await explainLookup(COLLECTIONS.giftPublications, {
+    giftId: { $eq: giftId },
+    revision: { $eq: firstRevision + 1 },
+  });
+  assert(
+    usesIndex(currentPublicationPlan, "gift_publications_gift_revision_unique"),
+    "The current publication lookup is not answered by gift_publications_gift_revision_unique.",
+  );
+
+  const replayAfterUpdate = await mongoGiftRepository.publish(publishInput);
+  assert(
+    replayAfterUpdate.status === "replayed" &&
+      replayAfterUpdate.publication.revision === firstRevision,
+    "Replaying the first publish key did not return the first publication.",
+  );
+
+  const duplicateRevision = await mongoGiftRepository.publish(
+    republishInputFor(savedWorkingCopy, assetId, randomUUID(), firstRevision),
+  );
+  const publicationsAfterDuplicate = await database
+    .collection<{ giftId: string }>(COLLECTIONS.giftPublications)
+    .countDocuments({ giftId });
+  assert(
+    (duplicateRevision.status === "stale" || duplicateRevision.status === "revision-taken") &&
+      publicationsAfterDuplicate === 2,
+    `Publishing the same revision again under another key was not refused: ${duplicateRevision.status}.`,
+  );
+
+  // A photo of the current publication is detached from the working copy, never deleted.
   const deletion = await mongoMediaAssetRepository.markDeleting(assetId, giftId, new Date());
   assert(
-    deletion.kind === "gift-not-draft",
-    "An asset of the published gift could still be moved to deleting.",
+    deletion.kind === "detached",
+    `A photo of the current publication was not detached: ${deletion.kind}.`,
   );
   const assetAfter = await mongoMediaAssetRepository.findById(assetId);
-  assert(assetAfter?.status === "ready", "The published gift's asset left ready.");
+  assert(
+    assetAfter?.status === "ready" &&
+      assetAfter.detachedAt !== null &&
+      assetAfter.giftSlot === null,
+    "The detached photo left ready or kept its quota slots.",
+  );
 
   // A publish and a deletion of its only photo race on a fresh draft: exactly one of them wins.
   const raceDraft = createGiftDraft({
@@ -309,16 +437,17 @@ try {
     .collection<MediaAsset & { _id: string }>(COLLECTIONS.assets)
     .insertOne(readyAsset(raceAssetId, raceGiftId));
   const [racePublish, raceDeletion] = await Promise.all([
-    mongoGiftRepository.publishDraft(publishInputFor(raceDraft, raceAssetId, randomUUID())),
+    mongoGiftRepository.publish(publishInputFor(raceDraft, raceAssetId, randomUUID())),
     mongoMediaAssetRepository.markDeleting(raceAssetId, raceGiftId, new Date()),
   ]);
   const raceGift = await database
     .collection<{ _id: string; status: string }>(COLLECTIONS.gifts)
     .findOne({ _id: raceGiftId });
   const raceAsset = await mongoMediaAssetRepository.findById(raceAssetId);
+  // When the publish commits first, the retried deletion sees the new publication and detaches.
   const publishWon =
     racePublish.status === "published" &&
-    raceDeletion.kind === "gift-not-draft" &&
+    raceDeletion.kind === "detached" &&
     raceGift?.status === "published" &&
     raceAsset?.status === "ready";
   const deletionWon =
@@ -337,7 +466,7 @@ try {
   // The revision compare-and-set alone: a fresh draft that is still a `draft` and whose referenced
   // asset is `ready`, saved to revision 1, then published against revision 0. Only the revision
   // differs, so `stale` proves the revision filter (the earlier stale check ran on a published
-  // gift, where the status filter alone already refuses).
+  // gift, where the draft precondition alone already refuses).
   const casDraft = createGiftDraft({
     anonymousDraftId: null,
     claimTokenHash: null,
@@ -368,7 +497,7 @@ try {
   const casPersisted = await mongoGiftRepository.updateDraft(casSaved.data, 0, [ownerAccessor]);
   assert(casPersisted?.revision === 1, "The compare-and-set draft did not reach revision 1.");
   const casKey = randomUUID();
-  const casPublish = await mongoGiftRepository.publishDraft(
+  const casPublish = await mongoGiftRepository.publish(
     publishInputFor(casDraft, casAssetId, casKey),
   );
   assert(

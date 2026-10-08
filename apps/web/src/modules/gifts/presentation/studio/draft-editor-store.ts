@@ -1,4 +1,4 @@
-import { type GiftDraftDto } from "@love-memory/contracts";
+import { type GiftDraftDto, type GiftPublicationSummary } from "@love-memory/contracts";
 import { type TemplateManifest } from "@love-memory/template-sdk";
 import { createStore, type StoreApi } from "zustand/vanilla";
 
@@ -53,6 +53,11 @@ export type DraftEditorData = Readonly<{
   inFlight: boolean;
   /** The content of the last successful save, or the loaded content. */
   lastSavedContent: DraftContent;
+  /**
+   * The current publication of a published gift (what recipients receive), or `null` for a draft.
+   * The editor then edits the gift's working copy.
+   */
+  publication: GiftPublicationSummary | null;
   /** A publish request is running: every field is read-only and edits are ignored. */
   publishing: boolean;
   /** The draft is gone or no longer editable; nothing is sent any more. */
@@ -72,6 +77,8 @@ export type DraftEditorActions = Readonly<{
   replaceFromServer: (gift: GiftDraftDto) => void;
   setFieldValue: (fieldId: string, raw: unknown) => void;
   setOffline: (offline: boolean) => void;
+  /** A publish succeeded: its revision is now what recipients receive. */
+  setPublication: (publication: GiftPublicationSummary) => void;
   setPublishing: (publishing: boolean) => void;
   setReloadError: (reloadError: boolean) => void;
   setStatus: (status: SaveStatus) => void;
@@ -128,6 +135,7 @@ export function createDraftEditorStore({
     generalError: null,
     inFlight: false,
     lastSavedContent: gift.content,
+    publication: gift.publication,
     publishing: false,
     readOnly: false,
     reloadError: false,
@@ -144,6 +152,7 @@ export function createDraftEditorStore({
             generalError: null,
             inFlight: false,
             lastSavedContent: sentContent,
+            publication: outcome.gift.publication,
             reloadError: false,
             revision: outcome.gift.revision,
             serverFieldErrors: {},
@@ -201,6 +210,7 @@ export function createDraftEditorStore({
         generalError: null,
         inFlight: false,
         lastSavedContent: stored.content,
+        publication: stored.publication,
         readOnly: false,
         reloadError: false,
         revision: stored.revision,
@@ -229,6 +239,10 @@ export function createDraftEditorStore({
       } else if (state.status === "offline") {
         set({ status: selectIsDirty(state) ? "pending" : "saved" });
       }
+    },
+
+    setPublication(publication) {
+      set({ publication });
     },
 
     setPublishing(publishing) {
@@ -296,6 +310,22 @@ export function selectIsDirty(state: DraftEditorData): boolean {
   return (
     state.content !== state.lastSavedContent && !isDeepEqual(state.content, state.lastSavedContent)
   );
+}
+
+/**
+ * The saved working copy of a published gift is newer than what recipients receive. `false` for a
+ * draft, which has no publication yet.
+ */
+export function selectHasUnpublishedChanges(state: DraftEditorData): boolean {
+  return state.publication !== null && state.revision > state.publication.revision;
+}
+
+/**
+ * `Cập nhật món quà` has something to publish: unpublished saved changes, or a change still
+ * waiting to be saved (the action saves it first).
+ */
+export function selectCanUpdatePublication(state: DraftEditorData): boolean {
+  return selectHasUnpublishedChanges(state) || selectIsDirty(state);
 }
 
 /**

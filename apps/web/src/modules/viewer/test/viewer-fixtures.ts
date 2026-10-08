@@ -32,7 +32,12 @@ export const activeTrack: LicensedAudioTrackDto = {
   url: "/audio-library/acoustic-morning.3f9a0c1d2e4b5a67.mp3",
 };
 
-const now = new Date("2026-10-01T10:00:00.000Z");
+/**
+ * The fixtures' clock: `viewerPayload` signs URLs that expire 300 s after it. Tests of components
+ * that read the real clock pin `Date` to it, or the URLs look expired once that day has passed.
+ */
+export const FIXTURE_NOW = new Date("2026-10-01T10:00:00.000Z");
+const now = FIXTURE_NOW;
 
 export function mediaAsset(
   id: string,
@@ -52,6 +57,7 @@ export function mediaAsset(
       key: `private/assets/${id}/w${width}.webp`,
       width,
     })),
+    detachedAt: null,
     expiresAt: null,
     failureCode: null,
     fieldId: "memories",

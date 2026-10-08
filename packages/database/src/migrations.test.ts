@@ -14,6 +14,31 @@ class FakeCollection {
     { key: { _id: 1 }, name: "_id_" },
   ];
   migrationVersion: number | undefined;
+  /** Documents for the data steps; only the operators those steps use are understood. */
+  readonly documents: Array<Record<string, unknown>> = [];
+  readonly updateMany = vi.fn(
+    (
+      filter: Readonly<Record<string, unknown>>,
+      pipeline: ReadonlyArray<Readonly<{ $set: Readonly<Record<string, string>> }>>,
+    ) => {
+      const matches = (document: Record<string, unknown>) =>
+        Object.entries(filter).every(([key, condition]) =>
+          typeof condition === "object" && condition !== null && "$exists" in condition
+            ? key in document === (condition as { $exists: boolean }).$exists
+            : document[key] === condition,
+        );
+      let modifiedCount = 0;
+      for (const document of this.documents.filter(matches)) {
+        for (const stage of pipeline) {
+          for (const [key, source] of Object.entries(stage.$set)) {
+            document[key] = document[source.slice(1)];
+          }
+        }
+        modifiedCount += 1;
+      }
+      return Promise.resolve({ modifiedCount });
+    },
+  );
   readonly updateOne = vi.fn(
     (_filter: unknown, update: Readonly<{ $set?: Readonly<{ version?: number }> }>) => {
       this.migrationVersion = update.$set?.version;
@@ -97,7 +122,7 @@ describe("database schema migration", () => {
       CORE_COLLECTION_DEFINITIONS.map((definition) => [definition.name, definition]),
     );
 
-    expect(DATABASE_SCHEMA_VERSION).toBe(9);
+    expect(DATABASE_SCHEMA_VERSION).toBe(10);
     expect(definitions.has(COLLECTIONS.users)).toBe(true);
     expect(definitions.has(COLLECTIONS.apiRateLimits)).toBe(true);
     expect(definitions.has(COLLECTIONS.templates)).toBe(true);
@@ -253,10 +278,6 @@ describe("database schema migration", () => {
     expect(schema?.properties["audioTrackId"]).toEqual({ bsonType: ["string", "null"] });
     expect(publications?.indexes).toEqual([
       {
-        key: { shareId: 1 },
-        options: { name: "gift_publications_share_id_unique", unique: true },
-      },
-      {
         key: { giftId: 1, revision: 1 },
         options: { name: "gift_publications_gift_revision_unique", unique: true },
       },
@@ -320,7 +341,7 @@ describe("database schema migration", () => {
       fake.collection(COLLECTIONS.gifts).indexDefinitions.map((index) => index["name"]),
     ).toContain("gifts_share_id_unique");
     expect(fake.collections.has(COLLECTIONS.analyticsEvents)).toBe(true);
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(9);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(10);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
   });
 
@@ -348,15 +369,81 @@ describe("database schema migration", () => {
     await runDatabaseMigrations(database);
     expect(
       fake.collection(COLLECTIONS.giftPublications).indexDefinitions.map((index) => index["name"]),
-    ).toEqual(
-      expect.arrayContaining([
-        "gift_publications_share_id_unique",
-        "gift_publications_gift_revision_unique",
-      ]),
-    );
+    ).toEqual(["_id_", "gift_publications_gift_revision_unique"]);
     expect(fake.collections.has(COLLECTIONS.analyticsEvents)).toBe(true);
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(9);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(10);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
+  });
+
+  it("upgrades a version 9 database: pointer and detach fields, legacy share index, backfill", async () => {
+    const fake = new FakeDatabase();
+    const database = fake as unknown as Db;
+    await runDatabaseMigrations(database);
+    fake.collection(COLLECTIONS.giftPublications).indexDefinitions.push({
+      key: { shareId: 1 },
+      name: "gift_publications_share_id_unique",
+      unique: true,
+    });
+    fake
+      .collection(COLLECTIONS.gifts)
+      .documents.push(
+        { _id: "published", revision: 7, status: "published" },
+        { _id: "draft", revision: 2, status: "draft" },
+      );
+    fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 9;
+
+    await expect(verifyDatabaseSchema(database)).rejects.toThrow(
+      "Legacy MongoDB index remains: giftPublications.gift_publications_share_id_unique",
+    );
+
+    await runDatabaseMigrations(database);
+    expect(
+      fake.collection(COLLECTIONS.giftPublications).indexDefinitions.map((index) => index["name"]),
+    ).not.toContain("gift_publications_share_id_unique");
+    expect(fake.collection(COLLECTIONS.gifts).documents).toEqual([
+      { _id: "published", publishedRevision: 7, revision: 7, status: "published" },
+      { _id: "draft", revision: 2, status: "draft" },
+    ]);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(10);
+    await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
+  });
+
+  it("backfills only published gifts without a pointer, and changes nothing on a second run", async () => {
+    const fake = new FakeDatabase();
+    const database = fake as unknown as Db;
+    fake
+      .collection(COLLECTIONS.gifts)
+      .documents.push({ _id: "edited", publishedRevision: 7, revision: 9, status: "published" });
+
+    await runDatabaseMigrations(database);
+    await runDatabaseMigrations(database);
+
+    const gifts = fake.collection(COLLECTIONS.gifts);
+    expect(gifts.updateMany).toHaveBeenCalledWith(
+      { publishedRevision: { $exists: false }, status: "published" },
+      [{ $set: { publishedRevision: "$revision" } }],
+    );
+    expect(gifts.documents).toEqual([
+      { _id: "edited", publishedRevision: 7, revision: 9, status: "published" },
+    ]);
+  });
+
+  it("validates the publication pointer and the detach time", () => {
+    const schemaOf = (name: string) =>
+      (
+        CORE_COLLECTION_DEFINITIONS.find((definition) => definition.name === name)?.validator as
+          { $jsonSchema: { properties: Record<string, unknown>; required: string[] } } | undefined
+      )?.$jsonSchema;
+
+    expect(schemaOf(COLLECTIONS.gifts)?.properties["publishedRevision"]).toEqual({
+      bsonType: "int",
+      minimum: 0,
+    });
+    expect(schemaOf(COLLECTIONS.gifts)?.required).not.toContain("publishedRevision");
+    expect(schemaOf(COLLECTIONS.assets)?.properties["detachedAt"]).toEqual({
+      bsonType: ["date", "null"],
+    });
+    expect(schemaOf(COLLECTIONS.assets)?.required).not.toContain("detachedAt");
   });
 
   it("defines the analytics event record with a TTL index and a per-step time index", () => {
@@ -443,7 +530,7 @@ describe("database schema migration", () => {
       expect.arrayContaining(["analytics_events_expiry_ttl", "analytics_events_name_occurred"]),
     );
     expect(JSON.stringify(publications.indexDefinitions)).toBe(indexesBefore);
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(9);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(10);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
   });
 
@@ -487,12 +574,12 @@ describe("database schema migration", () => {
 
     await runDatabaseMigrations(database);
     const indexes = fake.collection(COLLECTIONS.giftPublications).indexDefinitions;
-    const shareIndex = indexes.findIndex(
-      (index) => index["name"] === "gift_publications_share_id_unique",
+    const revisionIndex = indexes.findIndex(
+      (index) => index["name"] === "gift_publications_gift_revision_unique",
     );
-    indexes.splice(shareIndex, 1, { ...indexes[shareIndex], unique: false });
+    indexes.splice(revisionIndex, 1, { ...indexes[revisionIndex], unique: false });
     await expect(verifyDatabaseSchema(database)).rejects.toThrow(
-      "MongoDB index mismatch: giftPublications.gift_publications_share_id_unique",
+      "MongoDB index mismatch: giftPublications.gift_publications_gift_revision_unique",
     );
 
     await runDatabaseMigrations(database);
@@ -589,7 +676,7 @@ describe("database schema migration", () => {
     await runDatabaseMigrations(database);
     fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 1;
     await expect(verifyDatabaseSchema(database)).rejects.toThrow(
-      "MongoDB schema version mismatch: expected 9, received 1.",
+      "MongoDB schema version mismatch: expected 10, received 1.",
     );
 
     await runDatabaseMigrations(database);

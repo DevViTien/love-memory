@@ -4,8 +4,10 @@ import {
   createGiftPublication,
   type Gift,
   type GiftPublication,
+  isEditableGiftStatus,
   type MediaAsset,
   publishGiftDraft,
+  republishGift,
   updateGiftDraft,
 } from "@love-memory/domain";
 import {
@@ -61,16 +63,27 @@ export type GiftPublishPersistenceResult =
   | GiftPublishReplay
   | Readonly<{ publication: GiftPublication; status: "published" }>
   | Readonly<{ status: "assets-changed" }>
-  | Readonly<{ status: "stale" }>;
+  | Readonly<{ status: "stale" }>
+  /** Another key already published this revision: a concurrent update of the same revision. */
+  | Readonly<{ status: "revision-taken" }>;
+
+/**
+ * The state the publish checks saw, which the write is conditional on: a draft, or a published gift
+ * with its current publication (`undefined` for a document published before the pointer existed).
+ */
+export type GiftPublishPrecondition =
+  | Readonly<{ status: "draft" }>
+  | Readonly<{ publishedRevision: number | undefined; status: "published" }>;
 
 export type GiftPublishInput = Readonly<{
   /** Every image reference of the content, grouped by field; each must still be `ready`. */
   assetRefs: readonly GiftMediaReferenceGroup[];
   expectedRevision: number;
-  /** The gift in its published state, as `publishGiftDraft` returned it. */
+  /** The gift in its published state, as `publishGiftDraft` or `republishGift` returned it. */
   gift: Gift;
   idempotency: GiftPublishIdempotency;
   ownerId: string;
+  precondition: GiftPublishPrecondition;
   publication: GiftPublication;
 }>;
 
@@ -90,25 +103,29 @@ export interface GiftRepository {
   createDraft(gift: Gift, idempotency: GiftCreateIdempotency): Promise<GiftCreatePersistenceResult>;
   findAuthorized(publicId: string, accessors: readonly GiftAccessor[]): Promise<Gift | null>;
   /**
-   * Reads a gift by internal id only while it is a `draft`. Used only after a valid preview token
-   * named the gift; it grants nothing by itself.
+   * Reads a gift by internal id only while its content is editable (`draft` or `published`). Used
+   * only after a valid preview token named the gift; it grants nothing by itself.
    */
-  findDraftById(giftId: string): Promise<Gift | null>;
+  findEditableById(giftId: string): Promise<Gift | null>;
   /**
    * A published, `unlisted` gift by its share id. Used only by the public Viewer: the share id is
    * the recipient's credential.
    */
   findPublishedByShareId(shareId: string): Promise<Gift | null>;
-  /** The stored `gift-publish` key, if any, compared with this request. */
+  /**
+   * The stored `gift-publish` key, if any, compared with this request. A match replays the
+   * publication of the request's revision, even when the gift was updated since.
+   */
   findPublishReplay(
     idempotency: GiftPublishIdempotency,
     giftId: string,
+    revision: number,
   ): Promise<GiftPublishReplay | null>;
   /**
-   * One transaction: the conditional `draft → published` write, a write to every referenced
-   * `ready` asset, the publication record and the idempotency key, or nothing at all.
+   * One transaction: the conditional write to `published` (from the `precondition`), a write to
+   * every referenced `ready` asset, the publication record and the idempotency key, or nothing.
    */
-  publishDraft(input: GiftPublishInput): Promise<GiftPublishPersistenceResult>;
+  publish(input: GiftPublishInput): Promise<GiftPublishPersistenceResult>;
   validateMediaReferences(
     giftId: string,
     references: readonly GiftMediaReferenceGroup[],
@@ -126,7 +143,8 @@ export interface GiftAudioCatalog {
 }
 
 export interface GiftPublicationRepository {
-  findByShareId(shareId: string): Promise<GiftPublication | null>;
+  /** One publication of a gift; the current one is `revision: gift.publishedRevision`. */
+  findByGiftRevision(giftId: string, revision: number): Promise<GiftPublication | null>;
 }
 
 /** The internal free entitlement today; a verified-payment entitlement in Sprint 4 (ADR-0009). */
@@ -190,6 +208,7 @@ export type GiftServiceError = Readonly<
   | { actualRevision: number; code: "REVISION_CONFLICT"; expectedRevision: number }
   | { code: "FORBIDDEN" }
   | { code: "ACCESS_POLICY_UNSUPPORTED" }
+  | { code: "NO_UNPUBLISHED_CHANGES" }
   | { code: "TEMPLATE_NOT_EDITABLE" }
   | { code: "TEMPLATE_UNPUBLISHABLE" }
 >;
@@ -197,13 +216,23 @@ export type GiftServiceError = Readonly<
 export type GiftServiceResult<T> =
   Readonly<{ data: T; ok: true }> | Readonly<{ error: GiftServiceError; ok: false }>;
 
+/** The owner's summary of the current publication of a published gift. */
+export type GiftPublicationSummaryDto = Readonly<{
+  publishedAt: string;
+  revision: number;
+  shareId: string;
+  sharePath: string;
+}>;
+
+/** A draft, or the working copy of a published gift with its current publication. */
 export type GiftDraftDto = Readonly<{
   content: Readonly<Record<string, unknown>>;
   createdAt: string;
   ownerKind: "anonymous" | "user";
   publicId: string;
+  publication: GiftPublicationSummaryDto | null;
   revision: number;
-  status: "draft";
+  status: "draft" | "published";
   templateId: string;
   templateVersion: string;
   updatedAt: string;
@@ -218,10 +247,14 @@ export type GiftPublicationDto = Readonly<{
   status: "published";
 }>;
 
-/** What the Studio shows for an authorized gift: the editor, or the published panel. */
-export type StudioGiftView =
-  | Readonly<{ analytics: AnalyticsContext | null; draft: GiftDraftDto; kind: "draft" }>
-  | Readonly<{ kind: "published"; publication: GiftPublicationDto }>;
+/**
+ * What the Studio shows for an authorized gift: the editor, with the published panel above it for
+ * a published gift. Analytics is `null` for a published gift: the funnel ends at the first publish.
+ */
+export type StudioGiftView = Readonly<{
+  analytics: AnalyticsContext | null;
+  draft: GiftDraftDto;
+}>;
 
 export const PUBLISH_IDEMPOTENCY_TTL_MILLISECONDS = 24 * 60 * 60 * 1000;
 
@@ -247,9 +280,22 @@ function failure(error: GiftServiceError): GiftServiceResult<never> {
   return { error, ok: false };
 }
 
+function toPublicationSummary(gift: Gift): GiftPublicationSummaryDto | null {
+  if (gift.status !== "published") return null;
+  if (!gift.shareId || !gift.publishedAt || gift.publishedRevision === undefined) {
+    throw new Error("A published gift requires its current publication.");
+  }
+  return {
+    publishedAt: gift.publishedAt.toISOString(),
+    revision: gift.publishedRevision,
+    shareId: gift.shareId,
+    sharePath: `/g/${gift.shareId}`,
+  };
+}
+
 function toDto(gift: Gift): GiftDraftDto {
-  if (gift.status !== "draft") {
-    throw new Error("Only draft gifts can be represented by GiftDraftDto.");
+  if (gift.status !== "draft" && gift.status !== "published") {
+    throw new Error("Only editable gifts can be represented by GiftDraftDto.");
   }
 
   return {
@@ -257,6 +303,7 @@ function toDto(gift: Gift): GiftDraftDto {
     createdAt: gift.createdAt.toISOString(),
     ownerKind: gift.ownership.ownerId === null ? "anonymous" : "user",
     publicId: gift.publicId,
+    publication: toPublicationSummary(gift),
     revision: gift.revision,
     status: gift.status,
     templateId: gift.content.templateId,
@@ -424,12 +471,14 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
       }>,
     ): Promise<GiftServiceResult<GiftDraftDto>> {
       const gift = await dependencies.gifts.findAuthorized(input.publicId, input.accessors);
-      return gift?.status === "draft" ? success(toDto(gift)) : failure({ code: "NOT_FOUND" });
+      return gift && isEditableGiftStatus(gift.status)
+        ? success(toDto(gift))
+        : failure({ code: "NOT_FOUND" });
     },
 
     /**
-     * The Studio page's read: a draft opens the editor, a published gift the published panel.
-     * Every other status, and no access, is the same opaque not-found.
+     * The Studio page's read: the editor for a draft or a published gift's working copy. Every
+     * other status, and no access, is the same opaque not-found.
      */
     async getStudioGift(
       input: Readonly<{
@@ -439,33 +488,25 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
     ): Promise<GiftServiceResult<StudioGiftView>> {
       if (input.accessors.length === 0) return failure({ code: "NOT_FOUND" });
       const gift = await dependencies.gifts.findAuthorized(input.publicId, input.accessors);
-      if (gift?.status === "draft") {
-        // Only after the owner filter: a page receives a gift reference only for its own gift.
-        const analytics =
-          dependencies.analytics?.contextForGift({
-            id: gift.id,
-            templateId: gift.content.templateId,
-            templateVersion: gift.content.templateVersion,
-          }) ?? null;
-        return success({ analytics, draft: toDto(gift), kind: "draft" });
-      }
-      if (gift?.status === "published" && gift.shareId && gift.publishedAt) {
-        return success({
-          kind: "published",
-          publication: toPublicationDto(gift.publicId, {
-            publishedAt: gift.publishedAt,
-            revision: gift.revision,
-            shareId: gift.shareId,
-          }),
-        });
-      }
-      return failure({ code: "NOT_FOUND" });
+      if (!gift || !isEditableGiftStatus(gift.status)) return failure({ code: "NOT_FOUND" });
+      // Only after the owner filter: a page receives a gift reference only for its own gift. The
+      // creator funnel ends at the first publish, so a published gift sends no Studio events.
+      const analytics =
+        gift.status === "draft"
+          ? (dependencies.analytics?.contextForGift({
+              id: gift.id,
+              templateId: gift.content.templateId,
+              templateVersion: gift.content.templateVersion,
+            }) ?? null)
+          : null;
+      return success({ analytics, draft: toDto(gift) });
     },
 
     /**
-     * Publishes the stored content of the expected revision for its signed-in owner. The checks run
-     * in the order of `gift-publishing`; one transaction writes the gift, the asset confirmations,
-     * the immutable publication and the idempotency key.
+     * Publishes the stored content of the expected revision for its signed-in owner: a draft's
+     * first publication, or a newer revision of a published gift under the same share id. The
+     * checks run in the order of `gift-publishing`; one transaction writes the gift, the asset
+     * confirmations, the immutable publication and the idempotency key.
      */
     async publishGift(
       input: Readonly<{
@@ -496,20 +537,27 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
         scope: "gift-publish",
       };
       // Before the status check: a lost response of a successful publish is replayed as `201`.
-      const replay = await dependencies.gifts.findPublishReplay(idempotency, gift.id);
+      const replay = await dependencies.gifts.findPublishReplay(
+        idempotency,
+        gift.id,
+        input.expectedRevision,
+      );
       if (replay) {
         return replay.status === "replayed"
           ? success(toPublicationDto(gift.publicId, replay.publication))
           : failure({ code: "IDEMPOTENCY_CONFLICT" });
       }
 
-      if (gift.status !== "draft") return failure({ code: "INVALID_STATE" });
+      if (!isEditableGiftStatus(gift.status)) return failure({ code: "INVALID_STATE" });
       if (gift.revision !== input.expectedRevision) {
         return failure({
           actualRevision: gift.revision,
           code: "REVISION_CONFLICT",
           expectedRevision: input.expectedRevision,
         });
+      }
+      if (gift.status === "published" && input.expectedRevision <= (gift.publishedRevision ?? 0)) {
+        return failure({ code: "NO_UNPUBLISHED_CHANGES" });
       }
       if (gift.access.mode !== "unlisted") return failure({ code: "ACCESS_POLICY_UNSUPPORTED" });
 
@@ -536,11 +584,17 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
         });
       }
 
-      const published = publishGiftDraft(gift, {
-        expectedRevision: input.expectedRevision,
-        now: dependencies.clock(),
-        shareId: publishing.createShareId(),
-      });
+      const isUpdate = gift.status === "published";
+      const published = isUpdate
+        ? republishGift(gift, {
+            expectedRevision: input.expectedRevision,
+            now: dependencies.clock(),
+          })
+        : publishGiftDraft(gift, {
+            expectedRevision: input.expectedRevision,
+            now: dependencies.clock(),
+            shareId: publishing.createShareId(),
+          });
       if (!published.ok) {
         // The checks above already cover these; the domain refuses them again.
         return published.error.code === "GIFT_NOT_OWNED"
@@ -559,17 +613,21 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
         id: dependencies.createId(),
       });
 
-      const outcome = await dependencies.gifts.publishDraft({
+      const outcome = await dependencies.gifts.publish({
         assetRefs,
         expectedRevision: input.expectedRevision,
         gift: published.data,
         idempotency,
         ownerId: input.userId,
+        precondition: isUpdate
+          ? { publishedRevision: gift.publishedRevision, status: "published" }
+          : { status: "draft" },
         publication,
       });
       switch (outcome.status) {
         case "published":
-          // A first publish only: replays and every rejection record nothing.
+          // A first publish only: updates, replays and every rejection record nothing.
+          if (isUpdate) return success(toPublicationDto(gift.publicId, outcome.publication));
           try {
             dependencies.analytics?.publish.giftPublished({
               giftId: gift.id,
@@ -594,18 +652,30 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
               : changedImageFieldErrors(assetRefs, checkedAssets, freshAssets);
           return failure({ code: "INVALID_CONTENT", fieldErrors });
         }
-        case "stale": {
+        case "stale":
+        case "revision-taken": {
           const current = await dependencies.gifts.findAuthorized(input.publicId, ownerAccessors);
           if (!current) return failure({ code: "NOT_FOUND" });
-          if (current.status !== "draft") return failure({ code: "INVALID_STATE" });
+          if (!isEditableGiftStatus(current.status)) return failure({ code: "INVALID_STATE" });
+          if (current.revision !== input.expectedRevision) {
+            return failure({
+              actualRevision: current.revision,
+              code: "REVISION_CONFLICT",
+              expectedRevision: input.expectedRevision,
+            });
+          }
+          // Another tab or key published this revision first.
+          if (
+            outcome.status === "revision-taken" ||
+            (current.status === "published" &&
+              (current.publishedRevision ?? 0) >= input.expectedRevision)
+          ) {
+            return failure({ code: "NO_UNPUBLISHED_CHANGES" });
+          }
           if (current.access.mode !== "unlisted") {
             return failure({ code: "ACCESS_POLICY_UNSUPPORTED" });
           }
-          return failure({
-            actualRevision: current.revision,
-            code: "REVISION_CONFLICT",
-            expectedRevision: input.expectedRevision,
-          });
+          return failure({ code: "INVALID_STATE" });
         }
       }
     },
@@ -619,8 +689,8 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
       }>,
     ): Promise<GiftServiceResult<GiftDraftDto>> {
       const gift = await dependencies.gifts.findAuthorized(input.publicId, input.accessors);
-      // A gift that left `draft` (for example a published one) is no longer a draft to save.
-      if (gift?.status !== "draft") {
+      // A draft, or a published gift's working copy; any other status has nothing to save.
+      if (!gift || !isEditableGiftStatus(gift.status)) {
         return failure({ code: "NOT_FOUND" });
       }
 
@@ -699,7 +769,7 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
       }
 
       const current = await dependencies.gifts.findAuthorized(input.publicId, input.accessors);
-      if (current?.status !== "draft") {
+      if (!current || !isEditableGiftStatus(current.status)) {
         return failure({ code: "NOT_FOUND" });
       }
       return failure({

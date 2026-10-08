@@ -139,13 +139,14 @@ constraints:
   `deleted`), `createdAt`, `updatedAt`; `ownership` requires `anonymousDraftId`, `claimTokenHash`
   and `ownerId` and MUST be either anonymous (string draft id and claim token hash, null owner) or
   owned (null draft id and claim token hash, string owner); when present, `shareId` MUST be 22
-  base64url characters and `publishedAt` MUST be a date;
+  base64url characters, `publishedAt` MUST be a date and `publishedRevision` MUST be an int >= 0;
 - `giftRevisions` requires `_id`, `giftId`, `revision` (int >= 0), `content` (object), `createdAt`;
 - `assets` requires `_id`, `giftId`, `fieldId`, `giftSlot`, `fieldSlot`, `ownerId`,
   `anonymousDraftId`, `sourceKey`, `declaredContentType` (`image/jpeg`, `image/png`, `image/webp`),
   `declaredSizeBytes` (>= 1), `status` (`initiated`, `uploaded`, `processing`, `ready`, `failed`,
   `deleting`, `deleted`), `attempts` (int >= 0), `derivatives` (array), `placeholderDataUrl`,
-  `checksumSha256`, `failureCode`, `expiresAt`, `createdAt`, `updatedAt`;
+  `checksumSha256`, `failureCode`, `expiresAt`, `createdAt`, `updatedAt`; when present,
+  `detachedAt` MUST be a date or null;
 - `idempotencyKeys` requires `_id`, `actorKey`, `giftId`, `scope`, `key`, `requestFingerprint`,
   `expiresAt`, `createdAt`, `updatedAt`, with non-empty `actorKey`, `giftId` and
   `requestFingerprint`;
@@ -201,6 +202,12 @@ migration run.
   without `artifactContentHash`, is written
 - **THEN** MongoDB rejects the write with a document validation error
 
+#### Scenario: Malformed publication pointer rejected
+
+- **WHEN** a `gifts` document with `publishedRevision` `-1` or `"7"`, or an `assets` document with
+  `detachedAt` `"yesterday"`, is written
+- **THEN** MongoDB rejects the write with a document validation error
+
 #### Scenario: Analytics rate-limit scopes accepted
 
 - **WHEN** rate-limit counters with `scope` `analytics-event` and `analytics-event-ip` are written
@@ -240,8 +247,8 @@ The system SHALL maintain these named indexes and MUST keep every index name uni
   `idempotency_expiry_ttl`;
 - `jobOutbox`: `job_outbox_available`, `job_outbox_deduplication` (unique `deduplicationKey`);
 - `previewTokens`: `preview_tokens_expiry_ttl`;
-- `giftPublications`: `gift_publications_share_id_unique` (unique `shareId`),
-  `gift_publications_gift_revision_unique` (unique `giftId` + `revision`);
+- `giftPublications`: `gift_publications_gift_revision_unique` (unique `giftId` + `revision`),
+  which also serves the lookup of a gift's current publication;
 - `analyticsEvents`: `analytics_events_expiry_ttl`, `analytics_events_name_occurred` (`name` +
   `occurredAt`).
 
@@ -250,8 +257,9 @@ The indexes `sessions_expiry_ttl`, `verifications_expiry_ttl`, `api_rate_limits_
 TTL indexes on `expiresAt` with
 `expireAfterSeconds` `0`, so MongoDB deletes documents once `expiresAt` has passed. An existing
 index with an expected name but a different key, uniqueness, sparseness, TTL, partial filter or
-collation SHALL be dropped and recreated. The legacy index `assets_storage_key_unique` SHALL be
-dropped when present.
+collation SHALL be dropped and recreated. The legacy indexes `assets_storage_key_unique` and
+`gift_publications_share_id_unique` SHALL be dropped when present; the latter would reject the
+second publication of a gift, which keeps its share id.
 
 #### Scenario: Drifted index is rebuilt
 
@@ -262,6 +270,13 @@ dropped when present.
 
 - **WHEN** `assets` has an index named `assets_storage_key_unique` and migrations run
 - **THEN** that index no longer exists
+
+#### Scenario: Legacy publication share id index removed
+
+- **WHEN** `giftPublications` has an index named `gift_publications_share_id_unique` and migrations
+  run
+- **THEN** that index no longer exists, and two publications of one gift with the same `shareId`
+  and different revisions can both be stored
 
 #### Scenario: Expired idempotency key removed
 
@@ -294,8 +309,11 @@ dropped when present.
 The system SHALL provide `db:migrate`, which converges the database to the current schema (creating
 missing collections with validators, updating validators, reconciling indexes) and then upserts the
 ledger document `_id: "core"` in `databaseMigrations` with `version` equal to the current schema
-version `9`, `appliedAt` set to now, and `createdAt` set only on first insert. Running it repeatedly
-SHALL produce the same schema without errors. It SHALL print one JSON line per collection and phase,
+version `10`, `appliedAt` set to now, and `createdAt` set only on first insert. Before writing the
+ledger it SHALL set `publishedRevision` to the gift's `revision` on every `published` gift that has
+no `publishedRevision`; such gifts were published before editing after publish existed, so their
+revision is the revision of their only publication. Running it repeatedly SHALL produce the same
+schema and data without errors. It SHALL print one JSON line per collection and phase,
 `{"collection":<name>,"event":"database_migration","phase":"start"|"complete"}`, and SHALL verify the
 schema after migrating.
 
@@ -308,7 +326,14 @@ and always close the MongoDB client before exiting. An unrecognized command MUST
 #### Scenario: Re-running migrations is safe
 
 - **WHEN** `db:migrate` is run twice against the same database
-- **THEN** both runs succeed, the schema verifies, and the ledger `version` is `9`
+- **THEN** both runs succeed, the schema verifies, and the ledger `version` is `10`
+
+#### Scenario: Published gifts backfilled
+
+- **WHEN** `db:migrate` runs on a database with a `published` gift at revision `7` that has no
+  `publishedRevision`, and a `draft` gift
+- **THEN** the published gift's `publishedRevision` is `7`, the draft has no `publishedRevision`,
+  and a second run changes nothing
 
 #### Scenario: Command failure exits non-zero
 
@@ -321,12 +346,12 @@ The system SHALL provide `db:verify`, which fails without modifying the database
 collection is missing (`Missing MongoDB collection`), a validator differs from its definition
 (`MongoDB validator mismatch`), a legacy index remains (`Legacy MongoDB index remains`), an expected
 index is missing (`Missing MongoDB index`) or differs in key or options (`MongoDB index mismatch`),
-or the ledger version differs from `9` or is missing (`MongoDB schema version mismatch`).
+or the ledger version differs from `10` or is missing (`MongoDB schema version mismatch`).
 
 #### Scenario: Schema drift detected
 
 - **WHEN** the ledger document records `version` `1`
-- **THEN** `db:verify` fails with `MongoDB schema version mismatch: expected 9, received 1.`
+- **THEN** `db:verify` fails with `MongoDB schema version mismatch: expected 10, received 1.`
 
 #### Scenario: Database not yet migrated to version 7
 
@@ -334,7 +359,7 @@ or the ledger version differs from `9` or is missing (`MongoDB schema version mi
 - **THEN** `db:verify` fails without modifying the database, for example with
   `MongoDB validator mismatch` for `apiRateLimits` or `gifts`, or `Missing MongoDB collection` for
   `previewTokens`, `giftPublications` or `analyticsEvents`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `9`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `10`
 
 #### Scenario: Database not yet migrated to version 8
 
@@ -342,7 +367,7 @@ or the ledger version differs from `9` or is missing (`MongoDB schema version mi
 - **THEN** `db:verify` fails without modifying the database, for example with
   `MongoDB validator mismatch` for `apiRateLimits` or `gifts`, or `Missing MongoDB collection` for
   `giftPublications` or `analyticsEvents`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `9`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `10`
 
 #### Scenario: Database not yet migrated to version 9
 
@@ -350,7 +375,15 @@ or the ledger version differs from `9` or is missing (`MongoDB schema version mi
 - **THEN** `db:verify` fails without modifying the database, for example with
   `MongoDB validator mismatch` for `apiRateLimits`, or `Missing MongoDB collection` for
   `analyticsEvents`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `9`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `10`
+
+#### Scenario: Database not yet migrated to version 10
+
+- **WHEN** the ledger document records `version` `9`
+- **THEN** `db:verify` fails without modifying the database, for example with
+  `MongoDB validator mismatch` for `gifts` or `assets`, or `Legacy MongoDB index remains` for
+  `giftPublications.gift_publications_share_id_unique`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `10`
 
 #### Scenario: Empty database fails verification
 
@@ -414,16 +447,22 @@ stale revision `0` is rejected; the draft can be claimed by a user; replaying th
 anonymous idempotency key after the claim yields a conflict; publishing the claimed draft at its
 current revision with a `gift-publish` idempotency key, sent as two concurrent requests that each
 generate their own share id, stores exactly one `giftPublications` record, returns the same
-`shareId` to both, and sets the gift's status to `published` with that `shareId`; replaying that publish key
-returns the same publication; a publish at a stale revision is rejected; the lookup of a published
-gift by share id is answered by an index scan of `gifts_share_id_unique` (checked with `explain`);
-a `ready` asset of
-the published gift can no longer be moved to `deleting`; and, on a second draft, a publish and a
-concurrent deletion of its only `ready` asset never both succeed: either the gift is published with
-the asset still `ready`, or the asset is `deleting` with the gift still a `draft`. It SHALL delete
-the gifts, their revisions,
-publications, assets and idempotency keys whether or not verification succeeds, and
-print `Gift persistence verification completed successfully.` on success.
+`shareId` to both, and sets the gift's status to `published` with that `shareId` and its
+`publishedRevision`; replaying that publish key returns the same publication; a publish at a stale
+revision is rejected; the lookup of a published gift by share id is answered by an index scan of
+`gifts_share_id_unique` (checked with `explain`); a save of the published gift's working copy
+persists the next revision while the current publication is unchanged; publishing that revision
+with a new key stores a second publication with the same `shareId`, switches `publishedRevision`,
+and leaves the first publication unchanged; the lookup of the current publication by gift id and
+revision is answered by an index scan of `gift_publications_gift_revision_unique`; replaying the
+first publish key still returns the first publication; publishing the same revision again with
+another key is rejected and stores nothing; a `ready` asset referenced by the current publication
+is detached and never moved to `deleting`; and, on a second draft, a publish and a concurrent
+deletion of its only `ready` asset never both delete the asset and publish it: either the gift is
+published with the asset still `ready`, or the asset is `deleting` with the gift still a `draft`.
+It SHALL delete the gifts, their revisions, publications, assets and idempotency keys whether or
+not verification succeeds, and print `Gift persistence verification completed successfully.` on
+success.
 
 #### Scenario: Verification leaves no residue
 
@@ -434,9 +473,9 @@ print `Gift persistence verification completed successfully.` on success.
 #### Scenario: Publish transaction verified on a real replica set
 
 - **WHEN** `db:verify-gifts` runs against a MongoDB replica set with the current schema
-- **THEN** the publish, its replay, the stale-revision rejection, the indexed share-id lookup and the refused
-  asset deletion
-  behave as specified, and the command prints
+- **THEN** the publish, its replay, the stale-revision rejection, the indexed share-id lookup, the
+  update to a second publication under the same share id, the indexed current-publication lookup
+  and the detached asset behave as specified, and the command prints
   `Gift persistence verification completed successfully.`
 
 ### Requirement: Media persistence verification

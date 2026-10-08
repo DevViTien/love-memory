@@ -17,6 +17,7 @@ describe("GiftSchema", () => {
       ownership: { anonymousDraftId: null, claimTokenHash: null, ownerId: "owner-1" },
       publicId: "q1w2e3r4t5y6u7i8",
       publishedAt: "2026-09-16T00:00:00.000Z",
+      publishedRevision: 2,
       revision: 2,
       shareId: "Ab0_-cdefghijklmnopqrs",
       status: "published",
@@ -113,13 +114,29 @@ describe("GiftSchema", () => {
     } as const;
     const shareFields = {
       publishedAt: new Date("2026-09-16T00:00:00.000Z"),
+      publishedRevision: 3,
       shareId: "Ab0_-cdefghijklmnopqrs",
     };
 
-    it("rejects a published gift without a share id or publication time", () => {
+    it("rejects a published gift without a share id, publication time or published revision", () => {
       expect(GiftSchema.safeParse({ ...base, status: "published" }).success).toBe(false);
       expect(
         GiftSchema.safeParse({ ...base, shareId: shareFields.shareId, status: "published" })
+          .success,
+      ).toBe(false);
+      const { publishedRevision: _revision, ...withoutRevision } = shareFields;
+      expect(
+        GiftSchema.safeParse({ ...base, ...withoutRevision, status: "published" }).success,
+      ).toBe(false);
+    });
+
+    it("accepts a working copy ahead of its publication and rejects one behind it", () => {
+      expect(
+        GiftSchema.safeParse({ ...base, ...shareFields, publishedRevision: 1, status: "published" })
+          .success,
+      ).toBe(true);
+      expect(
+        GiftSchema.safeParse({ ...base, ...shareFields, publishedRevision: 4, status: "published" })
           .success,
       ).toBe(false);
     });
@@ -132,6 +149,9 @@ describe("GiftSchema", () => {
         GiftSchema.safeParse({ ...base, publishedAt: shareFields.publishedAt, status: "draft" })
           .success,
       ).toBe(false);
+      expect(GiftSchema.safeParse({ ...base, publishedRevision: 3, status: "draft" }).success).toBe(
+        false,
+      );
     });
 
     it("accepts a draft without share fields and a published gift with both", () => {

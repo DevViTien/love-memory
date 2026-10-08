@@ -38,6 +38,11 @@ export const MediaAssetSchema = z
     declaredContentType: z.enum(["image/jpeg", "image/png", "image/webp"]),
     declaredSizeBytes: z.number().int().positive().max(MEDIA_ASSET_LIMITS.maximumInputBytes),
     derivatives: z.array(MediaAssetDerivativeSchema).max(6),
+    /**
+     * When the owner removed this photo from a published gift's working copy while the current
+     * publication still shows it: kept for recipients, but out of every media operation and quota.
+     */
+    detachedAt: z.coerce.date().nullable().default(null),
     expiresAt: z.coerce.date().nullable(),
     failureCode: z
       .enum(["DECODE_FAILED", "OBJECT_MISSING", "PROCESSING_FAILED", "UPLOAD_INVALID"])
@@ -67,6 +72,16 @@ export const MediaAssetSchema = z
         code: "custom",
         message: "Gift and field quota slots must be assigned together.",
         path: ["giftSlot"],
+      });
+    }
+    if (
+      asset.detachedAt !== null &&
+      (asset.status !== "ready" || asset.giftSlot !== null || asset.fieldSlot !== null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Only a ready asset without quota slots can be detached.",
+        path: ["detachedAt"],
       });
     }
     if (asset.status === "ready" && asset.derivatives.length === 0) {

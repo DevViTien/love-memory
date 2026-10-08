@@ -10,7 +10,7 @@ import { type FlushResult } from "./autosave-controller";
 
 /**
  * A publish request that has not answered after 30 s is aborted and reported as failed. The retry
- * reuses the page's `Idempotency-Key`, so a publish that did succeed is answered as its replay.
+ * reuses the same `Idempotency-Key`, so a publish that did succeed is answered as its replay.
  */
 export const PUBLISH_REQUEST_TIMEOUT_MILLISECONDS = 30_000;
 
@@ -31,7 +31,7 @@ export type PublishOutcome =
 export type RequestPublishInput = Readonly<{
   fetch?: typeof fetch;
   flush: () => Promise<FlushResult>;
-  /** One UUID per Studio page, reused by every attempt: keys are recorded only on success. */
+  /** One UUID reused by every attempt until a `201`: keys are recorded only on success. */
   idempotencyKey: string;
   publicId: string;
 }>;
@@ -41,7 +41,10 @@ const UNPUBLISHABLE_REASONS: readonly string[] = [
   "TEMPLATE_VERSION_UNPUBLISHABLE",
 ];
 
-/** A `409` without details: the gift changed state elsewhere, so the page reloads to show it. */
+/**
+ * A `409` without details, or `NO_UNPUBLISHED_CHANGES`: the gift was published or updated
+ * elsewhere, so the page reloads to show its current state.
+ */
 export function reloadStudioPage(): void {
   window.location.reload();
 }
@@ -66,12 +69,13 @@ function classifyConflict(payload: unknown): PublishOutcome {
     return { kind: "unpublishable" };
   }
   if (reason === "ACCESS_POLICY_UNSUPPORTED") return { kind: "access-unsupported" };
+  if (reason === "NO_UNPUBLISHED_CHANGES") return { kind: "reload" };
   return { kind: "failed" };
 }
 
 /**
- * `Xuất bản`: settles pending saves first, then publishes the revision of the last successful
- * save. It never rejects and never logs.
+ * `Xuất bản` or `Cập nhật món quà`: settles pending saves first, then publishes the revision of
+ * the last successful save. It never rejects and never logs.
  */
 export async function requestPublish({
   fetch: fetchImpl = fetch,

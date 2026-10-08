@@ -1,7 +1,7 @@
 import { type FrameLocator, type Locator, type Page, type TestInfo } from "@playwright/test";
 
 import { expect, test } from "./test";
-import { captureViewerScreenshot } from "./viewer-harness";
+import { captureViewerScreenshot, pressTemplateNext } from "./viewer-harness";
 
 const HARNESS = "/viewer/memory-box/1.1.0";
 const VIEWER_TITLE = "LoveMemory template viewer";
@@ -92,9 +92,9 @@ async function expectNextInsideFrame(frame: FrameLocator, label: string) {
   expect(inside, `Tiếp outside the frame viewport in ${label}`).toBe(true);
 }
 
-/** Presses the in-frame `Tiếp` button and waits for the next scene. */
+/** Presses the in-frame `Tiếp` button once the scene settled, and waits for the next scene. */
 async function advance(frame: FrameLocator, nextSceneId: string) {
-  await frame.getByRole("button", { name: "Tiếp" }).click();
+  await pressTemplateNext(frame);
   await expect(scene(frame, nextSceneId)).toBeVisible();
 }
 

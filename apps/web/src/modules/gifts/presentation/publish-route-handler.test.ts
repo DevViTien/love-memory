@@ -201,6 +201,7 @@ describe("publish route handler", () => {
 
   it.each([
     ["ACCESS_POLICY_UNSUPPORTED", "ACCESS_POLICY_UNSUPPORTED"],
+    ["NO_UNPUBLISHED_CHANGES", "NO_UNPUBLISHED_CHANGES"],
     ["TEMPLATE_NOT_EDITABLE", "TEMPLATE_VERSION_NOT_EDITABLE"],
     ["TEMPLATE_UNPUBLISHABLE", "TEMPLATE_VERSION_UNPUBLISHABLE"],
   ] as const)("answers 409 with details.reason for %s", async (code, reason) => {

@@ -28,14 +28,29 @@ export const UpdateGiftDraftRequestSchema = z
 
 export const ClaimGiftDraftRequestSchema = z.object({}).strict();
 
+/** The owner's summary of a published gift's current publication: what recipients receive. */
+export const GiftPublicationSummarySchema = z
+  .object({
+    publishedAt: z.iso.datetime(),
+    revision: z.number().int().nonnegative(),
+    shareId: ShareIdSchema,
+    sharePath: z.string().regex(/^\/g\/[A-Za-z0-9_-]{22}$/),
+  })
+  .strict();
+
+/**
+ * A draft, or the working copy of a published gift. The gift has unpublished changes exactly when
+ * `revision` is greater than `publication.revision`.
+ */
 export const GiftDraftDtoSchema = z
   .object({
     content: z.record(z.string(), z.unknown()),
     createdAt: z.iso.datetime(),
     ownerKind: z.enum(["anonymous", "user"]),
     publicId: PublicGiftIdSchema,
+    publication: GiftPublicationSummarySchema.nullable(),
     revision: z.number().int().nonnegative(),
-    status: z.literal("draft"),
+    status: z.enum(["draft", "published"]),
     templateId: GiftTemplateIdSchema,
     templateVersion: GiftTemplateVersionSchema,
     updatedAt: z.iso.datetime(),
@@ -88,6 +103,7 @@ export type GiftPreviewLinkDto = z.infer<typeof GiftPreviewLinkDtoSchema>;
 export type GiftPreviewLinkResponse = z.infer<typeof GiftPreviewLinkResponseSchema>;
 export type CreateGiftDraftRequest = z.infer<typeof CreateGiftDraftRequestSchema>;
 export type GiftDraftDto = z.infer<typeof GiftDraftDtoSchema>;
+export type GiftPublicationSummary = z.infer<typeof GiftPublicationSummarySchema>;
 export type GiftPublicationDto = z.infer<typeof GiftPublicationDtoSchema>;
 export type GiftPublicationResponse = z.infer<typeof GiftPublicationResponseSchema>;
 export type PublishGiftRequest = z.infer<typeof PublishGiftRequestSchema>;

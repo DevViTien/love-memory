@@ -1,4 +1,5 @@
 import {
+  isEditableGiftStatus,
   MEDIA_ASSET_LIMITS,
   type Gift,
   type MediaAsset,
@@ -31,13 +32,18 @@ export interface MediaAssetRepository {
   ) => Promise<boolean>;
   releaseInitiated: (assetId: string, now: Date) => Promise<boolean>;
   findById: (assetId: string) => Promise<MediaAsset | null>;
+  /** The gift's working-copy assets: every non-`deleted` asset that is not detached. */
   listByGiftId: (giftId: string) => Promise<readonly MediaAsset[]>;
-  /** Exactly these assets of the gift (a publication snapshot), filtered by the gift id. */
+  /**
+   * Exactly these assets of the gift (a publication snapshot), filtered by the gift id. Detached
+   * assets are included: a publication may still show them.
+   */
   listByIdsForGift: (giftId: string, assetIds: readonly string[]) => Promise<readonly MediaAsset[]>;
   markDeleted: (assetId: string, now: Date) => Promise<boolean>;
   /**
-   * Moves an asset to `deleting` in one transaction with the check that its gift is still a
-   * `draft`, so a deletion can never interleave with a publish of that gift.
+   * In one transaction with the read of its gift (still `draft` or `published`) and of the gift's
+   * current publication: detaches the asset when that publication references it, otherwise moves
+   * it to `deleting`. A deletion can therefore never interleave with a publish of that gift.
    */
   markDeleting: (assetId: string, giftId: string, now: Date) => Promise<MarkDeletingResult>;
   markFailed: (
@@ -51,8 +57,10 @@ export interface MediaAssetRepository {
 
 export type MarkDeletingResult =
   | Readonly<{ asset: MediaAsset; kind: "deleting" }>
+  /** Kept for the current publication's recipients, out of the working copy and its quotas. */
+  | Readonly<{ kind: "detached" }>
   | Readonly<{ kind: "asset-unavailable" }>
-  | Readonly<{ kind: "gift-not-draft" }>;
+  | Readonly<{ kind: "gift-not-editable" }>;
 
 export type MediaAssetDto = Readonly<{
   assetId: string;
@@ -88,9 +96,14 @@ const completedStatuses: ReadonlySet<MediaAsset["status"]> = new Set([
 ]);
 
 function isAuthorizedAsset(asset: MediaAsset, gift: Gift): boolean {
-  // Every media operation ends when the gift leaves `draft`: a published gift's assets stay as
-  // they are, and their URLs are signed only by the public Viewer.
-  return gift.status === "draft" && asset.giftId === gift.id && asset.status !== "deleted";
+  // Media operations act on the editable content: a draft's, or a published gift's working copy.
+  // A detached asset belongs only to a publication, whose URLs the public Viewer alone signs.
+  return (
+    isEditableGiftStatus(gift.status) &&
+    asset.giftId === gift.id &&
+    asset.status !== "deleted" &&
+    asset.detachedAt === null
+  );
 }
 
 export function createMediaService({
@@ -204,7 +217,7 @@ export function createMediaService({
         assetId: string;
         giftPublicId: string;
       }>,
-    ): Promise<MediaServiceResult<{ assetId: string; deleted: true }>> {
+    ): Promise<MediaServiceResult<{ assetId: string; deleted: boolean }>> {
       const authorized = await findAuthorizedAsset(
         input.assetId,
         input.giftPublicId,
@@ -212,9 +225,11 @@ export function createMediaService({
       );
       if (!authorized) return failure({ code: "NOT_FOUND" });
       const marked = await assets.markDeleting(input.assetId, authorized.gift.id, clock());
-      // Published between the check above and the write: the same opaque 404, never a 409.
-      if (marked.kind === "gift-not-draft") return failure({ code: "NOT_FOUND" });
+      // Left the editable statuses between the check above and the write: the same opaque 404.
+      if (marked.kind === "gift-not-editable") return failure({ code: "NOT_FOUND" });
       if (marked.kind === "asset-unavailable") return failure({ code: "INVALID_STATE" });
+      // The current publication still shows it: nothing is removed from storage.
+      if (marked.kind === "detached") return success({ assetId: input.assetId, deleted: false });
       const deleting = marked.asset;
 
       const cleanup = await Promise.allSettled([
@@ -269,7 +284,7 @@ export function createMediaService({
       >
     > {
       const gift = await authorizeGift(input.giftPublicId, input.accessors);
-      if (!gift || gift.status !== "draft") return failure({ code: "NOT_FOUND" });
+      if (!gift || !isEditableGiftStatus(gift.status)) return failure({ code: "NOT_FOUND" });
       const manifest = await findManifest(gift.content.templateId, gift.content.templateVersion);
       const field = manifest?.fields.find((candidate) => candidate.id === input.fieldId);
       if (!field || !isImageField(field)) return failure({ code: "INVALID_FIELD" });
@@ -286,6 +301,7 @@ export function createMediaService({
         declaredContentType: input.contentType,
         declaredSizeBytes: input.sizeBytes,
         derivatives: [],
+        detachedAt: null,
         expiresAt,
         failureCode: null,
         fieldId: field.id,
@@ -342,7 +358,7 @@ export function createMediaService({
       }>,
     ): Promise<MediaServiceResult<readonly MediaAssetDto[]>> {
       const gift = await authorizeGift(input.giftPublicId, input.accessors);
-      if (gift?.status !== "draft") return failure({ code: "NOT_FOUND" });
+      if (!gift || !isEditableGiftStatus(gift.status)) return failure({ code: "NOT_FOUND" });
       return success(
         await Promise.all(
           (await assets.listByGiftId(gift.id)).map((asset) =>

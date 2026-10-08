@@ -39,6 +39,41 @@ describe("media asset", () => {
     expect(MediaAssetSchema.safeParse({ ...base, status: "ready" }).success).toBe(false);
   });
 
+  describe("detached assets", () => {
+    const ready = {
+      ...base,
+      derivatives: [
+        { contentType: "image/webp" as const, height: 800, key: "private/d/800", width: 640 },
+      ],
+      status: "ready" as const,
+    };
+    const detachedAt = new Date("2026-10-01T00:00:00.000Z");
+
+    it("defaults legacy documents to not detached", () => {
+      expect(MediaAssetSchema.parse(base).detachedAt).toBeNull();
+    });
+
+    it("accepts a detached ready asset without slots", () => {
+      expect(
+        MediaAssetSchema.safeParse({ ...ready, detachedAt, fieldSlot: null, giftSlot: null })
+          .success,
+      ).toBe(true);
+    });
+
+    it("rejects a detached asset that keeps slots or is not ready", () => {
+      expect(MediaAssetSchema.safeParse({ ...ready, detachedAt }).success).toBe(false);
+      expect(
+        MediaAssetSchema.safeParse({
+          ...ready,
+          detachedAt,
+          fieldSlot: null,
+          giftSlot: null,
+          status: "deleting",
+        }).success,
+      ).toBe(false);
+    });
+  });
+
   it("only permits explicit lifecycle transitions", () => {
     expect(canTransitionMediaAsset("initiated", "uploaded")).toBe(true);
     expect(canTransitionMediaAsset("failed", "processing")).toBe(true);

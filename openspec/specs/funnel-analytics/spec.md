@@ -391,8 +391,10 @@ When analytics is enabled, the Studio of a draft SHALL send these events with th
 - `publish_clicked` each time the creator chooses the enabled `Xuất bản` action, before the save
   flush and the publish request. It is not sent while the action is disabled or already busy.
 
-The Studio MUST NOT send any event for a gift that is shown as published. Loading a draft, moving
-between steps and a failed save MUST NOT send an event.
+The Studio MUST NOT send any event for a gift that is published: not when it opens a published
+gift, not while the owner edits, previews or updates its working copy, and not after the first
+publish succeeded in the same page. Loading a draft, moving between steps and a failed save MUST
+NOT send an event.
 
 #### Scenario: First autosave
 
@@ -429,6 +431,12 @@ between steps and a failed save MUST NOT send an event.
 - **WHEN** an anonymous creator sees `Xuất bản` disabled and clicks it
 - **THEN** no `publish_clicked` is sent
 
+#### Scenario: Editing a published gift
+
+- **WHEN** the owner of a published gift edits a caption, opens a preview and chooses
+  `Cập nhật món quà`
+- **THEN** no analytics event is sent from the Studio
+
 ### Requirement: Publish event on the server
 
 When analytics is enabled, the publish service SHALL record exactly one `gift_published` event,
@@ -436,6 +444,8 @@ with `sessionId` `null` and the published snapshot's `templateId` and `templateV
 publish request that newly publishes a draft. It SHALL NOT record one for these requests:
 
 - a replay of an earlier publish with the same `Idempotency-Key`;
+- an update of an already published gift (`gift-publishing`), so each gift has at most one
+  `gift_published` event;
 - any rejected publish, whatever its status code.
 
 The event SHALL be written after the response is sent, so it adds no latency. A failure to write it
@@ -451,6 +461,11 @@ response or its status, and it MUST NOT undo the publication.
 
 - **WHEN** the same `POST /api/gifts/{publicId}/publish` is replayed with the same `Idempotency-Key`
   and body, and answers `201` again
+- **THEN** still only one `gift_published` event exists for that gift
+
+#### Scenario: Update of a published gift
+
+- **WHEN** the owner updates a published gift and gets `201`
 - **THEN** still only one `gift_published` event exists for that gift
 
 #### Scenario: Rejected publish

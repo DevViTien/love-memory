@@ -28,6 +28,7 @@ const baseAsset: MediaAsset = {
   declaredContentType: "image/jpeg",
   declaredSizeBytes: 3,
   derivatives: [],
+  detachedAt: null,
   expiresAt: new Date(now.getTime() + 60_000),
   failureCode: null,
   fieldId: "photos",
@@ -70,12 +71,29 @@ describe("Mongo media repositories", () => {
     insertOne: vi.fn(() => Promise.resolve({ acknowledged: true })),
     updateOne: vi.fn(() => Promise.resolve({ matchedCount: 0, modifiedCount: 0 })),
   };
+  type GiftProjection = {
+    _id: string;
+    publishedRevision?: number;
+    revision?: number;
+    status: string;
+  };
   const gifts = {
-    findOne: vi.fn(() => Promise.resolve({ _id: baseAsset.giftId } as { _id: string } | null)),
+    findOne: vi.fn(() =>
+      Promise.resolve({ _id: baseAsset.giftId, status: "draft" } as GiftProjection | null),
+    ),
+  };
+  const giftPublications = {
+    findOne: vi.fn(() => Promise.resolve(null as { assetIds: string[] } | null)),
   };
   const database = {
     collection: vi.fn((name: string) =>
-      name === "assets" ? assets : name === "gifts" ? gifts : jobs,
+      name === "assets"
+        ? assets
+        : name === "gifts"
+          ? gifts
+          : name === "giftPublications"
+            ? giftPublications
+            : jobs,
     ),
   };
   const session = {
@@ -111,6 +129,12 @@ describe("Mongo media repositories", () => {
       id: baseAsset.id,
     });
     await expect(mongoMediaAssetRepository.listByGiftId(baseAsset.giftId)).resolves.toHaveLength(1);
+    // The working copy only: a detached asset belongs to a publication, not to the editor.
+    expect(assets.find).toHaveBeenLastCalledWith({
+      detachedAt: null,
+      giftId: baseAsset.giftId,
+      status: { $ne: "deleted" },
+    });
     assets.find.mockReturnValueOnce({
       sort: () => ({ toArray: () => Promise.resolve([]) }),
       toArray: () => Promise.resolve([document()]),
@@ -171,7 +195,7 @@ describe("Mongo media repositories", () => {
       true,
     );
     expect(assets.find).toHaveBeenCalledWith(
-      { giftId: baseAsset.giftId, status: { $in: expect.any(Array) as unknown } },
+      { detachedAt: null, giftId: baseAsset.giftId, status: { $in: expect.any(Array) as unknown } },
       expect.objectContaining({ session }),
     );
     expect(assets.insertOne).toHaveBeenCalledWith(
@@ -396,7 +420,7 @@ describe("Mongo media repositories", () => {
   });
 
   describe("markDeleting", () => {
-    it("reads the draft gift and moves the asset in one session", async () => {
+    it("reads the editable gift and moves the asset in one session", async () => {
       assets.findOneAndUpdate.mockResolvedValueOnce(document("deleting"));
 
       await expect(
@@ -408,11 +432,17 @@ describe("Mongo media repositories", () => {
 
       expect(session.withTransaction).toHaveBeenCalledOnce();
       expect(gifts.findOne).toHaveBeenCalledWith(
-        { _id: baseAsset.giftId, status: "draft" },
-        { projection: { _id: 1 }, session },
+        { _id: baseAsset.giftId, status: { $in: ["draft", "published"] } },
+        { projection: { _id: 1, publishedRevision: 1, revision: 1, status: 1 }, session },
       );
+      expect(giftPublications.findOne).not.toHaveBeenCalled();
       expect(assets.findOneAndUpdate).toHaveBeenCalledWith(
-        { _id: baseAsset.id, giftId: baseAsset.giftId, status: { $ne: "deleted" } },
+        {
+          _id: baseAsset.id,
+          detachedAt: null,
+          giftId: baseAsset.giftId,
+          status: { $ne: "deleted" },
+        },
         {
           $set: {
             expiresAt: new Date(now.getTime() + 60_000),
@@ -424,13 +454,69 @@ describe("Mongo media repositories", () => {
       );
     });
 
-    it("answers gift-not-draft without touching the asset of a published gift", async () => {
+    it("answers gift-not-editable without touching the asset of a gift in another status", async () => {
       gifts.findOne.mockResolvedValueOnce(null);
 
       await expect(
         mongoMediaAssetRepository.markDeleting(baseAsset.id, baseAsset.giftId, now),
-      ).resolves.toEqual({ kind: "gift-not-draft" });
+      ).resolves.toEqual({ kind: "gift-not-editable" });
       expect(assets.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("detaches a photo that the current publication references, in the same session", async () => {
+      gifts.findOne.mockResolvedValueOnce({
+        _id: baseAsset.giftId,
+        publishedRevision: 4,
+        revision: 6,
+        status: "published",
+      });
+      giftPublications.findOne.mockResolvedValueOnce({ assetIds: [baseAsset.id] });
+
+      await expect(
+        mongoMediaAssetRepository.markDeleting(baseAsset.id, baseAsset.giftId, now),
+      ).resolves.toEqual({ kind: "detached" });
+
+      expect(giftPublications.findOne).toHaveBeenCalledWith(
+        { giftId: baseAsset.giftId, revision: 4 },
+        { projection: { _id: 0, assetIds: 1 }, session },
+      );
+      expect(assets.updateOne).toHaveBeenCalledWith(
+        { _id: baseAsset.id, detachedAt: null, giftId: baseAsset.giftId, status: "ready" },
+        { $set: { detachedAt: now, fieldSlot: null, giftSlot: null, updatedAt: now } },
+        { session },
+      );
+      expect(assets.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("reads a legacy published gift's only publication by its revision", async () => {
+      gifts.findOne.mockResolvedValueOnce({
+        _id: baseAsset.giftId,
+        revision: 3,
+        status: "published",
+      });
+      assets.findOneAndUpdate.mockResolvedValueOnce(document("deleting"));
+
+      await expect(
+        mongoMediaAssetRepository.markDeleting(baseAsset.id, baseAsset.giftId, now),
+      ).resolves.toMatchObject({ kind: "deleting" });
+      expect(giftPublications.findOne).toHaveBeenCalledWith(
+        { giftId: baseAsset.giftId, revision: 3 },
+        expect.objectContaining({ session }),
+      );
+    });
+
+    it("answers asset-unavailable when the photo to detach is no longer ready", async () => {
+      gifts.findOne.mockResolvedValueOnce({
+        _id: baseAsset.giftId,
+        publishedRevision: 4,
+        status: "published",
+      });
+      giftPublications.findOne.mockResolvedValueOnce({ assetIds: [baseAsset.id] });
+      assets.updateOne.mockResolvedValueOnce({ matchedCount: 0, modifiedCount: 0 });
+
+      await expect(
+        mongoMediaAssetRepository.markDeleting(baseAsset.id, baseAsset.giftId, now),
+      ).resolves.toEqual({ kind: "asset-unavailable" });
     });
 
     it("answers asset-unavailable when the asset is already deleted", async () => {

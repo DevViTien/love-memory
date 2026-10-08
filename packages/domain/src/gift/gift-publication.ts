@@ -39,6 +39,12 @@ export type GiftPublication = z.infer<typeof GiftPublicationSchema>;
 
 export type GiftPublishError = GiftDraftError | GiftTransitionError;
 
+export type GiftRepublishError =
+  | Readonly<{ code: "GIFT_NOT_PUBLISHED" }>
+  | Readonly<{ code: "GIFT_NO_UNPUBLISHED_CHANGES" }>
+  | Extract<GiftDraftError, { code: "GIFT_REVISION_CONFLICT" }>
+  | GiftTransitionError;
+
 /**
  * Moves a draft `draft → publishing → published` in memory. Only the final state is persisted;
  * `publishing` exists so a later payment or outbox step can sit between the two transitions.
@@ -72,7 +78,49 @@ export function publishGiftDraft(
     GiftSchema.parse({
       ...gift,
       publishedAt: input.now,
+      publishedRevision: gift.revision,
       shareId: input.shareId,
+      status: published.data,
+      updatedAt: input.now,
+    }),
+  );
+}
+
+/**
+ * Publishes the working copy of a published gift as its new current publication, `published →
+ * publishing → published` in memory. The share id stays, so the recipient link never changes;
+ * only a revision newer than the current publication can be published.
+ */
+export function republishGift(
+  gift: Gift,
+  input: Readonly<{ expectedRevision: number; now: Date }>,
+): Result<Gift, GiftRepublishError> {
+  if (gift.status !== "published" || gift.publishedRevision === undefined) {
+    return failure({ code: "GIFT_NOT_PUBLISHED" });
+  }
+
+  if (gift.revision !== input.expectedRevision) {
+    return failure({
+      actualRevision: gift.revision,
+      code: "GIFT_REVISION_CONFLICT",
+      expectedRevision: input.expectedRevision,
+    });
+  }
+
+  if (input.expectedRevision <= gift.publishedRevision) {
+    return failure({ code: "GIFT_NO_UNPUBLISHED_CHANGES" });
+  }
+
+  const publishing = transitionGift(gift.status, "publishing");
+  if (!publishing.ok) return publishing;
+  const published = transitionGift(publishing.data, "published");
+  if (!published.ok) return published;
+
+  return success(
+    GiftSchema.parse({
+      ...gift,
+      publishedAt: input.now,
+      publishedRevision: gift.revision,
       status: published.data,
       updatedAt: input.now,
     }),

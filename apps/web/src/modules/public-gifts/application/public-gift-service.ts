@@ -28,7 +28,7 @@ export type PublicGiftServiceDependencies = Readonly<{
   assets: Pick<MediaAssetRepository, "listByIdsForGift">;
   gifts: Pick<GiftRepository, "findPublishedByShareId">;
   payload: BuildViewerPayloadDependencies;
-  publications: Pick<GiftPublicationRepository, "findByShareId">;
+  publications: Pick<GiftPublicationRepository, "findByGiftRevision">;
   templates: Pick<GiftTemplateRepository, "findEditableManifest">;
 }>;
 
@@ -57,8 +57,13 @@ export function createPublicGiftService(dependencies: PublicGiftServiceDependenc
       return null;
     }
 
-    const publication = await dependencies.publications.findByShareId(shareId);
-    if (publication?.giftId !== gift.id) return null;
+    // The current publication only: superseded ones and the working copy are never served.
+    if (gift.publishedRevision === undefined) return null;
+    const publication = await dependencies.publications.findByGiftRevision(
+      gift.id,
+      gift.publishedRevision,
+    );
+    if (publication?.giftId !== gift.id || publication.shareId !== shareId) return null;
 
     const manifest = await dependencies.templates.findEditableManifest(
       publication.templateId,

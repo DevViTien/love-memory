@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { claimGiftDraft, createGiftDraft, updateGiftDraft } from "./gift-draft";
+import { GiftSchema } from "./gift-schema";
 
 const now = new Date("2026-09-16T00:00:00.000Z");
 
@@ -47,6 +48,48 @@ describe("gift draft behavior", () => {
     });
 
     expect(updated.ok && updated.data.revision).toBe(1);
+  });
+
+  it("saves the working copy of a published gift and keeps its publication", () => {
+    const owned = createGiftDraft({
+      anonymousDraftId: null,
+      claimTokenHash: null,
+      content: createAnonymousDraft().content,
+      id: "7afd9fe9-d30d-41cc-8f9a-0fe907f7df89",
+      now,
+      ownerId: "user-1",
+      publicId: "q1w2e3r4t5y6u7i8",
+    });
+    const published = GiftSchema.parse({
+      ...owned,
+      publishedAt: now,
+      publishedRevision: 0,
+      shareId: "Ab0_-cdefghijklmnopqrs",
+      status: "published",
+    });
+
+    const updated = updateGiftDraft(published, {
+      content: { ...published.content, data: { headline: "Sửa sau khi gửi" } },
+      expectedRevision: 0,
+      now: new Date("2026-09-16T01:00:00.000Z"),
+    });
+
+    expect(updated.ok).toBe(true);
+    if (!updated.ok) return;
+    expect(updated.data).toMatchObject({ publishedRevision: 0, revision: 1, status: "published" });
+    expect(claimGiftDraft(published, { now, ownerId: "user-2" })).toEqual({
+      error: { code: "GIFT_NOT_DRAFT" },
+      ok: false,
+    });
+  });
+
+  it("refuses to save a gift whose status is not editable", () => {
+    const paused = GiftSchema.parse({ ...createAnonymousDraft(), status: "paused" });
+
+    expect(updateGiftDraft(paused, { content: paused.content, expectedRevision: 0, now })).toEqual({
+      error: { code: "GIFT_NOT_DRAFT" },
+      ok: false,
+    });
   });
 
   it("returns a structured conflict instead of overwriting newer content", () => {

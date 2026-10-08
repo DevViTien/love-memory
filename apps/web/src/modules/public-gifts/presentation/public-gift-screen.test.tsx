@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { viewerPayload } from "@/modules/viewer/test/viewer-fixtures";
+import { FIXTURE_NOW, viewerPayload } from "@/modules/viewer/test/viewer-fixtures";
 
 import { PublicGiftScreen } from "./public-gift-screen";
 
@@ -20,6 +20,10 @@ function responseFor(overrides: Parameters<typeof viewerPayload>[0] = {}): Respo
 let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
 
 beforeEach(() => {
+  // The component reads the real clock; the fixture URLs expire 300 s after `FIXTURE_NOW`. Only
+  // `Date` is faked, so timers (and user events) still run in real time.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(FIXTURE_NOW);
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockReturnValue(undefined);
   vi.spyOn(HTMLMediaElement.prototype, "load").mockReturnValue(undefined);
@@ -28,6 +32,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
