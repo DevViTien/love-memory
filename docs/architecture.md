@@ -600,6 +600,23 @@ The `privacy-notice` capability covers these pieces:
 - **Open retention decisions.** Expired gifts and abandoned drafts are kept until their owner
   deletes them. The notice says so; automatic purges wait for PO retention periods.
 
+## Rate limits
+
+`modules/rate-limits` owns rate limiting (`change-security-hardening`, debts D2 and D18):
+
+- **`application/rate-limiter.ts`:** the `ApiRateLimitScope` union, the `RateLimiter` port and
+  `consumeAll`.
+- **`application/rate-limit-subjects.ts`:** the pure subject helpers and the shared-bucket rule.
+- **`infrastructure/mongo-rate-limiter.ts`:** the per-scope limits and the fixed-window counters
+  in `apiRateLimits`, with HMAC-hashed subjects.
+
+`composition/rate-limits.ts` builds the single `rateLimiter`. No presentation code imports
+infrastructure; the ESLint allowlist is empty.
+
+**Coverage.** Every API route that does database work is limited, except the health checks and the
+token- or signature-gated object routes. Page renders of `/g` and `/preview` are limited by Vercel
+Firewall rules (deployment runbook).
+
 ## Configuration
 
 Each infrastructure boundary owns and validates its environment variables. Server-only URLs use

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { posix } from "node:path";
 
 const allowedEnvironmentFiles = new Set([".env.example"]);
@@ -15,6 +15,9 @@ const secretPatterns = [
     pattern: /-----BEGIN (?:EC |OPENSSH |RSA )?PRIVATE KEY-----/,
   },
   { name: "Vercel Blob token", pattern: /vercel_blob_(?:ro|rw)_[A-Za-z0-9_-]{16,}/i },
+  // Resend API keys: `re_` + 8 + `_` + 24 characters (placeholders such as `re_playwright_…` differ).
+  { name: "Resend API key", pattern: /\bre_[A-Za-z0-9]{8}_[A-Za-z0-9]{24}\b/ },
+  { name: "Trigger.dev secret key", pattern: /\btr_(?:dev|prod|stg|preview)_[A-Za-z0-9]{20,}/ },
 ];
 
 function isForbiddenEnvironmentFile(file) {
@@ -40,6 +43,8 @@ for (const file of repositoryFiles) {
     continue;
   }
 
+  // A tracked file deleted in the working tree (a move not yet staged) has nothing to scan.
+  if (!existsSync(file)) continue;
   const bytes = readFileSync(file);
   if (bytes.includes(0)) continue;
 

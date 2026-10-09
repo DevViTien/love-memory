@@ -1,4 +1,5 @@
 import { getAuth } from "@/composition/auth";
+import { rateLimiter } from "@/composition/rate-limits";
 import { getCurrentSession } from "@/composition/session";
 import { templateVersionControls } from "@/composition/templates";
 import { type AdminAccess, resolveAdminAccess } from "@/modules/admin/application/admin-access";
@@ -11,8 +12,6 @@ import { mongoAdminMfaLockout } from "@/modules/admin/infrastructure/mongo-admin
 import { mongoAdminStepUps } from "@/modules/admin/infrastructure/mongo-admin-step-ups";
 import { mongoAuditLog } from "@/modules/admin/infrastructure/mongo-audit-log";
 import { type AdminMfaRouteDependencies } from "@/modules/admin/presentation/admin-mfa-route-handlers";
-import { getAuthEnvironment } from "@/modules/auth/infrastructure/auth-environment";
-import { consumeApiRateLimit } from "@/modules/gifts/infrastructure/mongo-gift-rate-limiter";
 import { type TemplateVersionRouteDependencies } from "@/modules/templates/presentation/template-version-route-handler";
 
 export const auditService = createAuditService({ repository: mongoAuditLog });
@@ -31,6 +30,11 @@ export async function getAdminAccess(requestHeaders: Headers): Promise<AdminAcce
   });
 }
 
+/** One `admin-action` budget per admin for every admin action route. */
+export function limitAdminAction(userId: string) {
+  return rateLimiter.consume("admin-action", `user:${userId}`);
+}
+
 const adminMfaService = createAdminMfaService({
   audit: auditService,
   factor: createBetterAuthAdminFactor(async () => {
@@ -47,13 +51,14 @@ const adminMfaService = createAdminMfaService({
 });
 
 export const adminMfaRouteDependencies: AdminMfaRouteDependencies = {
-  consumeRateLimit: (subject) =>
-    consumeApiRateLimit("admin-mfa", subject, getAuthEnvironment().secret),
+  consumeRateLimit: (subject) => rateLimiter.consume("admin-mfa", subject),
   getAccess: getAdminAccess,
+  limitAction: limitAdminAction,
   mfa: adminMfaService,
 };
 
 export const templateVersionRouteDependencies: TemplateVersionRouteDependencies = {
   controls: templateVersionControls,
   getAccess: getAdminAccess,
+  limit: limitAdminAction,
 };

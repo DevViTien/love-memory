@@ -32,10 +32,12 @@ describe("admin MFA routes", () => {
   const consumeRateLimit = vi.fn<AdminMfaRouteDependencies["consumeRateLimit"]>();
   const enroll = vi.fn<AdminMfaService["enroll"]>();
   const verify = vi.fn<AdminMfaService["verify"]>();
+  const limitAction = vi.fn(() => Promise.resolve({ allowed: true, retryAfterSeconds: 0 }));
   const dependencies: AdminMfaRouteDependencies = {
     consumeRateLimit,
     getAccess,
     mfa: { enroll, verify },
+    limitAction,
   };
   const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
@@ -115,6 +117,15 @@ describe("admin MFA routes", () => {
       expect(response.status).toBe(500);
       expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("secret material");
     });
+  });
+
+  it("limits enrollment with the admin-action budget", async () => {
+    limitAction.mockResolvedValueOnce({ allowed: false, retryAfterSeconds: 30 });
+
+    const response = await handleAdminMfaEnroll(post("/api/admin/mfa/enroll", {}), dependencies);
+
+    expect(response.status).toBe(429);
+    expect(enroll).not.toHaveBeenCalled();
   });
 
   describe("POST /api/admin/mfa/verify", () => {

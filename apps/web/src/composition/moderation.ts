@@ -1,12 +1,11 @@
-import { auditService, getAdminAccess } from "@/composition/admin";
+import { auditService, getAdminAccess, limitAdminAction } from "@/composition/admin";
 import { getPublicGiftService } from "@/composition/public-gifts";
 import { isAutomatedUserAgent } from "@/modules/analytics/application/automated-traffic";
-import { getAuthEnvironment } from "@/modules/auth/infrastructure/auth-environment";
+import { rateLimiter } from "@/composition/rate-limits";
 import {
-  consumeApiRateLimit,
   publicReadLinkSubject,
   publicReadRateLimitSubject,
-} from "@/modules/gifts/infrastructure/mongo-gift-rate-limiter";
+} from "@/modules/rate-limits/application/rate-limit-subjects";
 import { createAbuseReportService } from "@/modules/moderation/application/abuse-reports";
 import { createModerationService } from "@/modules/moderation/application/moderation";
 import {
@@ -28,8 +27,7 @@ export const moderationService = createModerationService({
 });
 
 export const reportRouteDependencies: ReportRouteDependencies = {
-  consumeRateLimit: (scope, subject) =>
-    consumeApiRateLimit(scope, subject, getAuthEnvironment().secret),
+  consumeRateLimit: (scope, subject) => rateLimiter.consume(scope, subject),
   isAutomated: isAutomatedUserAgent,
   linkSubject: publicReadLinkSubject,
   networkSubject: publicReadRateLimitSubject,
@@ -38,5 +36,6 @@ export const reportRouteDependencies: ReportRouteDependencies = {
 
 export const moderationRouteDependencies: ModerationRouteDependencies = {
   getAccess: getAdminAccess,
+  limit: limitAdminAction,
   moderation: moderationService,
 };

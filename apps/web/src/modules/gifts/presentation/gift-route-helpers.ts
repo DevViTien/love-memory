@@ -6,18 +6,15 @@ import {
   createRateLimitedResponse,
 } from "@/http/api-response";
 import { getCurrentUser } from "@/composition/session";
-import { getAuthEnvironment } from "@/modules/auth/infrastructure/auth-environment";
 import { type GiftAccessor, type GiftServiceError } from "@/modules/gifts/application/gift-service";
 import {
   ANONYMOUS_DRAFT_COOKIE,
   parseAnonymousDraftIdentity,
   readCookie,
-} from "@/modules/gifts/infrastructure/anonymous-draft-identity";
-import {
-  consumeApiRateLimit,
-  giftRateLimitSubjects,
-  type ApiRateLimitScope,
-} from "@/modules/gifts/infrastructure/mongo-gift-rate-limiter";
+} from "@/composition/anonymous-draft";
+import { rateLimiter } from "@/composition/rate-limits";
+import { giftRateLimitSubjects } from "@/modules/rate-limits/application/rate-limit-subjects";
+import { type ApiRateLimitScope, consumeAll } from "@/modules/rate-limits/application/rate-limiter";
 
 export { requestId } from "@/http/api-response";
 
@@ -72,12 +69,8 @@ export async function enforceGiftMutationRateLimit(
       : {}),
     ...(context.userId ? { userId: context.userId } : {}),
   });
-  let result: Awaited<ReturnType<typeof consumeApiRateLimit>> | null = null;
-  for (const subject of subjects) {
-    result = await consumeApiRateLimit(scope, subject, getAuthEnvironment().secret);
-    if (!result.allowed) break;
-  }
-  if (!result || result.allowed) {
+  const result = await consumeAll(rateLimiter, scope, subjects);
+  if (result.allowed) {
     return null;
   }
   return createRateLimitedResponse(result.retryAfterSeconds, id);

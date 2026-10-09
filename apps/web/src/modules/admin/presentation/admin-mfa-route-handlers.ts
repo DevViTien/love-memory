@@ -27,6 +27,10 @@ export type AdminMfaRouteDependencies = Readonly<{
   consumeRateLimit: (
     subject: string,
   ) => Promise<Readonly<{ allowed: boolean; retryAfterSeconds: number }>>;
+  /** Charges the admin's `admin-action` counter (enrollment). */
+  limitAction: (
+    userId: string,
+  ) => Promise<Readonly<{ allowed: boolean; retryAfterSeconds: number }>>;
   getAccess: (headers: Headers) => Promise<AdminAccess>;
   mfa: Pick<AdminMfaService, "enroll" | "verify">;
 }>;
@@ -60,6 +64,8 @@ export async function handleAdminMfaEnroll(
 
     const rejected = validateJsonMutationRequest(request, id);
     if (rejected) return rejected;
+    const limit = await dependencies.limitAction(session.user.id);
+    if (!limit.allowed) return createRateLimitedResponse(limit.retryAfterSeconds, id);
 
     const body = await readJsonBody(request, EnrollRequestSchema, {
       maxBytes: ADMIN_MFA_BODY_MAX_BYTES,

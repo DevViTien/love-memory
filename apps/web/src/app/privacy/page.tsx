@@ -17,7 +17,7 @@ export const RETENTION_ROWS: readonly (readonly [string, string])[] = [
   ["Ảnh gốc", "Không giữ. Chỉ giữ ảnh đã xử lý, đã xoá thông tin vị trí và thiết bị."],
   [
     "Món quà bạn xoá",
-    "Đường dẫn ngừng hoạt động ngay; chữ và ảnh bị xoá hẳn trong vòng 24 giờ. Chỉ giữ mã và thời điểm trong 1 năm.",
+    "Đường dẫn ngừng hoạt động ngay; chữ và ảnh bị xoá hẳn trong vòng 24 giờ. Bản sao lưu cơ sở dữ liệu còn chứa món quà được xoá trong vòng 7 ngày. Chỉ giữ mã và thời điểm trong 1 năm.",
   ],
   ["Báo cáo vi phạm và nhật ký quản trị", "1 năm."],
   ["Phiên đăng nhập", "30 ngày."],

@@ -14,12 +14,11 @@ import {
   type AnalyticsRateLimitScope,
   type EventsRouteDependencies,
 } from "@/modules/analytics/presentation/events-route-handler";
-import { getAuthEnvironment } from "@/modules/auth/infrastructure/auth-environment";
+import { rateLimiter } from "@/composition/rate-limits";
 import {
   analyticsSessionSubject,
-  consumeApiRateLimit,
   publicReadRateLimitSubject,
-} from "@/modules/gifts/infrastructure/mongo-gift-rate-limiter";
+} from "@/modules/rate-limits/application/rate-limit-subjects";
 import { reportOperationalFailure } from "@/observability/operational-errors";
 
 let analyticsService: AnalyticsService | undefined;
@@ -42,12 +41,9 @@ export function analyticsContextForGift(gift: AnalyticsGift): AnalyticsContext |
   return getAnalyticsService().contextForGift(gift);
 }
 
-/** The analytics counters share the mutation limits' storage and keyed subject hashing. */
-export function consumeAnalyticsRateLimit(
-  scope: AnalyticsRateLimitScope,
-  subject: string,
-): ReturnType<typeof consumeApiRateLimit> {
-  return consumeApiRateLimit(scope, subject, getAuthEnvironment().secret);
+/** The analytics counters share the one rate limiter (`composition/rate-limits.ts`). */
+export function consumeAnalyticsRateLimit(scope: AnalyticsRateLimitScope, subject: string) {
+  return rateLimiter.consume(scope, subject);
 }
 
 export const eventsRouteDependencies: EventsRouteDependencies = {

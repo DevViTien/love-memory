@@ -10,6 +10,12 @@ const nextConfig: NextConfig = {
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
+          // Browsers apply HSTS only over HTTPS, so local HTTP is unaffected. No `includeSubDomains`
+          // or preload: other subdomains of a custom domain are not ours to commit.
+          { key: "Strict-Transport-Security", value: "max-age=63072000" },
+          // No page opens or is opened by another window; template frames are not affected.
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+          { key: "X-Permitted-Cross-Domain-Policies", value: "none" },
         ],
         source: "/:path*",
       },

@@ -4,6 +4,7 @@ import {
   createApiErrorResponse,
   createApiSuccessResponse,
   createInvalidBodyResponse,
+  createRateLimitedResponse,
   readJsonBody,
   requestId,
   validateJsonMutationRequest,
@@ -16,6 +17,8 @@ import { ModerationActionRequestSchema, type ModerationService } from "../applic
 
 export type ModerationRouteDependencies = Readonly<{
   getAccess: (headers: Headers) => Promise<AdminAccess>;
+  /** Charges the admin's `admin-action` counter. */
+  limit: (userId: string) => Promise<Readonly<{ allowed: boolean; retryAfterSeconds: number }>>;
   moderation: Pick<ModerationService, "act">;
 }>;
 
@@ -47,6 +50,8 @@ export async function handleModerationAction(
 
     const rejected = validateJsonMutationRequest(request, id);
     if (rejected) return rejected;
+    const limit = await dependencies.limit(session.user.id);
+    if (!limit.allowed) return createRateLimitedResponse(limit.retryAfterSeconds, id);
 
     const body = await readJsonBody(request, ModerationActionRequestSchema, { maxBytes: 1024 });
     if (!body.ok) return createInvalidBodyResponse(body.error, id);

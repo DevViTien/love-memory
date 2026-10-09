@@ -7,9 +7,8 @@ vi.mock("@/composition/session", () => ({ getCurrentUser: sessionMocks.getCurren
 vi.mock("@/modules/auth/infrastructure/auth-environment", () => ({
   getAuthEnvironment: () => ({ secret: "s".repeat(32) }),
 }));
-vi.mock("@/modules/gifts/infrastructure/mongo-gift-rate-limiter", async (importOriginal) => ({
-  ...(await importOriginal<object>()),
-  consumeApiRateLimit: rateLimitMocks.consume,
+vi.mock("@/composition/rate-limits", () => ({
+  rateLimiter: { consume: rateLimitMocks.consume },
 }));
 
 import {
@@ -195,10 +194,6 @@ describe("gift route helpers", () => {
       enforceGiftMutationRateLimit(request, context, "gift-update", "req-2"),
     ).resolves.toBeNull();
     expect(rateLimitMocks.consume).toHaveBeenCalledTimes(1);
-    expect(rateLimitMocks.consume).toHaveBeenCalledWith(
-      "gift-update",
-      "user:creator-1",
-      "s".repeat(32),
-    );
+    expect(rateLimitMocks.consume).toHaveBeenCalledWith("gift-update", "user:creator-1");
   });
 });

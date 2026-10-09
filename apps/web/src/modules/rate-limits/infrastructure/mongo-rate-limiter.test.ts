@@ -14,11 +14,11 @@ vi.mock("@love-memory/database", async (importOriginal) => ({
 
 import {
   analyticsSessionSubject,
-  consumeApiRateLimit,
   giftRateLimitSubjects,
   publicReadLinkSubject,
   publicReadRateLimitSubject,
-} from "./mongo-gift-rate-limiter";
+} from "../application/rate-limit-subjects";
+import { consumeApiRateLimit, createMongoRateLimiter } from "./mongo-rate-limiter";
 
 describe("Mongo gift mutation rate limiter", () => {
   beforeEach(() => {
@@ -432,5 +432,20 @@ describe("Mongo gift mutation rate limiter", () => {
         "unidentified",
       );
     });
+  });
+});
+
+describe("Mongo rate limiter port", () => {
+  it("binds the secret read at each call to the stored counter", async () => {
+    databaseMocks.findOneAndUpdate.mockResolvedValue({ count: 1 });
+    databaseMocks.getDatabase.mockResolvedValue({
+      collection: () => ({ findOneAndUpdate: databaseMocks.findOneAndUpdate }),
+    });
+    const getSecret = vi.fn(() => "k".repeat(32));
+
+    await expect(
+      createMongoRateLimiter(getSecret).consume("gift-update", "user:user-1"),
+    ).resolves.toMatchObject({ allowed: true });
+    expect(getSecret).toHaveBeenCalledTimes(1);
   });
 });

@@ -150,8 +150,9 @@ The system SHALL apply a `$jsonSchema` validator (allowing additional properties
 `giftTombstones` and `abuseReports`, including at least these constraints:
 
 - `apiRateLimits` requires `_id`, `count` (int >= 1), `scope` (one of `abuse-report`,
-  `abuse-report-ip`, `admin-mfa`, `analytics-event`, `analytics-event-ip`, `gift-claim`, `gift-create`, `gift-lifecycle`,
-  `gift-preview`, `gift-publish`, `gift-update`, `media-upload`, `public-gift-read`,
+  `abuse-report-ip`, `admin-action`, `admin-mfa`, `analytics-event`, `analytics-event-ip`,
+  `gift-claim`, `gift-create`, `gift-lifecycle`, `gift-preview`, `gift-publish`, `gift-read`,
+  `gift-update`, `media-read`, `media-upload`, `media-write`, `public-gift-read`,
   `public-gift-read-ip`),
   `subjectHash` (64 lowercase hex characters), `expiresAt`, `createdAt`, `updatedAt`;
 - `templates` requires `_id`, `currentVersion`, `status` (`draft`, `published`, `retired`),
@@ -392,7 +393,7 @@ second publication of a gift, which keeps its share id.
 The system SHALL provide `db:migrate`, which converges the database to the current schema (creating
 missing collections with validators, updating validators, reconciling indexes) and then upserts the
 ledger document `_id: "core"` in `databaseMigrations` with `version` equal to the current schema
-version `15`, `appliedAt` set to now, and `createdAt` set only on first insert. Before writing the
+version `16`, `appliedAt` set to now, and `createdAt` set only on first insert. Before writing the
 ledger it SHALL run these backfills, in this order:
 
 1. set `publishedRevision` to the gift's `revision` on every `published` gift that has no
@@ -422,7 +423,7 @@ and always close the MongoDB client before exiting. An unrecognized command MUST
 #### Scenario: Re-running migrations is safe
 
 - **WHEN** `db:migrate` is run twice against the same database
-- **THEN** both runs succeed, the schema verifies, and the ledger `version` is `15`
+- **THEN** both runs succeed, the schema verifies, and the ledger `version` is `16`
 
 #### Scenario: Published gifts backfilled
 
@@ -459,12 +460,12 @@ The system SHALL provide `db:verify`, which fails without modifying the database
 collection is missing (`Missing MongoDB collection`), a validator differs from its definition
 (`MongoDB validator mismatch`), a legacy index remains (`Legacy MongoDB index remains`), an expected
 index is missing (`Missing MongoDB index`) or differs in key or options (`MongoDB index mismatch`),
-or the ledger version differs from `15` or is missing (`MongoDB schema version mismatch`).
+or the ledger version differs from `16` or is missing (`MongoDB schema version mismatch`).
 
 #### Scenario: Schema drift detected
 
 - **WHEN** the ledger document records `version` `1`
-- **THEN** `db:verify` fails with `MongoDB schema version mismatch: expected 15, received 1.`
+- **THEN** `db:verify` fails with `MongoDB schema version mismatch: expected 16, received 1.`
 
 #### Scenario: Database not yet migrated to version 7
 
@@ -472,7 +473,7 @@ or the ledger version differs from `15` or is missing (`MongoDB schema version m
 - **THEN** `db:verify` fails without modifying the database, for example with
   `MongoDB validator mismatch` for `apiRateLimits` or `gifts`, or `Missing MongoDB collection` for
   `previewTokens`, `giftPublications` or `analyticsEvents`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `15`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `16`
 
 #### Scenario: Database not yet migrated to version 8
 
@@ -480,7 +481,7 @@ or the ledger version differs from `15` or is missing (`MongoDB schema version m
 - **THEN** `db:verify` fails without modifying the database, for example with
   `MongoDB validator mismatch` for `apiRateLimits` or `gifts`, or `Missing MongoDB collection` for
   `giftPublications` or `analyticsEvents`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `15`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `16`
 
 #### Scenario: Database not yet migrated to version 9
 
@@ -488,7 +489,7 @@ or the ledger version differs from `15` or is missing (`MongoDB schema version m
 - **THEN** `db:verify` fails without modifying the database, for example with
   `MongoDB validator mismatch` for `apiRateLimits`, or `Missing MongoDB collection` for
   `analyticsEvents`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `15`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `16`
 
 #### Scenario: Database not yet migrated to version 10
 
@@ -496,21 +497,21 @@ or the ledger version differs from `15` or is missing (`MongoDB schema version m
 - **THEN** `db:verify` fails without modifying the database, for example with
   `MongoDB validator mismatch` for `gifts` or `assets`, or `Legacy MongoDB index remains` for
   `giftPublications.gift_publications_share_id_unique`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `15`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `16`
 
 #### Scenario: Database not yet migrated to version 11
 
 - **WHEN** the ledger document records `version` `10`
 - **THEN** `db:verify` fails without modifying the database, with `MongoDB validator mismatch` for
   `gifts` or `MongoDB schema version mismatch: expected 11, received 10.`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `15`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `16`
 
 #### Scenario: Database not yet migrated to version 12
 
 - **WHEN** the ledger document records `version` `11`
 - **THEN** `db:verify` fails without modifying the database, with `MongoDB validator mismatch` for
   `jobOutbox` or `MongoDB schema version mismatch: expected 12, received 11.`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `15`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `16`
 
 #### Scenario: Database not yet migrated to version 13
 
@@ -518,7 +519,7 @@ or the ledger version differs from `15` or is missing (`MongoDB schema version m
 - **THEN** `db:verify` fails without modifying the database, for example with
   `Missing MongoDB collection` for `twoFactors`, `adminStepUps` or `auditLog`, or
   `MongoDB validator mismatch` for `apiRateLimits`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `15`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `16`
 
 #### Scenario: Empty database fails verification
 
@@ -531,7 +532,7 @@ or the ledger version differs from `15` or is missing (`MongoDB schema version m
 - **THEN** `db:verify` fails without modifying the database, for example with
   `Missing MongoDB collection` for `giftTombstones`, or `MongoDB validator mismatch` for
   `apiRateLimits`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `15`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `16`
 
 #### Scenario: Database not yet migrated to version 15
 
@@ -539,7 +540,14 @@ or the ledger version differs from `15` or is missing (`MongoDB schema version m
 - **THEN** `db:verify` fails without modifying the database, for example with
   `Missing MongoDB collection` for `abuseReports`, or `MongoDB validator mismatch` for
   `apiRateLimits`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `15`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `16`
+
+#### Scenario: Database not yet migrated to version 16
+
+- **WHEN** the ledger document records `version` `15`
+- **THEN** `db:verify` fails without modifying the database, for example with
+  `MongoDB validator mismatch` for `apiRateLimits`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `16`
 
 ### Requirement: Template catalog seed
 

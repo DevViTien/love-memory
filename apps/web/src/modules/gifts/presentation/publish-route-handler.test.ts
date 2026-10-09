@@ -8,9 +8,8 @@ vi.mock("@/composition/session", () => ({ getCurrentUser: sessionMocks.getCurren
 vi.mock("@/modules/auth/infrastructure/auth-environment", () => ({
   getAuthEnvironment: () => ({ secret: "s".repeat(32) }),
 }));
-vi.mock("@/modules/gifts/infrastructure/mongo-gift-rate-limiter", async (importOriginal) => ({
-  ...(await importOriginal<object>()),
-  consumeApiRateLimit: rateLimitMocks.consume,
+vi.mock("@/composition/rate-limits", () => ({
+  rateLimiter: { consume: rateLimitMocks.consume },
 }));
 
 import { type GiftPublicationDto, type GiftServiceResult } from "../application/gift-service";
@@ -114,11 +113,7 @@ describe("publish route handler", () => {
       requestId: "request-1",
       userId: "user-1",
     });
-    expect(rateLimitMocks.consume).toHaveBeenCalledWith(
-      "gift-publish",
-      "user:user-1",
-      "s".repeat(32),
-    );
+    expect(rateLimitMocks.consume).toHaveBeenCalledWith("gift-publish", "user:user-1");
   });
 
   it("answers 400 for a missing or malformed Idempotency-Key", async () => {

@@ -6,11 +6,10 @@ import {
   createRateLimitedResponse,
   requestId,
 } from "@/http/api-response";
-// Pure subject helpers, kept next to the shared-bucket rule they must agree with.
 import {
   publicReadLinkSubject,
   publicReadRateLimitSubject,
-} from "@/modules/gifts/infrastructure/mongo-gift-rate-limiter";
+} from "@/modules/rate-limits/application/rate-limit-subjects";
 
 import { reportOperationalFailure } from "@/observability/operational-errors";
 

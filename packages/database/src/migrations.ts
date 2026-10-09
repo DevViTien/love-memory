@@ -11,7 +11,7 @@ import {
 import { COLLECTIONS, type CollectionName } from "./collections";
 import { enqueueJob } from "./job-outbox";
 
-export const DATABASE_SCHEMA_VERSION = 15;
+export const DATABASE_SCHEMA_VERSION = 16;
 
 type DatabaseMigrationDocument = Readonly<{
   _id: string;
@@ -115,6 +115,7 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
             enum: [
               "abuse-report",
               "abuse-report-ip",
+              "admin-action",
               "admin-mfa",
               "analytics-event",
               "analytics-event-ip",
@@ -123,8 +124,11 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
               "gift-lifecycle",
               "gift-preview",
               "gift-publish",
+              "gift-read",
               "gift-update",
+              "media-read",
               "media-upload",
+              "media-write",
               "public-gift-read",
               "public-gift-read-ip",
             ],

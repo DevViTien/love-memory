@@ -114,6 +114,23 @@ Schema version `15` (`add-abuse-reports-and-takedown`):
 There is no backfill and no new environment variable. Until the migration runs, report requests
 answer `500`. After it, check that the queue at `/admin/reports` loads on the tier.
 
+Schema version `16` (`change-security-hardening`) adds the rate-limit scopes `gift-read`,
+`media-read`, `media-write` and `admin-action` to the `apiRateLimits` validator. There is no
+backfill. Until it runs, the owner gift and media routes and the admin actions answer `500`.
+
+### Vercel Firewall rules (debt D1)
+
+On every tier, add two rate-limit rules in the project's Firewall:
+
+- path prefix `/g/`: 120 requests per 60 seconds per IP, action "rate limit";
+- path prefix `/preview/`: 60 requests per 60 seconds per IP, action "rate limit".
+
+These bound page renders, which do database work. The data endpoints behind both pages
+(`/api/public-gifts/*`, preview payloads) already have in-app limits.
+
+See also the [credential rotation runbook](./credential-rotation.md) and the
+[backup and restore runbook](./backup-and-restore.md).
+
 ## Environment variables
 
 Configure shared Preview secrets once and override environment identity per branch:

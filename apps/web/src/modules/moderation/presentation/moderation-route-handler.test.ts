@@ -31,7 +31,8 @@ function post(body: unknown, headers: Record<string, string> = {}): Request {
 describe("POST /api/admin/reports/{reportId}", () => {
   const getAccess = vi.fn<(headers: Headers) => Promise<AdminAccess>>();
   const act = vi.fn<ModerationService["act"]>();
-  const dependencies: ModerationRouteDependencies = { getAccess, moderation: { act } };
+  const limit = vi.fn(() => Promise.resolve({ allowed: true, retryAfterSeconds: 0 }));
+  const dependencies: ModerationRouteDependencies = { getAccess, limit, moderation: { act } };
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 
   beforeEach(() => {
@@ -54,6 +55,15 @@ describe("POST /api/admin/reports/{reportId}", () => {
       id: "admin-1",
       requestId: "request-1",
     });
+  });
+
+  it("answers 429 when the admin-action budget is spent", async () => {
+    limit.mockResolvedValueOnce({ allowed: false, retryAfterSeconds: 30 });
+
+    expect(
+      (await handleModerationAction(post({ action: "dismiss" }), context, dependencies)).status,
+    ).toBe(429);
+    expect(act).not.toHaveBeenCalled();
   });
 
   it("maps not-found and the three conflicts", async () => {

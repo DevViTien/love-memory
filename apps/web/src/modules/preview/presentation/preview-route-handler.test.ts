@@ -8,9 +8,8 @@ vi.mock("@/composition/session", () => ({ getCurrentUser: sessionMocks.getCurren
 vi.mock("@/modules/auth/infrastructure/auth-environment", () => ({
   getAuthEnvironment: () => ({ secret: "s".repeat(32) }),
 }));
-vi.mock("@/modules/gifts/infrastructure/mongo-gift-rate-limiter", async (importOriginal) => ({
-  ...(await importOriginal<object>()),
-  consumeApiRateLimit: rateLimitMocks.consume,
+vi.mock("@/composition/rate-limits", () => ({
+  rateLimiter: { consume: rateLimitMocks.consume },
 }));
 
 import { type PreviewService } from "../application/preview-service";
@@ -78,11 +77,7 @@ describe("preview route handler", () => {
       accessors: [{ kind: "user", userId: "user-1" }],
       publicId,
     });
-    expect(rateLimitMocks.consume).toHaveBeenCalledWith(
-      "gift-preview",
-      "user:user-1",
-      "s".repeat(32),
-    );
+    expect(rateLimitMocks.consume).toHaveBeenCalledWith("gift-preview", "user:user-1");
   });
 
   it("answers an opaque 404 for a malformed id", async () => {

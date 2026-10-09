@@ -130,6 +130,8 @@ export async function handleCompleteMediaUpload(
     const body = await readJsonBody(request, MediaUploadCompleteRequestSchema);
     if (!body.ok) return createInvalidBodyResponse(body.error, id);
     const context = await getGiftRequestContext(request);
+    const limited = await enforceGiftMutationRateLimit(request, context, "media-write", id);
+    if (limited) return limited;
     const result = await getService().completeUpload({
       accessors: context.accessors,
       ...body.data,
@@ -163,6 +165,8 @@ export async function handleListMediaAssets(
       });
     }
     const context = await getGiftRequestContext(request);
+    const limited = await enforceGiftMutationRateLimit(request, context, "media-read", id);
+    if (limited) return limited;
     const result = await getService().listAssets({
       accessors: context.accessors,
       giftPublicId: publicId.data,
@@ -196,6 +200,8 @@ export async function handleGetMediaAsset(
       });
     }
     const context = await getGiftRequestContext(request);
+    const limited = await enforceGiftMutationRateLimit(request, context, "media-read", id);
+    if (limited) return limited;
     const result = await getService().getAsset({
       accessors: context.accessors,
       assetId: assetId.data,
@@ -230,6 +236,8 @@ async function handleAssetMutation(
           });
     }
     const context = await getGiftRequestContext(request);
+    const limited = await enforceGiftMutationRateLimit(request, context, "media-write", id);
+    if (limited) return limited;
     const input = {
       accessors: context.accessors,
       assetId: assetId.data,

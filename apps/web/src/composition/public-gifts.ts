@@ -1,7 +1,6 @@
 import { analyticsContextForGift } from "@/composition/analytics";
 import { viewerPayloadDependencies } from "@/composition/viewer";
-import { getAuthEnvironment } from "@/modules/auth/infrastructure/auth-environment";
-import { consumeApiRateLimit } from "@/modules/gifts/infrastructure/mongo-gift-rate-limiter";
+import { rateLimiter } from "@/composition/rate-limits";
 import { mongoGiftPublicationRepository } from "@/modules/gifts/infrastructure/mongo-gift-publication-repository";
 import {
   findReviewableGift,
@@ -32,10 +31,7 @@ export function getPublicGiftService(): PublicGiftService {
   return publicGiftService;
 }
 
-/** The public read counters share the mutation limits' storage and keyed subject hashing. */
-export function consumePublicReadRateLimit(
-  scope: PublicReadRateLimitScope,
-  subject: string,
-): ReturnType<typeof consumeApiRateLimit> {
-  return consumeApiRateLimit(scope, subject, getAuthEnvironment().secret);
+/** The public read counters share the one rate limiter (`composition/rate-limits.ts`). */
+export function consumePublicReadRateLimit(scope: PublicReadRateLimitScope, subject: string) {
+  return rateLimiter.consume(scope, subject);
 }

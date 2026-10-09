@@ -18,8 +18,8 @@ export const giftExportService = createGiftExportService({
 
 export const giftExportRouteDependencies: GiftExportRouteDependencies = {
   getAccessors: async (request) => (await getGiftRequestContext(request)).accessors,
-  // Rare and owner-only: the generous `gift-update` budget is enough.
+  // Owner-only reads share the `gift-read` budget.
   limit: async (request, id) =>
-    enforceGiftMutationRateLimit(request, await getGiftRequestContext(request), "gift-update", id),
+    enforceGiftMutationRateLimit(request, await getGiftRequestContext(request), "gift-read", id),
   service: giftExportService,
 };

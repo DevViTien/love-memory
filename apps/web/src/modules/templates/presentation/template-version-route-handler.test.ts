@@ -42,7 +42,8 @@ function post(body: unknown, headers: Record<string, string> = {}): Request {
 describe("POST /api/admin/template-versions", () => {
   const getAccess = vi.fn<(headers: Headers) => Promise<AdminAccess>>();
   const apply = vi.fn<TemplateVersionControls["apply"]>();
-  const dependencies: TemplateVersionRouteDependencies = { controls: { apply }, getAccess };
+  const limit = vi.fn(() => Promise.resolve({ allowed: true, retryAfterSeconds: 0 }));
+  const dependencies: TemplateVersionRouteDependencies = { controls: { apply }, getAccess, limit };
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 
   beforeEach(() => {
@@ -140,6 +141,19 @@ describe("POST /api/admin/template-versions", () => {
     await expect(noStepUp.json()).resolves.toMatchObject({
       error: { details: { reason: "MFA_REQUIRED" } },
     });
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it("answers 429 when the admin-action budget is spent, before any change", async () => {
+    limit.mockResolvedValueOnce({ allowed: false, retryAfterSeconds: 30 });
+
+    const response = await handleTemplateVersionAction(
+      post({ action: "retire", templateId: "memory-box", version: "1.1.0" }),
+      dependencies,
+    );
+
+    expect(response.status).toBe(429);
+    expect(limit).toHaveBeenCalledWith("admin-1");
     expect(apply).not.toHaveBeenCalled();
   });
 

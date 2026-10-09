@@ -4,6 +4,7 @@ import {
   createApiErrorResponse,
   createApiSuccessResponse,
   createInvalidBodyResponse,
+  createRateLimitedResponse,
   readJsonBody,
   requestId,
   validateJsonMutationRequest,
@@ -22,6 +23,8 @@ const TEMPLATE_VERSION_ACTION_MAX_BYTES = 1024;
 export type TemplateVersionRouteDependencies = Readonly<{
   controls: Pick<TemplateVersionControls, "apply">;
   getAccess: (headers: Headers) => Promise<AdminAccess>;
+  /** Charges the admin's `admin-action` counter. */
+  limit: (userId: string) => Promise<Readonly<{ allowed: boolean; retryAfterSeconds: number }>>;
 }>;
 
 /**
@@ -43,6 +46,8 @@ export async function handleTemplateVersionAction(
 
     const rejected = validateJsonMutationRequest(request, id);
     if (rejected) return rejected;
+    const limit = await dependencies.limit(session.user.id);
+    if (!limit.allowed) return createRateLimitedResponse(limit.retryAfterSeconds, id);
 
     const body = await readJsonBody(request, TemplateVersionActionRequestSchema, {
       maxBytes: TEMPLATE_VERSION_ACTION_MAX_BYTES,

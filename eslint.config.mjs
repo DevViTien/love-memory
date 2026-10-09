@@ -94,14 +94,7 @@ export default defineConfig([
   },
   {
     files: ["apps/*/src/modules/*/presentation/**/*.{ts,tsx}"],
-    ignores: [
-      "**/*.test.{ts,tsx}",
-      "**/test/**",
-      // Known exceptions, moved behind composition in Sprint 4 (docs/sprints/sprint-3-review.md,
-      // A19): the generic rate limiter still lives in gifts/infrastructure. Do not add entries.
-      "apps/web/src/modules/gifts/presentation/gift-route-helpers.ts",
-      "apps/web/src/modules/public-gifts/presentation/public-gift-route-handler.ts",
-    ],
+    ignores: ["**/*.test.{ts,tsx}", "**/test/**"],
     rules: {
       "no-restricted-imports": [
         "error",

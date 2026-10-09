@@ -46,10 +46,13 @@ export async function GET(request: Request, routeContext: GiftRouteContext): Pro
       return publicId;
     }
 
-    const { accessors } = await getGiftRequestContext(request);
+    const context = await getGiftRequestContext(request);
+    const { accessors } = context;
     if (accessors.length === 0) {
       return giftServiceErrorResponse({ code: "NOT_FOUND" }, id);
     }
+    const limited = await enforceGiftMutationRateLimit(request, context, "gift-read", id);
+    if (limited) return limited;
 
     const result = await giftService.getDraft({ accessors, publicId });
     return result.ok

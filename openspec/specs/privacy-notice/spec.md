@@ -24,7 +24,8 @@ SHALL state, in Vietnamese:
   - the version shown before an update is deleted within minutes of the update;
   - original photos are not kept; only processed photos without location data are;
   - a deleted gift's link stops at once, and its content and photos are erased within 24 hours,
-    keeping a record of ids and times for 1 year;
+    keeping a record of ids and times for 1 year; database backups that still hold it expire within
+    7 days (`backup-and-restore` runbook);
   - reports and the admin audit log are kept 1 year;
   - sign-in sessions last 30 days;
   - anonymous statistics, when enabled, are kept 180 days without any account link.
