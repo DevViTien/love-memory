@@ -172,7 +172,8 @@ export interface PlanGrantPolicy {
 
 /** The registered template artifact of an exact version, or `null` when none is registered. */
 export interface GiftArtifactResolver {
-  resolve(templateId: string, version: string): Readonly<{ contentHash: string }> | null;
+  /** The registered artifact of the exact version, or `null` (none, or the version is killed). */
+  resolve(templateId: string, version: string): Promise<Readonly<{ contentHash: string }> | null>;
 }
 
 /** The gift fields analytics may see: never content, the public id or the share id. */
@@ -468,7 +469,7 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
       // draft is created on it (it is shown as "Sắp ra mắt" in the catalog).
       if (
         dependencies.publishing &&
-        !dependencies.publishing.artifacts.resolve(manifest.id, manifest.version)
+        !(await dependencies.publishing.artifacts.resolve(manifest.id, manifest.version))
       ) {
         return failure({ code: "NOT_FOUND" });
       }
@@ -654,7 +655,7 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
         gift.content.templateVersion,
       );
       if (!manifest) return failure({ code: "TEMPLATE_NOT_EDITABLE" });
-      const artifact = publishing.artifacts.resolve(manifest.id, manifest.version);
+      const artifact = await publishing.artifacts.resolve(manifest.id, manifest.version);
       if (!artifact) return failure({ code: "TEMPLATE_UNPUBLISHABLE" });
 
       const content = gift.content.data;

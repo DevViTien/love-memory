@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { getLocalObjectStorageOrigin } from "@love-memory/storage";
 
 import { getWebEnvironment } from "@/config/environment";
-import { getTemplateArtifact } from "@/modules/templates/infrastructure/template-artifact-registry";
+import { resolveTemplateArtifact } from "@/composition/templates";
 import { createContentSecurityPolicy } from "@/security/content-security-policy";
 
 type Context = Readonly<{
@@ -12,7 +12,8 @@ type Context = Readonly<{
 
 export async function GET(_request: Request, context: Context): Promise<Response> {
   const { contentHash, fileName, templateId, version } = await context.params;
-  const artifact = getTemplateArtifact(templateId, version);
+  // A killed version answers 404 like an unknown one (`template-version-controls`).
+  const artifact = await resolveTemplateArtifact(templateId, version);
   const file = artifact?.contentHash === contentHash ? artifact.files[fileName] : undefined;
   if (!artifact || !file) return new Response(null, { status: 404 });
   const { assetOrigin } = getWebEnvironment();

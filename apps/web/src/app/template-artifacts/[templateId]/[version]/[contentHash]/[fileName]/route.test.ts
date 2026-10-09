@@ -1,6 +1,14 @@
 import { getTemplateArtifact } from "@/modules/templates/infrastructure/template-artifact-registry";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const kills = vi.hoisted(() => ({ isKilled: vi.fn((_id: string, _version: string) => false) }));
+
+vi.mock("@/modules/templates/infrastructure/mongo-template-version-state", () => ({
+  mongoTemplateVersionState: {
+    isKilled: (id: string, version: string) => Promise.resolve(kills.isKilled(id, version)),
+  },
+}));
+
 import { GET } from "./route";
 
 const hash = getTemplateArtifact("memory-box-spike", "0.1.0")!.contentHash;
@@ -23,6 +31,27 @@ describe("content-addressed template artifact route", () => {
     expect(html.headers.get("etag")).toMatch(/^"[a-f0-9]{64}"$/);
     expect(runtime.headers.get("content-type")).toContain("javascript");
     expect(runtime.headers.get("access-control-allow-origin")).toBe("*");
+  });
+
+  it("answers 404 for a killed version and serves it again after a restore (Killed version)", async () => {
+    const artifact = getTemplateArtifact("memory-box", "1.1.0")!;
+    const request = () =>
+      GET(new Request("https://example.test"), {
+        params: Promise.resolve({
+          contentHash: artifact.contentHash,
+          fileName: "index.html",
+          templateId: "memory-box",
+          version: "1.1.0",
+        }),
+      });
+    kills.isKilled.mockReturnValueOnce(true);
+    const killed = await request();
+    expect(killed.status).toBe(404);
+    expect(await killed.text()).toBe("");
+    expect(kills.isKilled).toHaveBeenCalledWith("memory-box", "1.1.0");
+
+    const restored = await request();
+    expect(restored.status).toBe(200);
   });
 
   it("serves the committed memory-box 1.1.0 release with the template CSP", async () => {

@@ -19,6 +19,11 @@ through a schema-validated message protocol and an allowlisted asset resolver.
 - Published gifts reference an exact template and engine version.
 - Template capabilities and network access are denied unless explicitly declared and enforced.
 - SDK compatibility, reduced-motion behavior and visual fixtures become release gates.
+- **Kill switch** (`add-template-kill-switch`, 2026-10-10). An admin can kill a template version
+  that misbehaves. The version stays pinned and its manifest unchanged, but no consumer receives its
+  artifact any more: viewers show the static rendering, publishing is refused, and the artifact
+  route answers `404`. A restore brings the same immutable artifact back. Gifts never move to
+  another version.
 
 ## Revisit when
 

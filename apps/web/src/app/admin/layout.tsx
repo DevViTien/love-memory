@@ -16,6 +16,7 @@ export default async function AdminLayout({ children }: Readonly<{ children: Rea
       <Container className="py-8 sm:py-10">
         <nav aria-label="Quản trị" className="mb-6 flex gap-4 text-sm font-bold text-stone-700">
           <Link href="/admin">Quản trị</Link>
+          <Link href="/admin/templates">Mẫu quà</Link>
           <Link href="/admin/audit">Nhật ký</Link>
         </nav>
         {children}

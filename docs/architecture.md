@@ -502,6 +502,15 @@ The admin area lets operations look up a gift and read the audit log. Behavior i
   - A read audit (the gift lookup) is written before the page renders, and a failed write fails
     the page.
   - The searched text is never recorded.
+- **Template kill switch.** `/admin/templates` and `POST /api/admin/template-versions` retire,
+  kill or restore a template version (`template-version-controls`).
+  - **Storage.** A kill is stored as `killedAt` and `killReason` on the `templateVersions`
+    document, with the transition and its audit record in one transaction.
+  - **Enforcement.** `resolveTemplateArtifact` (`composition/templates.ts`) is the only way to an
+    artifact. It returns `null` for a killed version, which turns into the static rendering in the
+    viewer and preview, `409 TEMPLATE_VERSION_UNPUBLISHABLE` on publish, the Studio notice, and
+    `404` on the artifact route.
+  - **The seed.** `db:seed` leaves the status of a version with `adminRetiredAt` alone.
 - **Gift lookup.** `mongo-admin-gift-lookup.ts` is the only cross-owner read. It is an exact match
   on `_id`, `publicId` or `shareId`, with a projection without content, plus the owner's email and
   the asset counts per status.

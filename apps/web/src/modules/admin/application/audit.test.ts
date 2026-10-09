@@ -37,6 +37,27 @@ describe("audit records", () => {
     expect(AUDIT_RETENTION_MILLISECONDS).toBe(365 * 86_400_000);
   });
 
+  it("accepts the template version actions (Template action recorded)", () => {
+    for (const action of [
+      "admin.template.retired",
+      "admin.template.killed",
+      "admin.template.restored",
+    ] as const) {
+      expect(
+        buildAuditRecord(
+          {
+            action,
+            actor: { id: "user-1", kind: "admin" },
+            ...(action === "admin.template.killed" ? { metadata: { reason: "broken" } } : {}),
+            target: { id: "memory-box@1.1.0", kind: "template-version" },
+          },
+          "request-1",
+          now,
+        ).action,
+      ).toBe(action);
+    }
+  });
+
   it("refuses unknown actions, actor kinds and oversized or sensitive metadata", () => {
     const base = {
       action: "admin.role.granted" as const,

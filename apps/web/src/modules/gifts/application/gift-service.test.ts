@@ -238,7 +238,9 @@ describe("gift application service", () => {
         createPublicId: () => "q1w2e3r4t5y6u7i8",
         gifts: repository,
         publishing: {
-          artifacts: { resolve: () => (registered ? { contentHash: "a".repeat(64) } : null) },
+          artifacts: {
+            resolve: () => Promise.resolve(registered ? { contentHash: "a".repeat(64) } : null),
+          },
           assets: { listByGiftId: () => Promise.resolve([]) },
           createShareId: () => "unused",
           plans: { grantFor: () => ({ kind: "grant", source: "free" }) },
@@ -881,7 +883,9 @@ describe("gift publishing", () => {
       publishing: {
         artifacts: {
           resolve: (templateId, version) =>
-            templateId === "memory-box" && version === "1.1.0" ? { contentHash } : null,
+            Promise.resolve(
+              templateId === "memory-box" && version === "1.1.0" ? { contentHash } : null,
+            ),
         },
         assets: { listByGiftId: () => Promise.resolve(assets) },
         createShareId: () => shareId,

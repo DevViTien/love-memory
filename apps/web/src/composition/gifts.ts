@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 
 import { analyticsContextForGift, publishAnalytics } from "@/composition/analytics";
 import { audioCatalog } from "@/composition/audio";
+import { resolveTemplateArtifact } from "@/composition/templates";
 import { getInternalPlanGrantEnvironment } from "@/config/internal-plan-grant";
 import { createGiftService, type PlanGrantPolicy } from "@/modules/gifts/application/gift-service";
 import { getAuthEnvironment } from "@/modules/auth/infrastructure/auth-environment";
@@ -9,7 +10,6 @@ import { createIdempotentAnonymousDraftIdentity } from "@/modules/gifts/infrastr
 import { mongoGiftRepository } from "@/modules/gifts/infrastructure/mongo-gift-repository";
 import { mongoGiftTemplateRepository } from "@/modules/gifts/infrastructure/mongo-gift-template-repository";
 import { mongoMediaAssetRepository } from "@/modules/media/infrastructure/mongo-media-repository";
-import { getTemplateArtifact } from "@/modules/templates/infrastructure/template-artifact-registry";
 
 /**
  * `gift-plans` "Plan availability": Free always; Standard only through the internal paid-plan grant
@@ -41,8 +41,8 @@ export const giftService = createGiftService({
   },
   publishing: {
     artifacts: {
-      resolve: (templateId, version) => {
-        const artifact = getTemplateArtifact(templateId, version);
+      resolve: async (templateId, version) => {
+        const artifact = await resolveTemplateArtifact(templateId, version);
         return artifact ? { contentHash: artifact.contentHash } : null;
       },
     },

@@ -128,3 +128,21 @@ through the application.
 | `admin.mfa.verified`   | `admin`    | user   | `method` (`totp` or `backup`)            |
 | `admin.mfa.failed`     | `admin`    | user   | `method`, `reason` (`invalid`, `locked`) |
 | `admin.gift.looked_up` | `admin`    | gift   | `matched`; no target when nothing found  |
+
+## Template versions
+
+`/admin/templates` lists every stored template version. For each one it shows the status, whether it
+is the template's current version, whether its template is registered (`Hiệu ứng`), and its kill
+state.
+
+| Action            | When                                                                                       | Effect                                                                                                                                                                                                  | Audit action              |
+| ----------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| `Ngừng phát hành` | A version should no longer start new gifts.                                                | It leaves the catalog and new drafts. Existing gifts keep working. Retiring the current version removes the template from the catalog until a new release.                                              | `admin.template.retired`  |
+| `Tắt khẩn cấp`    | A version misbehaves (`broken`), is unsafe (`security`), or must stop for `legal` reasons. | It is also retired. Every gift on it shows only its static content, its previews show the static fallback, publishing and updates are refused, and its artifact URLs answer `404`. Gifts stay readable. | `admin.template.killed`   |
+| `Khôi phục`       | The cause of a kill is resolved.                                                           | The template runs again for those gifts, from the next page load. The version stays retired.                                                                                                            | `admin.template.restored` |
+
+- **Effect timing.** Effects start with the next request; nothing needs a deploy, a cache purge
+  or a migration.
+- **Already-open pages** keep running until they are reloaded.
+- **`db:seed`** never undoes a retire or a kill made here.
+- **Bringing a version back into the catalog** needs a code release.

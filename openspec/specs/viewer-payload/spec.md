@@ -59,10 +59,11 @@ audio URL.
 
 The `artifactUrl` SHALL be the content-addressed entry URL
 `/template-artifacts/{templateId}/{version}/{contentHash}/index.html` of the exact template version
-that the gift is bound to, when that exact version has a registered artifact. `artifactUrl` SHALL be
-`null` in two cases:
+that the gift is bound to, when that exact version has a registered artifact and is not killed
+(`template-version-controls`). `artifactUrl` SHALL be `null` in three cases:
 
 - the version has no registered artifact, such as the retired `memory-box` `1.0.0`;
+- the version is killed;
 - an expected `contentHash` was supplied and differs from the registered one.
 
 The rest of the output SHALL still be built, so the gift viewer shows the static rendering. The
@@ -90,6 +91,11 @@ transformation MUST NOT fall back to another version of the template, or to an a
 
 - **WHEN** the expected `contentHash` differs from the registered one
 - **THEN** `artifactUrl` is `null` and the rest of the output is still returned
+
+#### Scenario: Killed version
+
+- **WHEN** the gift is bound to `memory-box` `1.1.0` and an admin has killed that version
+- **THEN** `artifactUrl` is `null`, and `payload`, `assets`, `fields` and `issues` are still returned
 
 ### Requirement: Payload is the stored content
 

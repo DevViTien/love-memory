@@ -1,6 +1,4 @@
-import { createHmac } from "node:crypto";
-import { UUID } from "mongodb";
-
+import { cleanupAdminAccount, enrollAdminFactor, setRole } from "./support/admin";
 import { signInThroughMagicLink, uniqueE2eEmail } from "./support/auth";
 import {
   cleanupE2eRecord,
@@ -9,60 +7,6 @@ import {
   withE2eDatabase,
 } from "./support/gift-journey";
 import { expect, test } from "./test";
-
-const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-
-function base32Decode(value: string): Buffer {
-  let bits = 0;
-  let accumulator = 0;
-  const bytes: number[] = [];
-  for (const character of value.replace(/=+$/, "").toUpperCase()) {
-    const index = BASE32_ALPHABET.indexOf(character);
-    if (index < 0) throw new Error("The setup key is not base32.");
-    accumulator = (accumulator << 5) | index;
-    bits += 5;
-    if (bits >= 8) {
-      bytes.push((accumulator >>> (bits - 8)) & 0xff);
-      bits -= 8;
-    }
-  }
-  return Buffer.from(bytes);
-}
-
-/** RFC 6238 TOTP (SHA-1, 6 digits, 30 s), as an authenticator app computes it from the setup key. */
-function totp(setupKey: string, now = Date.now()): string {
-  const counter = Buffer.alloc(8);
-  counter.writeBigUInt64BE(BigInt(Math.floor(now / 30_000)));
-  const digest = createHmac("sha1", base32Decode(setupKey)).update(counter).digest();
-  const offset = digest[digest.length - 1]! & 0x0f;
-  const binary = digest.readUInt32BE(offset) & 0x7fffffff;
-  return String(binary % 1_000_000).padStart(6, "0");
-}
-
-/** Sets the role directly in the E2E database; returns the user id as the application sees it. */
-async function setRole(email: string, role: "admin" | "creator"): Promise<string> {
-  return withE2eDatabase(async (database) => {
-    const users = database.collection<{ _id: string | UUID; email: string }>("users");
-    await users.updateOne({ email }, { $set: { role } });
-    const user = await users.findOne({ email }, { projection: { _id: 1 } });
-    if (!user) throw new Error("The E2E user does not exist.");
-    // Better Auth stores user ids as BSON UUIDs.
-    return user._id instanceof UUID ? user._id.toString() : String(user._id);
-  });
-}
-
-/** Removes what the admin journey adds beyond a gift and its account. */
-async function cleanupAdminRecords(userId: string | undefined, giftId: string | undefined) {
-  if (!userId) return;
-  await withE2eDatabase(async (database) => {
-    await Promise.all([
-      database.collection("twoFactors").deleteMany({ userId: { $in: [userId, new UUID(userId)] } }),
-      database.collection("adminStepUps").deleteMany({ userId }),
-      database.collection("auditLog").deleteMany({ "actor.id": userId }),
-      ...(giftId ? [database.collection("auditLog").deleteMany({ "target.id": giftId })] : []),
-    ]);
-  });
-}
 
 test("an admin enrolls, steps up, looks up a gift without its content and finds the lookup in the audit log", async ({
   page,
@@ -91,24 +35,10 @@ test("an admin enrolls, steps up, looks up a gift without its content and finds 
       return (await gifts.findOne({ publicId: draftPublicId }, { projection: { _id: 1 } }))?._id;
     });
 
-    // 1. Without a factor the admin is sent to enrollment.
-    await page.goto("/admin");
-    await expect(page).toHaveURL(/\/admin\/mfa$/);
-    await expect(page.getByRole("heading", { name: "Thiết lập xác thực hai lớp" })).toBeVisible();
-
-    // 2. Enrollment shows the setup key and the backup codes once; a computed code activates it.
-    await page.getByRole("button", { name: "Tạo mã thiết lập" }).click();
-    const setup = page.getByRole("region", { name: "Thiết lập ứng dụng xác thực" });
-    await expect(
-      setup.getByText("Lưu các mã dự phòng ở nơi an toàn.", { exact: false }),
-    ).toBeVisible();
-    const setupKey = (await setup.locator("p.font-mono").first().textContent())?.trim() ?? "";
-    expect(setupKey).toMatch(/^[A-Z2-7]+=*$/);
-    await page.getByLabel("Mã xác thực").fill(totp(setupKey));
-    await page.getByRole("button", { name: "Xác nhận" }).click();
+    // 1–2. Without a factor the admin is sent to enrollment; a computed code activates it.
+    await enrollAdminFactor(page);
 
     // 3. The admin reaches /admin; a lookup by publicId shows the summary and no gift text.
-    await expect(page).toHaveURL(/\/admin$/);
     await page.getByLabel("Tìm món quà").fill(draftPublicId);
     await page.getByRole("button", { name: "Tìm" }).click();
     const summary = page.getByRole("region", { name: "Món quà" });
@@ -137,8 +67,8 @@ test("an admin enrolls, steps up, looks up a gift without its content and finds 
     const enable = await page.request.post("/api/auth/two-factor/enable", { data: {} });
     expect(enable.status()).toBe(404);
   } finally {
-    await cleanupAdminRecords(userId, giftId);
     if (publicId) await cleanupE2eRecord({ email, publicId });
+    await cleanupAdminAccount(email, userId, giftId ? [giftId] : []);
   }
 });
 

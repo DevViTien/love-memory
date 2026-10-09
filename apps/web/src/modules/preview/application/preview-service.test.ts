@@ -98,7 +98,9 @@ describe("preview service", () => {
         downloadUrlTtlSeconds: 300,
         findSelectableTrack: (id) => (id === activeTrack.id ? activeTrack : null),
         resolveArtifact: (id, version) =>
-          id === "memory-box" && version === "1.1.0" ? { contentHash: "f".repeat(64) } : null,
+          Promise.resolve(
+            id === "memory-box" && version === "1.1.0" ? { contentHash: "f".repeat(64) } : null,
+          ),
         signDownloadUrl: (key) => Promise.resolve(`https://blob.example/${key}?sig=1`),
       },
       templates: {

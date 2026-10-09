@@ -3,7 +3,7 @@ import { type ObjectStorage, STORAGE_LIMITS } from "@love-memory/storage";
 import { audioCatalog } from "@/composition/audio";
 import { createStorage } from "@/composition/media";
 import { type BuildViewerPayloadDependencies } from "@/modules/viewer/application/build-viewer-payload";
-import { getTemplateArtifact } from "@/modules/templates/infrastructure/template-artifact-registry";
+import { resolveTemplateArtifact } from "@/composition/templates";
 
 let storage: ObjectStorage | undefined;
 
@@ -18,8 +18,8 @@ export const viewerPayloadDependencies: BuildViewerPayloadDependencies = {
   clock: () => new Date(),
   downloadUrlTtlSeconds: STORAGE_LIMITS.downloadUrlTtlSeconds,
   findSelectableTrack: (id) => audioCatalog.findSelectableTrack(id),
-  resolveArtifact: (id, version) => {
-    const artifact = getTemplateArtifact(id, version);
+  resolveArtifact: async (id, version) => {
+    const artifact = await resolveTemplateArtifact(id, version);
     return artifact ? { contentHash: artifact.contentHash } : null;
   },
   signDownloadUrl: (key) =>

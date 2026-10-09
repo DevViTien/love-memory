@@ -42,7 +42,7 @@ export function manifestContentHash(manifest: unknown): string {
 export type SeedCollection = Readonly<{
   findOne: (filter: Readonly<{ _id: string }>) => Promise<Readonly<{ manifest?: unknown }> | null>;
   updateOne: (
-    filter: Readonly<{ _id: string }>,
+    filter: Readonly<{ _id: string; adminRetiredAt?: Readonly<{ $exists: false }> }>,
     update: Readonly<Record<string, unknown>>,
     options: Readonly<{ upsert: boolean }>,
   ) => Promise<unknown>;
@@ -77,7 +77,8 @@ export async function assertTemplateVersionUnchanged(
 
 /**
  * Upserts one template version. A new document stores the raw manifest, its preview fixture and
- * `sha256(canonicalJson(manifest))`; an existing document keeps them and only gets its `status`.
+ * `sha256(canonicalJson(manifest))`; an existing document keeps them and only gets its `status`,
+ * unless an admin retired or killed it (`template-version-controls`): that decision stays.
  */
 export async function upsertTemplateVersion(
   collection: SeedCollection,
@@ -87,20 +88,27 @@ export async function upsertTemplateVersion(
 ): Promise<void> {
   await assertTemplateVersionUnchanged(collection, templateId, version);
   const versionId = versionOf(version);
+  const _id = `${templateId}@${versionId}`;
   await collection.updateOne(
-    { _id: `${templateId}@${versionId}` },
+    { _id },
     {
-      $set: { status: version.status, updatedAt: now },
+      $set: { updatedAt: now },
       $setOnInsert: {
         contentHash: manifestContentHash(version.manifest),
         createdAt: now,
         manifest: version.manifest,
         previewFixture: version.previewFixture,
+        status: version.status,
         templateId,
         version: versionId,
       },
     },
     { upsert: true },
+  );
+  await collection.updateOne(
+    { _id, adminRetiredAt: { $exists: false } },
+    { $set: { status: version.status } },
+    { upsert: false },
   );
 }
 

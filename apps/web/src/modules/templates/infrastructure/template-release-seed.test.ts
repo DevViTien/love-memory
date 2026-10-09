@@ -17,11 +17,17 @@ function fakeCollection(initial: StoredDocument[] = []) {
   const writes: string[] = [];
   const collection: SeedCollection = {
     findOne: ({ _id }) => Promise.resolve(documents.get(_id) ?? null),
-    updateOne: ({ _id }, update) => {
-      writes.push(_id);
+    updateOne: (filter, update, options) => {
+      const { _id } = filter;
       const existing = documents.get(_id);
+      // `{ adminRetiredAt: { $exists: false } }` skips a version an admin retired or killed.
+      if (filter.adminRetiredAt && existing?.["adminRetiredAt"] !== undefined) {
+        return Promise.resolve();
+      }
+      if (!existing && !options.upsert) return Promise.resolve();
+      writes.push(_id);
       const set = update["$set"] as Record<string, unknown>;
-      const setOnInsert = update["$setOnInsert"] as Record<string, unknown>;
+      const setOnInsert = (update["$setOnInsert"] ?? {}) as Record<string, unknown>;
       documents.set(_id, existing ? { ...existing, ...set } : { _id, ...setOnInsert, ...set });
       return Promise.resolve();
     },
@@ -192,6 +198,29 @@ describe("seedTemplateRelease", () => {
       status: "published",
       updatedAt: now,
     });
+  });
+
+  it("keeps a version an admin retired or killed (Re-seeding keeps an admin retire)", async () => {
+    const versions = fakeCollection();
+    const templates = fakeCollection();
+    const collections = { templateVersions: versions.collection, templates: templates.collection };
+    await seedTemplateRelease(collections, memoryBox, 0, createdAt);
+    const killed = versions.documents.get("memory-box@1.1.0")!;
+    versions.documents.set("memory-box@1.1.0", {
+      ...killed,
+      adminRetiredAt: createdAt,
+      killedAt: createdAt,
+      status: "retired",
+    });
+
+    await seedTemplateRelease(collections, memoryBox, 0, now);
+
+    expect(versions.documents.get("memory-box@1.1.0")).toMatchObject({
+      killedAt: createdAt,
+      status: "retired",
+      updatedAt: now,
+    });
+    expect(versions.documents.get("memory-box@1.0.0")).toMatchObject({ status: "retired" });
   });
 
   it("fails when the current version is not among the release versions", async () => {

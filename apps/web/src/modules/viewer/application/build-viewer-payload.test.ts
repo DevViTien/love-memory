@@ -35,7 +35,7 @@ describe("buildViewerPayload", () => {
       downloadUrlTtlSeconds: 300,
       findSelectableTrack: (id) => (id === activeTrack.id ? activeTrack : null),
       resolveArtifact: (id, version) =>
-        id === "memory-box" && version === "1.1.0" ? { contentHash } : null,
+        Promise.resolve(id === "memory-box" && version === "1.1.0" ? { contentHash } : null),
       signDownloadUrl,
     };
   });
@@ -122,6 +122,18 @@ describe("buildViewerPayload", () => {
       expect(result.payload).toEqual(completeContent());
       expect(Object.keys(result.assets)).toHaveLength(3);
       expect(result.fields).toHaveLength(7);
+      expect(result.issues).toEqual([]);
+    });
+
+    it("returns no artifact for a killed version and still builds the rest (Killed version)", async () => {
+      const result = await buildViewerPayload(
+        { assets: readyAssets(), content: completeContent(), giftId, manifest: memoryBoxManifest },
+        { ...dependencies, resolveArtifact: () => Promise.resolve(null) },
+      );
+
+      expect(result.artifactUrl).toBeNull();
+      expect(result.payload).toEqual(completeContent());
+      expect(Object.keys(result.assets)).toHaveLength(3);
       expect(result.issues).toEqual([]);
     });
 

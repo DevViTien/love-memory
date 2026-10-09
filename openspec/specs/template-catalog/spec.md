@@ -202,7 +202,9 @@ Seeding MUST:
 - abort if a template has no preview fixture, or its preview fixture fails payload validation
   against the manifest;
 - abort, without changing that version, when a version is already stored with a manifest whose
-  content differs, ignoring key order, because a template release is immutable.
+  content differs, ignoring key order, because a template release is immutable;
+- leave the status of a version that an admin retired or killed (`template-version-controls`)
+  unchanged, so a re-run never brings it back into the catalog or new drafts.
 
 #### Scenario: Seed on an empty database
 
@@ -235,6 +237,12 @@ Seeding MUST:
 - **WHEN** `memory-box@1.1.0` is already stored with a manifest whose content differs from the
   committed release manifest
 - **THEN** seeding fails naming `memory-box@1.1.0` and leaves the stored version unchanged
+
+#### Scenario: Re-seeding keeps an admin retire
+
+- **WHEN** an admin retired `our-timeline` `1.0.0` and `db:seed` runs again
+- **THEN** `our-timeline` `1.0.0` stays `retired`, and every other seeded version gets its seeded
+  status
 
 ### Requirement: Retired versions remain resolvable for existing gifts
 

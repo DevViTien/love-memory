@@ -135,7 +135,9 @@ describe("public gift service", () => {
         downloadUrlTtlSeconds: 300,
         findSelectableTrack: (id) => (id === activeTrack.id ? activeTrack : null),
         resolveArtifact: (id, version) =>
-          id === "memory-box" && version === "1.1.0" ? { contentHash: registeredHash } : null,
+          Promise.resolve(
+            id === "memory-box" && version === "1.1.0" ? { contentHash: registeredHash } : null,
+          ),
         signDownloadUrl: (key) => Promise.resolve(`https://blob.example/${key}?sig=1`),
       },
       publications: { findByGiftRevision },

@@ -1,5 +1,6 @@
 import { getAuth } from "@/composition/auth";
 import { getCurrentSession } from "@/composition/session";
+import { templateVersionControls } from "@/composition/templates";
 import { type AdminAccess, resolveAdminAccess } from "@/modules/admin/application/admin-access";
 import { createAdminMfaService } from "@/modules/admin/application/admin-mfa";
 import { createAuditService } from "@/modules/admin/application/audit";
@@ -12,6 +13,7 @@ import { mongoAuditLog } from "@/modules/admin/infrastructure/mongo-audit-log";
 import { type AdminMfaRouteDependencies } from "@/modules/admin/presentation/admin-mfa-route-handlers";
 import { getAuthEnvironment } from "@/modules/auth/infrastructure/auth-environment";
 import { consumeApiRateLimit } from "@/modules/gifts/infrastructure/mongo-gift-rate-limiter";
+import { type TemplateVersionRouteDependencies } from "@/modules/templates/presentation/template-version-route-handler";
 
 export const auditService = createAuditService({ repository: mongoAuditLog });
 
@@ -49,4 +51,9 @@ export const adminMfaRouteDependencies: AdminMfaRouteDependencies = {
     consumeApiRateLimit("admin-mfa", subject, getAuthEnvironment().secret),
   getAccess: getAdminAccess,
   mfa: adminMfaService,
+};
+
+export const templateVersionRouteDependencies: TemplateVersionRouteDependencies = {
+  controls: templateVersionControls,
+  getAccess: getAdminAccess,
 };

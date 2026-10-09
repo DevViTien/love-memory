@@ -25,8 +25,9 @@ The system SHALL record each audited event as one document in `auditLog`, holdin
 - `expiresAt`, 365 days after `at`.
 
 The actions are `admin.role.granted`, `admin.role.revoked`, `admin.mfa.enrolled`, `admin.mfa.reset`,
-`admin.mfa.verified`, `admin.mfa.failed` and `admin.gift.looked_up`. Later capabilities add their own
-actions to this list.
+`admin.mfa.verified`, `admin.mfa.failed`, `admin.gift.looked_up`, `admin.template.retired`,
+`admin.template.killed` and `admin.template.restored`. Later capabilities add their own actions to
+this list.
 
 **Contents.** A record MUST NOT contain gift content, captions, passwords, TOTP or backup codes,
 tokens, share ids, signed URLs or email addresses. No API or command SHALL update or delete a record;
@@ -52,6 +53,12 @@ event writes them; no endpoint accepts a record from a client.
 - **WHEN** the audit write of `admin:grant` fails
 - **THEN** the command exits with a non-zero status, and the role is not left changed without a
   record
+
+#### Scenario: Template action recorded
+
+- **WHEN** an admin kills `memory-box` `1.1.0` with the reason `broken`
+- **THEN** a record holds `admin.template.killed`, the admin as actor, the target
+  `{ kind: "template-version", id: "memory-box@1.1.0" }` and the metadata `{ reason: "broken" }`
 
 ### Requirement: Audit page
 

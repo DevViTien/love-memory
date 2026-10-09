@@ -22,18 +22,22 @@ export type BuildViewerPayloadDependencies = Readonly<{
   /** The lifetime `signDownloadUrl` gives each URL; `assetsExpireAt` is derived from it. */
   downloadUrlTtlSeconds: number;
   findSelectableTrack: (id: string) => LicensedAudioTrackDto | null;
-  resolveArtifact: (id: string, version: string) => Readonly<{ contentHash: string }> | null;
+  /** The registered artifact of the exact version, or `null` (none, or the version is killed). */
+  resolveArtifact: (
+    id: string,
+    version: string,
+  ) => Promise<Readonly<{ contentHash: string }> | null>;
   /** Signs a download URL valid for `downloadUrlTtlSeconds`. */
   signDownloadUrl: (key: string) => Promise<string>;
 }>;
 
-function resolveArtifactUrl(
+async function resolveArtifactUrl(
   manifest: TemplateManifest,
   expectedContentHash: string | undefined,
   resolveArtifact: BuildViewerPayloadDependencies["resolveArtifact"],
-): string | null {
+): Promise<string | null> {
   // Never another version: a gift is pinned to the exact version it was created with.
-  const artifact = resolveArtifact(manifest.id, manifest.version);
+  const artifact = await resolveArtifact(manifest.id, manifest.version);
   if (!artifact) return null;
   if (expectedContentHash !== undefined && artifact.contentHash !== expectedContentHash) {
     return null;
@@ -71,7 +75,7 @@ export async function buildViewerPayload(
   const assets = Object.fromEntries(signed);
 
   return {
-    artifactUrl: resolveArtifactUrl(
+    artifactUrl: await resolveArtifactUrl(
       manifest,
       input.expectedContentHash,
       dependencies.resolveArtifact,

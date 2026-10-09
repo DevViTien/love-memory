@@ -6,7 +6,7 @@ import { notFound } from "next/navigation";
 
 import { audioCatalog } from "@/composition/audio";
 import { getGiftTemplateManifest, giftService, planGrantPolicy } from "@/composition/gifts";
-import { isTemplateVersionAvailable } from "@/composition/templates";
+import { resolveTemplateArtifact } from "@/composition/templates";
 import { listPlanOffers } from "@/modules/gifts/application/plan-offers";
 import { ClaimDraftButton } from "@/modules/gifts/presentation/claim-draft-button";
 import { DraftEditor } from "@/modules/gifts/presentation/draft-editor";
@@ -45,6 +45,9 @@ export default async function StudioDraftPage({ params }: StudioDraftPageProps) 
   if (!manifest) {
     throw new Error("Gift template version is unavailable.");
   }
+  // A killed version counts as one without an artifact (`template-version-controls`).
+  const publishable =
+    (await resolveTemplateArtifact(draft.templateId, draft.templateVersion)) !== null;
 
   return (
     <main>
@@ -65,7 +68,7 @@ export default async function StudioDraftPage({ params }: StudioDraftPageProps) 
                 gift={draft}
                 manifest={manifest}
                 planOffers={listPlanOffers(planGrantPolicy)}
-                publishable={isTemplateVersionAvailable(draft.templateId, draft.templateVersion)}
+                publishable={publishable}
                 signedIn={context.userId !== null}
               />
             </div>
