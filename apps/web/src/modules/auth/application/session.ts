@@ -10,10 +10,17 @@ const CurrentUserSchema = z
     // name when the sign-in form only asks for an email address.
     name: z.string(),
     role: z.enum(["creator", "admin"]).default("creator"),
+    // Set by Better Auth's `twoFactor` plugin once an admin's factor is enabled.
+    twoFactorEnabled: z
+      .boolean()
+      .nullish()
+      .transform((enabled) => enabled === true),
   })
   .passthrough();
 
 export type CurrentUser = Readonly<z.output<typeof CurrentUserSchema>>;
+
+const SessionIdSchema = z.object({ id: z.string().min(1) }).passthrough();
 
 export interface SessionProvider {
   getSession(requestHeaders: Headers): Promise<unknown>;
@@ -38,5 +45,16 @@ export function createSessionService(provider: SessionProvider) {
     return user;
   }
 
-  return { getCurrentUser, verifySession } as const;
+  /** The user and the current session's id: what a per-session check (the admin step-up) needs. */
+  async function getCurrentSession(
+    requestHeaders: Headers,
+  ): Promise<Readonly<{ sessionId: string; user: CurrentUser }> | null> {
+    const session = await provider.getSession(requestHeaders);
+    if (!session || typeof session !== "object" || !("user" in session)) return null;
+    const sessionId = SessionIdSchema.safeParse((session as { session?: unknown }).session);
+    if (!sessionId.success) return null;
+    return { sessionId: sessionId.data.id, user: CurrentUserSchema.parse(session.user) };
+  }
+
+  return { getCurrentSession, getCurrentUser, verifySession } as const;
 }

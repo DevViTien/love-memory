@@ -39,7 +39,7 @@ export const TYPICAL_MEMORY_BOX: MemoryBoxJourneyContent = {
   receiver: MEMORY_BOX_CONTENT.receiver,
 };
 
-async function withE2eDatabase<T>(
+export async function withE2eDatabase<T>(
   operation: (database: ReturnType<MongoClient["db"]>) => Promise<T>,
 ): Promise<T> {
   const uri = process.env["MONGODB_URI"];

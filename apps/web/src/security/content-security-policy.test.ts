@@ -163,6 +163,11 @@ describe("content security policy", () => {
     ["/preview/abc", "nonce"],
     ["/previews", "static"],
     ["/preview-guide", "static"],
+    // Admin pages use the nonce policy, whether or not the visitor may see them.
+    ["/admin", "nonce"],
+    ["/admin/mfa", "nonce"],
+    ["/admin/audit", "nonce"],
+    ["/administration-guide", "static"],
   ] as const)("selects %s as %s policy", (pathname, mode) => {
     expect(getContentSecurityPolicyMode(pathname)).toBe(mode);
   });

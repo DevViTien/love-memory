@@ -199,7 +199,7 @@ describe("database schema migration", () => {
       CORE_COLLECTION_DEFINITIONS.map((definition) => [definition.name, definition]),
     );
 
-    expect(DATABASE_SCHEMA_VERSION).toBe(12);
+    expect(DATABASE_SCHEMA_VERSION).toBe(13);
     expect(definitions.has(COLLECTIONS.users)).toBe(true);
     expect(definitions.has(COLLECTIONS.apiRateLimits)).toBe(true);
     expect(definitions.has(COLLECTIONS.templates)).toBe(true);
@@ -258,7 +258,7 @@ describe("database schema migration", () => {
     expect(hashPattern.test("A-_b".repeat(10) + "xyz")).toBe(false);
   });
 
-  it("accepts the preview, publish, public read and analytics rate-limit scopes", () => {
+  it("accepts the admin MFA, preview, publish, public read and analytics rate-limit scopes", () => {
     const apiRateLimits = CORE_COLLECTION_DEFINITIONS.find(
       (definition) => definition.name === COLLECTIONS.apiRateLimits,
     );
@@ -268,6 +268,7 @@ describe("database schema migration", () => {
     )?.$jsonSchema.properties.scope.enum;
 
     expect(scope).toEqual([
+      "admin-mfa",
       "analytics-event",
       "analytics-event-ip",
       "gift-claim",
@@ -418,7 +419,7 @@ describe("database schema migration", () => {
       fake.collection(COLLECTIONS.gifts).indexDefinitions.map((index) => index["name"]),
     ).toContain("gifts_share_id_unique");
     expect(fake.collections.has(COLLECTIONS.analyticsEvents)).toBe(true);
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(12);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(13);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
   });
 
@@ -448,7 +449,7 @@ describe("database schema migration", () => {
       fake.collection(COLLECTIONS.giftPublications).indexDefinitions.map((index) => index["name"]),
     ).toEqual(["_id_", "gift_publications_gift_revision_unique"]);
     expect(fake.collections.has(COLLECTIONS.analyticsEvents)).toBe(true);
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(12);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(13);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
   });
 
@@ -489,7 +490,7 @@ describe("database schema migration", () => {
       },
       { _id: "draft", revision: 2, status: "draft" },
     ]);
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(12);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(13);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
   });
 
@@ -651,6 +652,99 @@ describe("database schema migration", () => {
     ]);
   });
 
+  it("defines the admin collections with their validators and indexes", () => {
+    const definitionOf = (name: string) =>
+      CORE_COLLECTION_DEFINITIONS.find((definition) => definition.name === name);
+    const schemaOf = (name: string) =>
+      (
+        definitionOf(name)?.validator as
+          | {
+              $jsonSchema: {
+                properties: Record<string, Record<string, unknown>>;
+                required: string[];
+              };
+            }
+          | undefined
+      )?.$jsonSchema;
+
+    expect(definitionOf(COLLECTIONS.twoFactors)).toEqual({
+      indexes: [{ key: { userId: 1 }, options: { name: "two_factors_user_unique", unique: true } }],
+      name: COLLECTIONS.twoFactors,
+    });
+
+    expect(schemaOf(COLLECTIONS.adminStepUps)?.required).toEqual([
+      "_id",
+      "userId",
+      "verifiedAt",
+      "expiresAt",
+    ]);
+    expect(schemaOf(COLLECTIONS.adminStepUps)?.properties["_id"]).toEqual({
+      bsonType: "string",
+      pattern: "^[a-f0-9]{64}$",
+    });
+    expect(definitionOf(COLLECTIONS.adminStepUps)?.indexes).toEqual([
+      { key: { userId: 1 }, options: { name: "admin_step_ups_user" } },
+      {
+        key: { expiresAt: 1 },
+        options: { expireAfterSeconds: 0, name: "admin_step_ups_expiry_ttl" },
+      },
+    ]);
+
+    const audit = schemaOf(COLLECTIONS.auditLog);
+    expect(audit?.required).toEqual([
+      "_id",
+      "at",
+      "actor",
+      "action",
+      "target",
+      "requestId",
+      "metadata",
+      "expiresAt",
+    ]);
+    expect(audit?.properties["actor"]?.["properties"]).toEqual({
+      id: { bsonType: "string", minLength: 1 },
+      kind: { enum: ["admin", "operator", "system"] },
+    });
+    expect(audit?.properties["target"]).toEqual({ bsonType: ["object", "null"] });
+    expect(audit?.properties["requestId"]).toEqual({ bsonType: ["string", "null"] });
+    expect(definitionOf(COLLECTIONS.auditLog)?.indexes).toEqual([
+      { key: { at: -1 }, options: { name: "audit_log_at" } },
+      { key: { "target.id": 1, at: -1 }, options: { name: "audit_log_target_at" } },
+      { key: { expiresAt: 1 }, options: { expireAfterSeconds: 0, name: "audit_log_expiry_ttl" } },
+    ]);
+  });
+
+  it("detects a database not yet migrated to version 13", async () => {
+    const fake = new FakeDatabase();
+    const database = fake as unknown as Db;
+    await runDatabaseMigrations(database);
+    const gifts = fake.collection(COLLECTIONS.gifts);
+    const giftIndexesBefore = JSON.stringify(gifts.indexDefinitions);
+    fake.collections.delete(COLLECTIONS.twoFactors);
+    fake.collections.delete(COLLECTIONS.adminStepUps);
+    fake.collections.delete(COLLECTIONS.auditLog);
+    fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 12;
+
+    await expect(verifyDatabaseSchema(database)).rejects.toThrow(
+      "Missing MongoDB collection: twoFactors",
+    );
+
+    await runDatabaseMigrations(database);
+    await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(13);
+    expect(
+      fake.collection(COLLECTIONS.auditLog).indexDefinitions.map((index) => index["name"]),
+    ).toEqual(
+      expect.arrayContaining(["audit_log_at", "audit_log_target_at", "audit_log_expiry_ttl"]),
+    );
+    expect(JSON.stringify(gifts.indexDefinitions)).toBe(giftIndexesBefore);
+
+    fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 12;
+    await expect(verifyDatabaseSchema(database)).rejects.toThrow(
+      "MongoDB schema version mismatch: expected 13, received 12.",
+    );
+  });
+
   it("detects a database not yet migrated to version 12", async () => {
     const fake = new FakeDatabase();
     const database = fake as unknown as Db;
@@ -671,12 +765,12 @@ describe("database schema migration", () => {
     );
     fake.validators.set(COLLECTIONS.jobOutbox, jobOutbox);
     await expect(verifyDatabaseSchema(database)).rejects.toThrow(
-      "MongoDB schema version mismatch: expected 12, received 11.",
+      "MongoDB schema version mismatch: expected 13, received 11.",
     );
 
     await runDatabaseMigrations(database);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(12);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(13);
   });
 
   it("detects a database not yet migrated to version 11", async () => {
@@ -697,12 +791,12 @@ describe("database schema migration", () => {
     );
     fake.validators.set(COLLECTIONS.gifts, gifts);
     await expect(verifyDatabaseSchema(database)).rejects.toThrow(
-      "MongoDB schema version mismatch: expected 12, received 10.",
+      "MongoDB schema version mismatch: expected 13, received 10.",
     );
 
     await runDatabaseMigrations(database);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(12);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(13);
   });
 
   it("validates the publication pointer and the detach time", () => {
@@ -807,7 +901,7 @@ describe("database schema migration", () => {
       expect.arrayContaining(["analytics_events_expiry_ttl", "analytics_events_name_occurred"]),
     );
     expect(JSON.stringify(publications.indexDefinitions)).toBe(indexesBefore);
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(12);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(13);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
   });
 
@@ -953,7 +1047,7 @@ describe("database schema migration", () => {
     await runDatabaseMigrations(database);
     fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 1;
     await expect(verifyDatabaseSchema(database)).rejects.toThrow(
-      "MongoDB schema version mismatch: expected 12, received 1.",
+      "MongoDB schema version mismatch: expected 13, received 1.",
     );
 
     await runDatabaseMigrations(database);

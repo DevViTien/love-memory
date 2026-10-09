@@ -86,6 +86,17 @@ unaffected. Before deploying, rename
 `INTERNAL_PUBLISH_ENABLED` to `INTERNAL_PLAN_GRANT_ENABLED` on the tier (see "Environment
 variables").
 
+Schema version `13` (`add-admin-access-and-audit`):
+
+- creates `twoFactors`, `adminStepUps` (TTL) and `auditLog` (TTL, 365 days);
+- adds the `admin-mfa` scope to the `apiRateLimits` validator.
+
+There is no backfill and no new environment variable. Until it runs, the admin area cannot record a
+step-up, so admins stay on `/admin/mfa`; creators and recipients are unaffected. After the deploy,
+grant the tier's first admin with `pnpm admin:grant <email> --operator <name>` (see the
+[admin access runbook](./admin-access.md)). Rolling back past version 13 needs no data repair;
+admins step up again after the roll forward.
+
 ## Environment variables
 
 Configure shared Preview secrets once and override environment identity per branch:

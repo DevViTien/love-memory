@@ -3,12 +3,16 @@ import "server-only";
 import { mongodbAdapter } from "@better-auth/mongo-adapter";
 import { COLLECTIONS, getDatabase, getMongoClient } from "@love-memory/database";
 import { betterAuth } from "better-auth/minimal";
-import { magicLink } from "better-auth/plugins";
+import { magicLink, twoFactor } from "better-auth/plugins";
 
 import {
   createCaptureAuthEmailSender,
   createResendAuthEmailSender,
 } from "@/modules/auth/infrastructure/auth-email-sender";
+import {
+  TWO_FACTOR_HTTP_PATHS,
+  TWO_FACTOR_OPTIONS,
+} from "@/modules/admin/infrastructure/two-factor";
 import { getAuthEnvironment } from "@/modules/auth/infrastructure/auth-environment";
 
 async function createAuth() {
@@ -31,6 +35,8 @@ async function createAuth() {
     },
     baseURL: environment.baseUrl.origin,
     database: mongodbAdapter(database, { client, transaction: true, usePlural: false }),
+    // The admin factor is used only on the server by the guarded admin routes (`admin-access`).
+    disabledPaths: [...TWO_FACTOR_HTTP_PATHS],
     plugins: [
       magicLink({
         expiresIn: 600,
@@ -38,6 +44,7 @@ async function createAuth() {
         sendMagicLink: ({ email, url }) => emailSender.sendMagicLink({ email, url }),
         storeToken: "hashed",
       }),
+      twoFactor(TWO_FACTOR_OPTIONS),
     ],
     rateLimit: {
       customRules: {

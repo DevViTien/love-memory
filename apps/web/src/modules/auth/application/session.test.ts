@@ -7,6 +7,7 @@ const creator: CurrentUser = {
   id: "creator-1",
   name: "Creator",
   role: "creator",
+  twoFactorEnabled: false,
 };
 
 describe("session service", () => {
@@ -38,5 +39,47 @@ describe("session service", () => {
     });
 
     await expect(sessions.getCurrentUser(new Headers())).resolves.toEqual(passwordlessUser);
+  });
+
+  it("reads the admin second factor, absent as false", async () => {
+    const withFactor = createSessionService({
+      getSession: () =>
+        Promise.resolve({
+          session: { id: "session-1" },
+          user: { ...creator, role: "admin", twoFactorEnabled: true },
+        }),
+    });
+    const { twoFactorEnabled: _absent, ...legacy } = creator;
+    const withoutField = createSessionService({
+      getSession: () => Promise.resolve({ session: { id: "session-1" }, user: legacy }),
+    });
+
+    await expect(withFactor.getCurrentUser(new Headers())).resolves.toMatchObject({
+      role: "admin",
+      twoFactorEnabled: true,
+    });
+    await expect(withoutField.getCurrentUser(new Headers())).resolves.toMatchObject({
+      twoFactorEnabled: false,
+    });
+  });
+
+  it("gives the session id with the user, and nothing without a session id", async () => {
+    const sessions = createSessionService({
+      getSession: () => Promise.resolve({ session: { id: "session-1" }, user: creator }),
+    });
+    const withoutId = createSessionService({
+      getSession: () => Promise.resolve({ session: {}, user: creator }),
+    });
+
+    await expect(sessions.getCurrentSession(new Headers())).resolves.toEqual({
+      sessionId: "session-1",
+      user: creator,
+    });
+    await expect(withoutId.getCurrentSession(new Headers())).resolves.toBeNull();
+    await expect(
+      createSessionService({ getSession: () => Promise.resolve(null) }).getCurrentSession(
+        new Headers(),
+      ),
+    ).resolves.toBeNull();
   });
 });

@@ -1,8 +1,10 @@
 export const COLLECTIONS = {
   accounts: "accounts",
   abuseReports: "abuseReports",
+  adminStepUps: "adminStepUps",
   apiRateLimits: "apiRateLimits",
   assets: "assets",
+  auditLog: "auditLog",
   authRateLimits: "authRateLimits",
   databaseMigrations: "databaseMigrations",
   giftRevisions: "giftRevisions",
@@ -17,6 +19,7 @@ export const COLLECTIONS = {
   templateVersions: "templateVersions",
   templates: "templates",
   technicalSpikes: "technicalSpikes",
+  twoFactors: "twoFactors",
   users: "users",
   verifications: "verifications",
   giftPublications: "giftPublications",

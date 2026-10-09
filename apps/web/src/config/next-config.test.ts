@@ -19,11 +19,28 @@ describe("next.config", () => {
     expect(ignored("/api/media/uploads/init")).toBe(false);
     expect(ignored("/studio/abc")).toBe(false);
     expect(ignored(`/preview/${"a".repeat(43)}`)).toBe(true);
+    // An admin search query can hold a share id.
+    expect(ignored(`/admin?q=${"A".repeat(22)}`)).toBe(true);
     expect(ignored("/previews")).toBe(false);
     expect(ignored(`/g/${"a".repeat(22)}`)).toBe(true);
     expect(ignored(`/api/public-gifts/${"a".repeat(22)}`)).toBe(true);
     expect(ignored("/gifts")).toBe(false);
     expect(ignored("/api/gifts/abc/publish")).toBe(false);
+  });
+
+  it("sends private, noindex and no-referrer headers on the admin area after the global entry", async () => {
+    const entries = (await nextConfig.headers?.()) ?? [];
+    const globalIndex = entries.findIndex((entry) => entry.source === "/:path*");
+
+    for (const source of ["/admin", "/admin/:path*"]) {
+      const index = entries.findIndex((entry) => entry.source === source);
+      expect(index, source).toBeGreaterThan(globalIndex);
+      expect(entries[index]?.headers).toEqual([
+        { key: "Referrer-Policy", value: "no-referrer" },
+        { key: "X-Robots-Tag", value: "noindex" },
+        { key: "Cache-Control", value: "private, no-store" },
+      ]);
+    }
   });
 
   it("sends private, noindex and no-referrer headers on share links after the global entry", async () => {

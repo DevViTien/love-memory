@@ -11,6 +11,9 @@
     "pnpm": ">=10.22.0"
   },
   "scripts": {
+    "admin:grant": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local --conditions=react-server --import tsx scripts/admin.ts grant",
+    "admin:reset-mfa": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local --conditions=react-server --import tsx scripts/admin.ts reset-mfa",
+    "admin:revoke": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local --conditions=react-server --import tsx scripts/admin.ts revoke",
     "build": "turbo run build",
     "build:templates": "pnpm --filter \"./templates/*\" build",
     "db:migrate": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local --conditions=react-server --import tsx scripts/database.ts migrate",

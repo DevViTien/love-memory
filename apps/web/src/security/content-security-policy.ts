@@ -30,7 +30,9 @@ export function getContentSecurityPolicyMode(pathname: string): ContentSecurityP
     pathname === "/preview" ||
     pathname.startsWith("/preview/") ||
     pathname === "/g" ||
-    pathname.startsWith("/g/")
+    pathname.startsWith("/g/") ||
+    pathname === "/admin" ||
+    pathname.startsWith("/admin/")
     ? "nonce"
     : "static";
 }

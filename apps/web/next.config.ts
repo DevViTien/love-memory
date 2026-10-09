@@ -49,13 +49,30 @@ const nextConfig: NextConfig = {
         ],
         source: "/g/:path*",
       },
+      // The admin area (`admin-access`): private, never indexed, and its search query can hold a
+      // share id, so it never leaves in a `Referer` header. Listed after the global entry so
+      // `no-referrer` wins.
+      ...["/admin", "/admin/:path*"].map((source) => ({
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "X-Robots-Tag", value: "noindex" },
+          { key: "Cache-Control", value: "private, no-store" },
+        ],
+        source,
+      })),
     ];
   },
   logging: {
     // Development-only request log: signed local object URLs, preview tokens and share ids must
     // never be printed.
     incomingRequests: {
-      ignore: [/\/api\/local-object-storage\//, /^\/preview\//, /^\/g\//, /^\/api\/public-gifts\//],
+      ignore: [
+        /\/api\/local-object-storage\//,
+        /^\/preview\//,
+        /^\/g\//,
+        /^\/api\/public-gifts\//,
+        /^\/admin/,
+      ],
     },
   },
   poweredByHeader: false,

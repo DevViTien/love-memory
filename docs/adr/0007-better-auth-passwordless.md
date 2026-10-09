@@ -23,8 +23,17 @@ with its old anonymous key.
 
 - Auth routes, cookie policy, trusted origins and email delivery require integration tests.
 - Magic-link/OTP values are hashed at rest and never logged.
-- Admin identity requires a distinct role and MFA before admin features become active. Until then
-  the `admin` role grants no access to other creators' drafts.
+- Admin identity requires a distinct role and MFA before admin features become active.
+  - **Implemented** (`add-admin-access-and-audit`, schema version 13): the role is granted only by
+    an audited operator command.
+  - **The factor.** An authenticator-app factor is stored by Better Auth's `twoFactor` plugin. The
+    plugin's HTTP endpoints are disabled, and only the guarded admin routes call it on the server.
+  - **The step-up.** The plugin challenges only password sign-ins, never magic links, so admins
+    step up per session instead: one code gives a 12-hour step-up stored in `adminStepUps` under
+    a hash of the session id, with the application's own lockout of 10 wrong codes and 15
+    minutes. See the [admin access runbook](../runbooks/admin-access.md).
+  - **Scope.** The `admin` role still grants no access to other creators' drafts; admins see only
+    the lookup summary.
 - Auth types must not leak into the gift domain package.
 - Better Auth 1.7.5 currently requires an explicit `@better-auth/utils` 0.4.2 peer pin alongside
   `better-call`'s private 0.5.x dependency; keep both resolved versions until the upstream peer

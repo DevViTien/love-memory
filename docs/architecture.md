@@ -80,7 +80,9 @@ application services are wired to concrete infrastructure adapters.
 Public catalog routes use a static-compatible CSP. They currently render per request
 (`force-dynamic`) because they read the persisted template registry, but they must never depend on a
 nonce, so they can return to static or cached rendering later. Studio, Viewer and preview routes receive a
-per-request nonce, and each of those route trees calls `connection()` in its layout. A route must
+per-request nonce, and each of those route trees calls `connection()` in its layout. So does the
+admin area (`/admin`), which also sends `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex` and
+`Cache-Control: private, no-store`. A route must
 never use nonce CSP unless its layout explicitly opts into dynamic rendering. Production Playwright
 tests verify both modes.
 
@@ -462,6 +464,52 @@ Retryable work runs after the request that caused it has committed. Behavior is 
 - **Rollback.** The previous build never writes generic jobs. Its `db:verify` reports drift, and its
   `db:migrate` restores the old validator, under which any remaining `dead` job no longer
   validates on update. Leave them untouched until the roll forward; nothing runs them meanwhile.
+
+## Admin access and audit
+
+The admin area lets operations look up a gift and read the audit log. Behavior is in
+`openspec/specs/admin-access` and `openspec/specs/audit-log`; operations are in the
+[admin access runbook](./runbooks/admin-access.md).
+
+- **One guard.** `resolveAdminAccess` (`modules/admin/application/admin-access.ts`) decides from the
+  session before any admin data is read:
+  - `none` (no session or not `admin`);
+  - `needs-enrollment`;
+  - `needs-step-up`;
+  - `admin`.
+
+  `admin-guard.ts` turns that decision into not-found or a redirect to `/admin/mfa` for pages, and
+  into `404` or `403 MFA_REQUIRED` for routes. Routes run the guard before the media-type and origin
+  checks, so a non-admin learns nothing.
+
+- **Second factor.** Better Auth's `twoFactor` plugin stores the TOTP secret and the backup codes,
+  encrypted in `twoFactors`. Every plugin HTTP path is in `disabledPaths`; `/api/admin/mfa/enroll`
+  and `/api/admin/mfa/verify` call `auth.api.*` on the server. The plugin never challenges a
+  magic-link sign-in and marks nothing on a session, so the application adds three things:
+  - **A step-up.** `adminStepUps` holds `_id = sha256(session id)`, `userId`, and a TTL 12 hours
+    after verification. It is written in one transaction with its audit record.
+  - **A lockout.** 10 consecutive wrong codes lock the factor for 15 minutes. The lockout reuses
+    the plugin's `failedVerificationCount` and `lockedUntil` fields, because the plugin skips its
+    own lockout for calls with a session.
+  - **Session rotation.** The first code rotates the session. The step-up follows the new session
+    cookie, read back with `auth.api.getSession`.
+- **Roles** change only through `scripts/admin.ts` (`admin:grant`, `admin:revoke`,
+  `admin:reset-mfa`). Each command is one transaction with its audit record. Revocation and reset
+  delete the user's sessions and step-ups.
+- **Audit log.** `auditLog` is append-only: its port has `insert` and `listLatest` only, and a TTL
+  removes records after 365 days.
+  - The metadata schema refuses keys that could hold personal data or credentials.
+  - A read audit (the gift lookup) is written before the page renders, and a failed write fails
+    the page.
+  - The searched text is never recorded.
+- **Gift lookup.** `mongo-admin-gift-lookup.ts` is the only cross-owner read. It is an exact match
+  on `_id`, `publicId` or `shareId`, with a projection without content, plus the owner's email and
+  the asset counts per status.
+
+**Schema version 13 rollout and rollback.** `db:migrate` creates `twoFactors`, `adminStepUps` and
+`auditLog` and adds the `admin-mfa` rate-limit scope; there is no backfill. The previous build
+ignores the new collections and `twoFactorEnabled`. Its `db:verify` reports drift, but no data
+repair is needed. Admins step up again after the roll forward.
 
 ## Configuration
 

@@ -11,7 +11,7 @@ import {
 import { COLLECTIONS, type CollectionName } from "./collections";
 import { enqueueJob } from "./job-outbox";
 
-export const DATABASE_SCHEMA_VERSION = 12;
+export const DATABASE_SCHEMA_VERSION = 13;
 
 type DatabaseMigrationDocument = Readonly<{
   _id: string;
@@ -113,6 +113,7 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
           expiresAt: { bsonType: "date" },
           scope: {
             enum: [
+              "admin-mfa",
               "analytics-event",
               "analytics-event-ip",
               "gift-claim",
@@ -598,6 +599,70 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
           "occurredAt",
           "expiresAt",
         ],
+      },
+    },
+  },
+  {
+    // The `twoFactor` plugin owns this shape (encrypted secret and backup codes), so no validator.
+    indexes: [{ key: { userId: 1 }, options: { name: "two_factors_user_unique", unique: true } }],
+    name: COLLECTIONS.twoFactors,
+  },
+  {
+    indexes: [
+      { key: { userId: 1 }, options: { name: "admin_step_ups_user" } },
+      {
+        key: { expiresAt: 1 },
+        options: { expireAfterSeconds: 0, name: "admin_step_ups_expiry_ttl" },
+      },
+    ],
+    name: COLLECTIONS.adminStepUps,
+    validator: {
+      $jsonSchema: {
+        additionalProperties: true,
+        bsonType: "object",
+        properties: {
+          // The SHA-256 hash of the session id; the id itself is never stored.
+          _id: { bsonType: "string", pattern: "^[a-f0-9]{64}$" },
+          expiresAt: { bsonType: "date" },
+          userId: { bsonType: "string", minLength: 1 },
+          verifiedAt: { bsonType: "date" },
+        },
+        required: ["_id", "userId", "verifiedAt", "expiresAt"],
+      },
+    },
+  },
+  {
+    indexes: [
+      { key: { at: -1 }, options: { name: "audit_log_at" } },
+      { key: { "target.id": 1, at: -1 }, options: { name: "audit_log_target_at" } },
+      {
+        key: { expiresAt: 1 },
+        options: { expireAfterSeconds: 0, name: "audit_log_expiry_ttl" },
+      },
+    ],
+    name: COLLECTIONS.auditLog,
+    validator: {
+      $jsonSchema: {
+        additionalProperties: true,
+        bsonType: "object",
+        properties: {
+          _id: { bsonType: "string", minLength: 1 },
+          action: { bsonType: "string", minLength: 1 },
+          actor: {
+            bsonType: "object",
+            properties: {
+              id: { bsonType: "string", minLength: 1 },
+              kind: { enum: ["admin", "operator", "system"] },
+            },
+            required: ["kind", "id"],
+          },
+          at: { bsonType: "date" },
+          expiresAt: { bsonType: "date" },
+          metadata: { bsonType: "object" },
+          requestId: { bsonType: ["string", "null"] },
+          target: { bsonType: ["object", "null"] },
+        },
+        required: ["_id", "at", "actor", "action", "target", "requestId", "metadata", "expiresAt"],
       },
     },
   },
