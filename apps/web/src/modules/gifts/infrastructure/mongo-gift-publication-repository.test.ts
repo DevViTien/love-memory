@@ -2,6 +2,7 @@ import type * as DatabaseModule from "@love-memory/database";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const databaseMocks = vi.hoisted(() => ({
+  deleteMany: vi.fn(),
   findOne: vi.fn(),
   getDatabase: vi.fn(),
 }));
@@ -41,7 +42,7 @@ describe("Mongo gift publication repository", () => {
     databaseMocks.getDatabase.mockResolvedValue({
       collection: (name: string) => {
         collectionName = name;
-        return { findOne: databaseMocks.findOne };
+        return { deleteMany: databaseMocks.deleteMany, findOne: databaseMocks.findOne };
       },
     });
   });
@@ -64,6 +65,16 @@ describe("Mongo gift publication repository", () => {
     expect(databaseMocks.findOne).toHaveBeenCalledWith({
       giftId: { $eq: publication.giftId },
       revision: { $eq: publication.revision },
+    });
+  });
+
+  it("deletes only the gift's publications older than the current revision", async () => {
+    await mongoGiftPublicationRepository.deleteSuperseded("gift-1", 9);
+
+    expect(collectionName).toBe("giftPublications");
+    expect(databaseMocks.deleteMany).toHaveBeenCalledWith({
+      giftId: { $eq: "gift-1" },
+      revision: { $lt: 9 },
     });
   });
 

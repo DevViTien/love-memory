@@ -54,6 +54,9 @@ describe("gift assets cleanup job", () => {
   >;
   let markDeleted: ReturnType<typeof vi.fn<DetachedAssetRepository["markDeleted"]>>;
   let deleteObject: ReturnType<typeof vi.fn<(key: string) => Promise<void>>>;
+  let deleteSuperseded: ReturnType<
+    typeof vi.fn<(giftId: string, revision: number) => Promise<void>>
+  >;
 
   beforeEach(() => {
     gift = { id: giftId, publishedRevision: 9, status: "published" } as Gift;
@@ -63,13 +66,14 @@ describe("gift assets cleanup job", () => {
     markDeleted = vi.fn(() => Promise.resolve(true));
     markDetachedDeleting = vi.fn(() => Promise.resolve(true));
     deleteObject = vi.fn(() => Promise.resolve());
+    deleteSuperseded = vi.fn(() => Promise.resolve());
   });
 
   function handler() {
     return createGiftAssetsCleanupHandler({
       assets: { listDetachedReady, markDeleted, markDetachedDeleting },
       gifts: { findEditableById: () => Promise.resolve(gift) },
-      publications: { findByGiftRevision: () => Promise.resolve(publication) },
+      publications: { deleteSuperseded, findByGiftRevision: () => Promise.resolve(publication) },
       storage: { deleteObject },
     });
   }
@@ -82,6 +86,17 @@ describe("gift assets cleanup job", () => {
     expect(giftAssetsCleanupKey(giftId, 9)).toBe(`gift.assets.cleanup.v1:${giftId}:9`);
     expect(handler().payload.safeParse({ giftId }).success).toBe(true);
     expect(handler().payload.safeParse({ giftId, extra: 1 }).success).toBe(false);
+  });
+
+  it("deletes the older publication records before the photos (Older publication text removed)", async () => {
+    deleteSuperseded.mockImplementationOnce(() => {
+      expect(markDetachedDeleting).not.toHaveBeenCalled();
+      return Promise.resolve();
+    });
+
+    await run();
+
+    expect(deleteSuperseded).toHaveBeenCalledExactlyOnceWith(giftId, 9);
   });
 
   it("deletes the detached photo the update replaced (Replaced photo deleted after the update)", async () => {
@@ -132,6 +147,7 @@ describe("gift assets cleanup job", () => {
     publication = null;
 
     await expect(run()).rejects.toMatchObject({ code: "PUBLICATION_UNREADABLE", retryable: true });
+    expect(deleteSuperseded).not.toHaveBeenCalled();
     expect(listDetachedReady).not.toHaveBeenCalled();
   });
 

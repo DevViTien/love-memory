@@ -168,6 +168,7 @@ describe("content security policy", () => {
     ["/admin/mfa", "nonce"],
     ["/admin/audit", "nonce"],
     ["/administration-guide", "static"],
+    ["/privacy", "static"],
   ] as const)("selects %s as %s policy", (pathname, mode) => {
     expect(getContentSecurityPolicyMode(pathname)).toBe(mode);
   });

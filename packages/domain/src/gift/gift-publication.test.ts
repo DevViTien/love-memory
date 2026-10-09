@@ -188,6 +188,7 @@ describe("createGiftPublication", () => {
       id: publicationId,
       publishedAt: now,
       revision: 7,
+      rightsConfirmedAt: now,
       shareId,
       templateId: "memory-box",
       templateVersion: "1.1.0",

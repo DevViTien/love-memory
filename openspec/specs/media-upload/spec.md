@@ -267,6 +267,11 @@ key is `gift.assets.cleanup.v1:{giftId}:{revision}`.
 - its id is not in the `assetIds` of the gift's current publication (the one whose revision equals
   the gift's `publishedRevision`).
 
+**Superseded publications.** Once the current publication is read, the job SHALL delete every
+publication record of the gift whose revision is lower than the current one. A replay of a publish
+whose record was deleted answers `409` `IDEMPOTENCY_CONFLICT` (`gift-publishing` "Idempotent
+publish").
+
 **Deleting each one.** For each selected asset the job SHALL do what "Asset deletion" does for a
 deletable asset:
 
@@ -314,3 +319,9 @@ publication can need an asset this job deletes.
 
 - **WHEN** a cleanup job runs for a gift that no longer exists
 - **THEN** the job completes and changes nothing
+
+#### Scenario: Older publication text removed
+
+- **WHEN** the cleanup job of revision `9` runs for a gift that has publications of revisions `4`,
+  `7` and `9`
+- **THEN** the records of revisions `4` and `7` are deleted, and the record of revision `9` is kept

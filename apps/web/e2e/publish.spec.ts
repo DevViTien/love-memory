@@ -418,12 +418,18 @@ async function runPublishJourney(page: Page, testInfo: TestInfo, journey: Journe
   // Publishing is irreversible, so it asks first; the confirmation itself sends nothing.
   await expect(publishRegion.getByRole("heading", { name: "Xuất bản món quà này?" })).toBeFocused();
   await expect(publishRegion.getByText(`Gói đã chọn: ${planName}.`)).toBeVisible();
+  // The upload-rights confirmation (`privacy-notice`) unlocks the confirm button.
+  await expect(publishRegion.getByRole("button", { name: "Xác nhận xuất bản" })).toBeDisabled();
+  await publishRegion.getByRole("checkbox").check();
   await publishRegion.getByRole("button", { name: "Xác nhận xuất bản" }).click();
   const request = await publishRequest;
   const idempotencyKey = request.headers()["idempotency-key"] ?? "";
   const requestBody = request.postData() ?? "";
   expect(idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
-  expect(JSON.parse(requestBody)).toMatchObject({ planId: onFree ? "free" : "standard" });
+  expect(JSON.parse(requestBody)).toMatchObject({
+    planId: onFree ? "free" : "standard",
+    rightsConfirmed: true,
+  });
   await expect(page.getByRole("heading", { name: "Đã xuất bản" })).toBeVisible();
   await expect(
     page.getByText(

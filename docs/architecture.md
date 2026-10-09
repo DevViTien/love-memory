@@ -202,7 +202,8 @@ opens it at `/g/{shareId}` without an account. Behavior is specified in
   `gift_publications_gift_revision_unique`). The gift has unpublished changes exactly when
   `revision > publishedRevision`. Publishing again inserts a new record with the same `shareId` and
   moves the pointer in the same transaction, so recipients see the old publication or the new one,
-  never a mix. Superseded records are kept and never served.
+  never a mix. Superseded records are never served, and the next `gift.assets.cleanup.v1` deletes
+  them (`add-privacy-consent-and-export`).
 
 - **Publish checks.** `POST /api/gifts/{publicId}/publish` takes an `Idempotency-Key` and
   `{ expectedRevision, planId }`. `giftService.publishGift` finds the gift with the owner filter
@@ -239,8 +240,8 @@ opens it at `/g/{shareId}` without an account. Behavior is specified in
   it from the working copy: it stays `ready` with its storage objects for recipients, its quota
   slots are released (`giftSlot`/`fieldSlot` become `null`, `detachedAt` is set), and it disappears
   from listings, reads, retries, deletions and save references. The `DELETE` answers `200` with
-  `deleted: false`. Detached photos and those referenced only by superseded publications stay in
-  storage until a cleanup job exists (risk register).
+  `deleted: false`. `gift.assets.cleanup.v1` deletes detached photos that the current
+  publication no longer shows, and the superseded publication records.
 - **Plans and entitlement.** Plans are the versioned catalog `PLAN_CATALOG` in
   `packages/domain/src/billing` (`free@1`, `standard@1`;
   [ADR-0011](./adr/0011-versioned-plan-catalog.md)). The details are as follows:
@@ -579,6 +580,25 @@ Recipients report gifts, and the operations team reviews and takes them down
 **Schema version 15 rollout and rollback.** `abuseReports` becomes managed, and the two report
 scopes are added; there is no backfill. The previous build ignores `takedown`, so an owner could
 resume a taken-down gift there. Roll forward promptly.
+
+## Privacy notice, consent and export
+
+The `privacy-notice` capability covers these pieces:
+
+- **`/privacy`.** A static page whose retention table must match the code. Every retention change
+  updates it in the same change.
+- **The footer and sign-in links.** The site footer links to the page, and the sign-in form shows a
+  one-line notice with the link.
+- **Upload-rights confirmation.** The Studio's publish and update confirmations require a checkbox.
+  `PublishGiftRequestSchema` requires `rightsConfirmed: true`, and every publication stores
+  `rightsConfirmedAt`.
+- **Superseded publications.** They are deleted by `gift.assets.cleanup.v1` right after the current
+  one is read. A replay of a publish key whose record is gone answers `409`
+  `IDEMPOTENCY_CONFLICT`.
+- **Owner export.** `GET /api/gifts/{publicId}/export` returns a JSON attachment built field by
+  field, with photos as five-minute signed URLs of their largest derivative.
+- **Open retention decisions.** Expired gifts and abandoned drafts are kept until their owner
+  deletes them. The notice says so; automatic purges wait for PO retention periods.
 
 ## Configuration
 

@@ -12,7 +12,8 @@ export const GIFT_PUBLICATION_MAX_ASSETS = 30;
 
 /**
  * The immutable record of one publish: the exact template version, the artifact bytes it pinned
- * and the content snapshot. No API ever updates or deletes it.
+ * and the content snapshot. No API ever updates it; `gift.assets.cleanup.v1` deletes it once a
+ * newer publication of the gift is current (`gift-publishing`).
  */
 export const GiftPublicationSchema = z
   .object({
@@ -30,6 +31,8 @@ export const GiftPublicationSchema = z
     id: z.uuid(),
     publishedAt: z.coerce.date(),
     revision: z.number().int().nonnegative(),
+    /** When the creator confirmed the upload rights (`privacy-notice`); absent on older records. */
+    rightsConfirmedAt: z.coerce.date().optional(),
     shareId: ShareIdSchema,
     templateId: GiftTemplateIdSchema,
     templateVersion: GiftTemplateVersionSchema,
@@ -165,6 +168,8 @@ export function createGiftPublication(
     id: input.id,
     publishedAt: gift.publishedAt,
     revision: gift.revision,
+    // Every publish requires the confirmation (`privacy-notice` "Upload-rights confirmation").
+    rightsConfirmedAt: gift.publishedAt,
     shareId: gift.shareId,
     templateId: gift.content.templateId,
     templateVersion: gift.content.templateVersion,

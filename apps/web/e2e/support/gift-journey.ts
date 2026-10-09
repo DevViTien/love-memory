@@ -233,7 +233,11 @@ export async function publishTypicalMemoryBox(
       };
       const response = await fetch(`/api/gifts/${giftPublicId}/publish`, {
         // Three photos: the Free plan, which needs no payment.
-        body: JSON.stringify({ expectedRevision: draft.data.gift.revision, planId: "free" }),
+        body: JSON.stringify({
+          expectedRevision: draft.data.gift.revision,
+          planId: "free",
+          rightsConfirmed: true,
+        }),
         headers: { ...json, "Idempotency-Key": idempotencyKey },
         method: "POST",
       });

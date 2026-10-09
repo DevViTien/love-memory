@@ -51,7 +51,8 @@ function publishRequest(
 ): Request {
   const idempotencyKey = init.idempotencyKey === undefined ? key : init.idempotencyKey;
   return new Request(`https://love.example/api/gifts/${publicId}/publish`, {
-    body: init.body ?? JSON.stringify({ expectedRevision: 7, planId: "free" }),
+    body:
+      init.body ?? JSON.stringify({ expectedRevision: 7, planId: "free", rightsConfirmed: true }),
     headers: {
       "content-type": init.contentType ?? "application/json",
       "x-request-id": "request-1",
@@ -157,6 +158,18 @@ describe("publish route handler", () => {
     expect(publishGift).toHaveBeenCalledWith(expect.objectContaining({ userId: null }));
   });
 
+  it("answers 400 without the rights confirmation (Rights not confirmed)", async () => {
+    const response = await handlePublishGift(
+      publishRequest({ body: JSON.stringify({ expectedRevision: 3, planId: "free" }) }),
+      params(),
+      dependencies(),
+    );
+
+    expect(response.status).toBe(400);
+    expect((await errorBody(response)).fieldErrors).toHaveProperty("rightsConfirmed");
+    expect(publishGift).not.toHaveBeenCalled();
+  });
+
   it("answers 400 for a missing or unknown plan (Missing or unknown plan)", async () => {
     for (const body of [{ expectedRevision: 3 }, { expectedRevision: 3, planId: "premium" }]) {
       const response = await handlePublishGift(
@@ -174,7 +187,9 @@ describe("publish route handler", () => {
     publishGift.mockResolvedValue({ error: { code: "PLAN_NOT_AVAILABLE" }, ok: false });
 
     const response = await handlePublishGift(
-      publishRequest({ body: JSON.stringify({ expectedRevision: 7, planId: "standard" }) }),
+      publishRequest({
+        body: JSON.stringify({ expectedRevision: 7, planId: "standard", rightsConfirmed: true }),
+      }),
       params(),
       dependencies(),
     );

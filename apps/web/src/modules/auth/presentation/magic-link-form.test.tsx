@@ -35,6 +35,16 @@ describe("MagicLinkForm", () => {
     );
   });
 
+  it("tells the creator how their data is handled, with the privacy link", () => {
+    const { unmount } = render(createElement(MagicLinkForm));
+
+    expect(
+      screen.getByRole("link", { name: "Chính sách quyền riêng tư" }).getAttribute("href"),
+    ).toBe("/privacy");
+    expect(screen.getByText(/Khi tiếp tục, bạn đồng ý để LoveMemory xử lý dữ liệu/)).toBeTruthy();
+    unmount();
+  });
+
   it("recovers after a failed request (Delivery or transport failure is recoverable)", async () => {
     authClientMock.signIn.magicLink.mockRejectedValue(new TypeError("Failed to fetch"));
     const user = userEvent.setup();

@@ -15,8 +15,20 @@ export function toPublicationDomain(document: GiftPublicationDocument): GiftPubl
   return GiftPublicationSchema.parse({ ...publication, id: _id });
 }
 
-/** Publication records are written only by the publish transaction and never updated. */
-export const mongoGiftPublicationRepository: GiftPublicationRepository = {
+/**
+ * Publication records are written only by the publish transaction and never updated. Superseded
+ * ones are deleted by `gift.assets.cleanup.v1` once a newer one is current.
+ */
+export const mongoGiftPublicationRepository: GiftPublicationRepository &
+  Readonly<{ deleteSuperseded: (giftId: string, currentRevision: number) => Promise<void> }> = {
+  async deleteSuperseded(giftId, currentRevision) {
+    const database = await getDatabase();
+    // Served by `gift_publications_gift_revision_unique` (prefix `giftId`).
+    await database
+      .collection<GiftPublicationDocument>(COLLECTIONS.giftPublications)
+      .deleteMany({ giftId: { $eq: giftId }, revision: { $lt: currentRevision } });
+  },
+
   async findByGiftRevision(giftId, revision) {
     const database = await getDatabase();
     // Served by `gift_publications_gift_revision_unique`.

@@ -24,6 +24,8 @@ type Dependencies = Readonly<{
   assets: DetachedAssetRepository;
   gifts: Readonly<{ findEditableById: (giftId: string) => Promise<Gift | null> }>;
   publications: Readonly<{
+    /** Deletes the gift's publication records older than `currentRevision` (`gift-publishing`). */
+    deleteSuperseded: (giftId: string, currentRevision: number) => Promise<void>;
     findByGiftRevision: (giftId: string, revision: number) => Promise<GiftPublication | null>;
   }>;
   storage: Pick<ObjectStorage, "deleteObject">;
@@ -50,6 +52,9 @@ export function createGiftAssetsCleanupHandler({
       const current = await publications.findByGiftRevision(gift.id, gift.publishedRevision);
       // Without a readable current publication nothing proves a photo unused: retry later.
       if (!current) throw new JobFailure("PUBLICATION_UNREADABLE", true);
+      // Only the current publication is kept: older ones hold text the owner replaced
+      // (`privacy-notice`). Strictly older, so the current record is never touched.
+      await publications.deleteSuperseded(gift.id, current.revision);
 
       const served = new Set(current.assetIds);
       const unused = (await assets.listDetachedReady(gift.id)).filter(

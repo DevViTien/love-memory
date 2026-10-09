@@ -175,10 +175,24 @@ describe("gift API contracts", () => {
     } as const;
 
     it("accepts only a non-negative expected revision and a released plan in the request", () => {
-      expect(PublishGiftRequestSchema.parse({ expectedRevision: 3, planId: "free" })).toEqual({
-        expectedRevision: 3,
-        planId: "free",
-      });
+      expect(
+        PublishGiftRequestSchema.parse({
+          expectedRevision: 3,
+          planId: "free",
+          rightsConfirmed: true,
+        }),
+      ).toEqual({ expectedRevision: 3, planId: "free", rightsConfirmed: true });
+      // Rights not confirmed (`privacy-notice` "Upload-rights confirmation").
+      expect(
+        PublishGiftRequestSchema.safeParse({ expectedRevision: 3, planId: "free" }).success,
+      ).toBe(false);
+      expect(
+        PublishGiftRequestSchema.safeParse({
+          expectedRevision: 3,
+          planId: "free",
+          rightsConfirmed: false,
+        }).success,
+      ).toBe(false);
       expect(
         PublishGiftRequestSchema.safeParse({ expectedRevision: -1, planId: "free" }).success,
       ).toBe(false);

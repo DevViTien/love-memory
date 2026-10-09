@@ -126,7 +126,15 @@ export default async function StudioDraftPage({ params }: StudioDraftPageProps) 
                   )
                 ) : null}
               </div>
-              <div className="mt-4 border-t border-rose-100 pt-4">
+              <div className="mt-4 space-y-2 border-t border-rose-100 pt-4">
+                {/* A plain download link: the browser sends the session and the draft cookie. */}
+                <a
+                  className="block text-sm font-bold text-rose-700 underline"
+                  download
+                  href={`/api/gifts/${encodeURIComponent(publicId)}/export`}
+                >
+                  Tải dữ liệu món quà
+                </a>
                 <DeleteGiftButton publicId={publicId} />
               </div>
             </div>

@@ -14,16 +14,17 @@ in the Studio.
 
 The system SHALL publish a draft through `POST /api/gifts/{publicId}/publish`. The request SHALL
 carry an `Idempotency-Key` header with a UUID and a strict JSON body that holds only
-`expectedRevision`, a non-negative integer, and `planId`, one of the plan ids of `gift-plans`
-(`free` or `standard`). The checks run in this order:
+`expectedRevision`, a non-negative integer, `planId`, one of the plan ids of `gift-plans`
+(`free` or `standard`), and `rightsConfirmed`, which MUST be `true` (`privacy-notice`
+"Upload-rights confirmation"). The checks run in this order:
 
 1. the media type and origin guards of `mutation-request-guards`;
 2. the `publicId` format. A malformed id SHALL respond `404` with code `NOT_FOUND`;
 3. the `Idempotency-Key` header. A missing or malformed key SHALL respond `400` with code
    `VALIDATION_ERROR` and `fieldErrors.idempotencyKey`;
 4. the `gift-publish` rate limit;
-5. the body. An invalid body, including a missing or unknown `planId`, SHALL respond `400` with
-   code `VALIDATION_ERROR`;
+5. the body. An invalid body, including a missing or unknown `planId`, or a `rightsConfirmed` that
+   is missing or not `true`, SHALL respond `400` with code `VALIDATION_ERROR`;
 6. the session. A request without a signed-in user SHALL respond `401` with code `UNAUTHORIZED`;
 7. ownership. The gift SHALL be found only when its owner is the signed-in user. The anonymous
    draft cookie MUST NOT authorize publishing, and the user's role, including `admin`, grants
@@ -74,6 +75,12 @@ expiry or entitlement answer ever reveals that a gift exists to someone who does
 - **WHEN** a signed-in user who does not own the gift sends a valid publish request on plan
   `standard` while the internal paid-plan grant is off
 - **THEN** the response is `404` with code `NOT_FOUND`, not a plan refusal
+
+#### Scenario: Rights not confirmed
+
+- **WHEN** the owner sends the body `{ "expectedRevision": 3, "planId": "free" }`
+- **THEN** the response is `400` with code `VALIDATION_ERROR` and `error.fieldErrors.rightsConfirmed`,
+  and nothing is published
 
 ### Requirement: Pre-publish checks
 
@@ -246,14 +253,15 @@ A successful publish SHALL, in one database transaction, do all of the following
 - insert one publication record holding `giftId`, `shareId`, `revision`, `templateId`,
   `templateVersion`, the registered artifact `contentHash` (`artifactContentHash`), the stored
   content, the referenced asset ids in content order (`assetIds`), the audio track id or `null`
-  (`audioTrackId`) and `publishedAt`;
+  (`audioTrackId`), `publishedAt`, and `rightsConfirmedAt` (equal to `publishedAt`);
 - record the idempotency key (see "Idempotent publish");
 - for an update, enqueue one `gift.assets.cleanup.v1` job for the gift (`media-upload` "Cleanup of
   detached assets"), with the deduplication key `gift.assets.cleanup.v1:{giftId}:{revision}` of the
   published revision. A first publish enqueues no cleanup job.
 
 The new publication becomes the gift's current publication when the transaction commits. Earlier
-publication records of the gift SHALL be kept unchanged and SHALL NOT be served to recipients. When
+publication records of the gift SHALL NOT be served to recipients, and SHALL be deleted by the
+gift's next `gift.assets.cleanup.v1` job (`media-upload` "Cleanup of detached assets"). When
 a condition fails inside the transaction, nothing SHALL be written, and the response SHALL be the
 one the matching check of "Pre-publish checks" or "Publish endpoint and authorization" gives. No
 API SHALL modify or delete a publication record. The `publishing` status is never observable
@@ -317,6 +325,11 @@ exactly `publicId`, `status` (`published`), `shareId`, `sharePath` (`/g/{shareId
 - **THEN** exactly one `gift.assets.cleanup.v1` job with the deduplication key
   `gift.assets.cleanup.v1:{giftId}:9` is committed with the new publication
 - **AND** a first publish of a draft commits no such job
+
+#### Scenario: Superseded publication removed after an update
+
+- **WHEN** the owner updates a published gift and the cleanup job of the new revision runs
+- **THEN** only the publication record of the new revision remains for the gift
 
 ### Requirement: Share id
 

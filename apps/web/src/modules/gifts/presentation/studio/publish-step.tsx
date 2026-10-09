@@ -11,7 +11,7 @@ import { useStore } from "zustand";
 import { ClaimDraftButton } from "../claim-draft-button";
 import { selectCanUpdatePublication } from "./draft-editor-store";
 import { PlanChoice, planOptions, selectedPlan } from "./plan-choice";
-import { planName } from "./plan-format";
+import { formatRetention, planName } from "./plan-format";
 import { reloadStudioPage, requestPublish } from "./publish-action";
 import { studioLinkHandler, useStudio } from "./studio-context";
 import { useNow } from "./use-now";
@@ -83,6 +83,12 @@ function signInHref(publicId: string) {
  * `Idempotency-Key` serves every attempt until a `201`; the next publish of the page uses a new
  * one. Plan limits shown here are the server's; the publish endpoint decides again.
  */
+/** `privacy-notice` "Upload-rights confirmation": required in both confirmations. */
+export const RIGHTS_CONFIRMATION =
+  "Tôi có quyền dùng các ảnh và nội dung trong món quà này, và người xuất hiện trong ảnh đồng ý chia sẻ.";
+
+export const RETENTION_NOTE = "Bạn có thể tạm dừng hoặc xoá món quà bất cứ lúc nào.";
+
 export function PublishStep({ incomplete }: Readonly<{ incomplete: boolean }>) {
   const { controller, navigation, publish, report, store } = useStudio();
   const publicId = store.getState().context.publicId;
@@ -105,6 +111,8 @@ export function PublishStep({ incomplete }: Readonly<{ incomplete: boolean }>) {
   const idempotencyKey = useRef<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // The upload-rights confirmation (`privacy-notice`): unchecked each time a confirmation opens.
+  const [rightsConfirmed, setRightsConfirmed] = useState(false);
   const confirmHeading = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
@@ -156,6 +164,7 @@ export function PublishStep({ incomplete }: Readonly<{ incomplete: boolean }>) {
     if (blocked !== null || busyRef.current || confirming) return;
     if (mode === "publish") report("publish_clicked");
     setNotice(null);
+    setRightsConfirmed(false);
     setConfirming(true);
   }
 
@@ -293,10 +302,29 @@ export function PublishStep({ incomplete }: Readonly<{ incomplete: boolean }>) {
           </h3>
           <p className="text-sm leading-6 text-stone-700">{texts.confirmText}</p>
           {mode === "publish" && selected ? (
-            <p className="text-sm font-semibold text-stone-800">Gói đã chọn: {selected.name}.</p>
+            <>
+              <p className="text-sm font-semibold text-stone-800">Gói đã chọn: {selected.name}.</p>
+              <p className="text-sm text-stone-700">
+                {formatRetention(selected.retentionDays)}. {RETENTION_NOTE}
+              </p>
+            </>
           ) : null}
+          <label className="flex items-start gap-2 text-sm leading-6 text-stone-800">
+            <input
+              checked={rightsConfirmed}
+              className="mt-1"
+              disabled={busy}
+              onChange={(event) => setRightsConfirmed(event.target.checked)}
+              type="checkbox"
+            />
+            <span>{RIGHTS_CONFIRMATION}</span>
+          </label>
           <div className="flex flex-wrap gap-3">
-            <Button disabled={busy} onClick={() => void startPublish()} size="lg">
+            <Button
+              disabled={busy || !rightsConfirmed}
+              onClick={() => void startPublish()}
+              size="lg"
+            >
               {busy ? texts.busy : texts.confirm}
             </Button>
             <Button disabled={busy} onClick={() => setConfirming(false)} variant="outline">

@@ -91,4 +91,6 @@ Export to a warehouse, or move to a vendor behind the same event names, when one
 - the product needs cohort or retention analysis that ad-hoc queries cannot serve.
 
 Turning analytics on in Production needs the Sprint 6 privacy notice and consent copy, not this
-ADR to change.
+ADR to change. The notice exists since `add-privacy-consent-and-export` (2026-10-10) and already
+describes anonymous statistics. A consent banner, separate from the operational processing, is
+still required before enabling analytics in Production.

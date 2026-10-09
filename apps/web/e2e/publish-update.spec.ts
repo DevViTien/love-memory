@@ -9,12 +9,14 @@ import {
   type E2eRecord,
   fillCompleteMemoryBox,
   findAssetStatus,
+  findGiftId,
   listDraftAssetIds,
   publishTypicalMemoryBox,
   saveStatus,
   studioStep,
   TYPICAL_MEMORY_BOX,
   waitForHydration,
+  withE2eDatabase,
 } from "./support/gift-journey";
 import { assignOwnAuthClientAddress, expect, test } from "./test";
 
@@ -85,6 +87,7 @@ async function updateFromStudio(page: Page) {
   await expect(
     publishRegion.getByRole("heading", { name: "Cập nhật món quà đã gửi?" }),
   ).toBeFocused();
+  await publishRegion.getByRole("checkbox").check();
   await publishRegion.getByRole("button", { name: "Xác nhận cập nhật" }).click();
   await expect(publishRegion.getByText("Đã cập nhật món quà.")).toBeVisible();
   await expect(page.getByText("Người nhận đang xem bản mới nhất.", { exact: true })).toBeVisible();
@@ -196,6 +199,17 @@ test("a photo of the live publication stays with recipients until the update rep
     // (`gift.assets.cleanup.v1`, inline on the E2E server) deleted it for good.
     await expect.poll(() => findAssetStatus(removed), { timeout: 15_000 }).toBe("deleted");
     expect(await findAssetStatus(replacement!)).toBe("ready");
+    // Only the current publication is kept: the replaced text is gone too (`privacy-notice`).
+    const giftId = await findGiftId(record.publicId);
+    await expect
+      .poll(
+        () =>
+          withE2eDatabase((database) =>
+            database.collection("giftPublications").countDocuments({ giftId }),
+          ),
+        { timeout: 15_000 },
+      )
+      .toBe(1);
   } finally {
     await recipient.close();
   }

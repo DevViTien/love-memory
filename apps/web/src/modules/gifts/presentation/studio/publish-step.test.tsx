@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as PublishActionModule from "./publish-action";
 import { routerRefresh } from "./test/next-navigation";
+import { RIGHTS_CONFIRMATION } from "./publish-step";
 import { apiError, assetIds, jsonResponse } from "./test/fixtures";
 import {
   analyticsEventNames,
@@ -77,9 +78,16 @@ function confirmButton() {
   });
 }
 
+/** Ticks the upload-rights checkbox (`privacy-notice`) unless it is already ticked. */
+async function confirmRights(user: UserEvent) {
+  const box = publishStep().getByRole<HTMLInputElement>("checkbox");
+  if (!box.checked) await user.click(box);
+}
+
 /** `Xuất bản`, then `Xác nhận xuất bản` in the confirmation. */
 async function publishNow(user: UserEvent) {
   await user.click(publishButton());
+  await confirmRights(user);
   await user.click(confirmButton());
 }
 
@@ -155,6 +163,31 @@ describe("Xuất bản step: availability", () => {
     expect(publishStep().getByText("Sắp mở thanh toán.")).toBeTruthy();
     expect(publishButton().disabled).toBe(false);
     expect(publishStep().queryByText("Xuất bản chưa được mở cho tài khoản này.")).toBeNull();
+  });
+
+  it("requires the rights confirmation and states the retention (Rights must be confirmed before publishing)", async () => {
+    stubStudioFetch({ assets: readyAssets });
+    await openReadyPublishStep();
+    const user = userEvent.setup();
+
+    await user.click(publishButton());
+    expect(confirmButton().disabled).toBe(true);
+    expect(
+      publishStep().getByText(
+        "Người nhận mở được trong 14 ngày. Bạn có thể tạm dừng hoặc xoá món quà bất cứ lúc nào.",
+      ),
+    ).toBeTruthy();
+    const box = publishStep().getByRole<HTMLInputElement>("checkbox", {
+      name: RIGHTS_CONFIRMATION,
+    });
+    await user.click(box);
+    expect(confirmButton().disabled).toBe(false);
+
+    // Reopening the confirmation asks again.
+    await user.click(publishStep().getByRole("button", { name: "Quay lại chỉnh sửa" }));
+    await user.click(publishButton());
+    expect(publishStep().getByRole<HTMLInputElement>("checkbox").checked).toBe(false);
+    expect(confirmButton().disabled).toBe(true);
   });
 
   it("describes each plan from the server's values", async () => {
@@ -328,7 +361,11 @@ describe("Xuất bản step: publishing", () => {
       .map(([input, init]) => `${init?.method} ${urlOf(input)}`);
     expect(order).toEqual([`PATCH /api/gifts/${publicId}`, `POST /api/gifts/${publicId}/publish`]);
     const [, init] = publishPosts(fetchMock)[0]!;
-    expect(JSON.parse(init?.body as string)).toEqual({ expectedRevision: 1, planId: "free" });
+    expect(JSON.parse(init?.body as string)).toEqual({
+      expectedRevision: 1,
+      planId: "free",
+      rightsConfirmed: true,
+    });
     expect(new Headers(init?.headers).get("Idempotency-Key")).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );
@@ -405,6 +442,7 @@ describe("Xuất bản step: publishing", () => {
     await openReadyPublishStep();
 
     await user.click(publishButton());
+    await confirmRights(user);
     await user.dblClick(confirmButton());
 
     await waitFor(() => expect(publishPosts(fetchMock)).toHaveLength(1));
@@ -664,12 +702,17 @@ describe("Cập nhật món quà step: a published gift", () => {
     ).toBeTruthy();
     await user.click(updateButton());
     expect(publishStep().getByRole("heading", { name: "Cập nhật món quà đã gửi?" })).toBeTruthy();
+    await confirmRights(user);
     await user.click(confirmUpdateButton());
 
     expect(await publishStep().findByText("Đã cập nhật món quà.")).toBeTruthy();
     expect(screen.getByText("Người nhận đang xem bản mới nhất.")).toBeTruthy();
     const [, init] = publishPosts(fetchMock)[0]!;
-    expect(JSON.parse(init?.body as string)).toEqual({ expectedRevision: 1, planId: "free" });
+    expect(JSON.parse(init?.body as string)).toEqual({
+      expectedRevision: 1,
+      planId: "free",
+      rightsConfirmed: true,
+    });
     expect(updateButton().disabled).toBe(true);
   });
 
@@ -708,9 +751,11 @@ describe("Cập nhật món quà step: a published gift", () => {
 
     await editLetter(user);
     await user.click(updateButton());
+    await confirmRights(user);
     await user.click(confirmUpdateButton());
     expect(await publishStep().findByText("Chưa cập nhật được — thử lại.")).toBeTruthy();
     await user.click(updateButton());
+    await confirmRights(user);
     await user.click(confirmUpdateButton());
 
     expect(await publishStep().findByText("Đã cập nhật món quà.")).toBeTruthy();
@@ -736,6 +781,7 @@ describe("Cập nhật món quà step: a published gift", () => {
     expect(await screen.findByRole("heading", { name: "Đã xuất bản" })).toBeTruthy();
     await editLetter(user);
     await user.click(updateButton());
+    await confirmRights(user);
     await user.click(confirmUpdateButton());
     expect(await publishStep().findByText("Đã cập nhật món quà.")).toBeTruthy();
 
@@ -760,6 +806,7 @@ describe("Cập nhật món quà step: a published gift", () => {
 
     await editLetter(user);
     await user.click(updateButton());
+    await confirmRights(user);
     await user.click(confirmUpdateButton());
     expect(await publishStep().findByText("Đã cập nhật món quà.")).toBeTruthy();
 
@@ -797,6 +844,7 @@ describe("Xuất bản step: funnel analytics", () => {
     expect(analyticsEventNames(fetchMock).filter((name) => name === "publish_clicked")).toEqual([
       "publish_clicked",
     ]);
+    await confirmRights(user);
     await user.click(confirmButton());
     await waitFor(() => expect(publishPosts(fetchMock)).toHaveLength(1));
     respond(published(0));

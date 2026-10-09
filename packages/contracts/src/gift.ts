@@ -106,6 +106,8 @@ export const PublishGiftRequestSchema = z
   .object({
     expectedRevision: z.number().int().nonnegative(),
     planId: PlanIdSchema,
+    /** The creator's upload-rights confirmation (`privacy-notice`): only `true` is accepted. */
+    rightsConfirmed: z.literal(true),
   })
   .strict();
 

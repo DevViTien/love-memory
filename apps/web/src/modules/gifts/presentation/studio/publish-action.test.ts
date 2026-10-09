@@ -65,7 +65,7 @@ describe("requestPublish", () => {
 
     await expect(publish(fetchMock)).resolves.toEqual({ kind: "published", publication });
     expect(fetchMock).toHaveBeenCalledExactlyOnceWith(`/api/gifts/${publicId}/publish`, {
-      body: JSON.stringify({ expectedRevision: 4, planId: "free" }),
+      body: JSON.stringify({ expectedRevision: 4, planId: "free", rightsConfirmed: true }),
       headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
       method: "POST",
       signal: expect.any(AbortSignal) as AbortSignal,

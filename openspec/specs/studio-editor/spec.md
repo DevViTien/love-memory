@@ -190,7 +190,7 @@ The `Xuất bản` button SHALL be disabled, with one explanation, in the first 
 - a template step is `Còn thiếu`: `Hoàn thiện các bước còn thiếu để xuất bản.`;
 - no plan is selected: `Chọn một gói để xuất bản.`
 
-Otherwise the button SHALL be enabled, with the note `Sau khi xuất bản, bạn vẫn có thể chỉnh sửa và cập nhật món quà tại cùng đường dẫn.`. Choosing `Xuất bản` SHALL NOT send any request. It SHALL replace the button with a confirmation that has the heading `Xuất bản món quà này?`, the text `Ai có đường dẫn đều mở được món quà. Bạn có thể chỉnh sửa và cập nhật sau, nhưng chưa thể thu hồi đường dẫn.`, the line `Gói đã chọn: {planName}.`, and two actions, `Xác nhận xuất bản` and `Quay lại chỉnh sửa`. The plan choice SHALL be disabled while the confirmation is open.
+Otherwise the button SHALL be enabled, with the note `Sau khi xuất bản, bạn vẫn có thể chỉnh sửa và cập nhật món quà tại cùng đường dẫn.`. Choosing `Xuất bản` SHALL NOT send any request. It SHALL replace the button with a confirmation that has the heading `Xuất bản món quà này?`, the text `Ai có đường dẫn đều mở được món quà. Bạn có thể chỉnh sửa và cập nhật sau, nhưng chưa thể thu hồi đường dẫn.`, the line `Gói đã chọn: {planName}.`, the retention line `{retentionLabel}. Bạn có thể tạm dừng hoặc xoá món quà bất cứ lúc nào.` (where `{retentionLabel}` is the retention label of the plan choice above, such as `Người nhận mở được trong 14 ngày`), the rights checkbox of `privacy-notice` ("Upload-rights confirmation"), and two actions, `Xác nhận xuất bản` and `Quay lại chỉnh sửa`. `Xác nhận xuất bản` SHALL stay disabled until the checkbox is checked. The plan choice SHALL be disabled while the confirmation is open.
 
 For a published gift, the `Xuất bản` step SHALL show no plan choice, the line `Gói {planName}` of the gift's entitlement, and a `Cập nhật món quà` button instead. It SHALL be disabled, with one explanation, in the first of these cases that applies:
 
@@ -200,12 +200,12 @@ For a published gift, the `Xuất bản` step SHALL show no plan choice, the lin
 - the content's photo count exceeds the entitlement's `maxPhotos`: `Gói {planName} cho tối đa {maxPhotos} ảnh. Hãy bớt ảnh để cập nhật.`;
 - the gift has no unpublished changes (`gift-publishing` "Editing a published gift") and no change is waiting to be saved: `Người nhận đang xem bản mới nhất. Hãy chỉnh sửa trước khi cập nhật.`
 
-Otherwise it SHALL be enabled, with the note `Người nhận sẽ thấy nội dung mới tại đường dẫn hiện tại.`. Choosing `Cập nhật món quà` SHALL NOT send any request. It SHALL replace the button with a confirmation that has the heading `Cập nhật món quà đã gửi?`, the text `Người nhận sẽ thấy nội dung mới ngay tại đường dẫn hiện tại. Bản đã gửi trước đó sẽ không còn hiển thị.`, and two actions, `Xác nhận cập nhật` and `Quay lại chỉnh sửa`.
+Otherwise it SHALL be enabled, with the note `Người nhận sẽ thấy nội dung mới tại đường dẫn hiện tại.`. Choosing `Cập nhật món quà` SHALL NOT send any request. It SHALL replace the button with a confirmation that has the heading `Cập nhật món quà đã gửi?`, the text `Người nhận sẽ thấy nội dung mới ngay tại đường dẫn hiện tại. Bản đã gửi trước đó sẽ không còn hiển thị.`, the rights checkbox, and two actions, `Xác nhận cập nhật` and `Quay lại chỉnh sửa`. `Xác nhận cập nhật` SHALL stay disabled until the checkbox is checked. The checkbox SHALL start unchecked each time a confirmation opens.
 
 In both confirmations keyboard focus SHALL move to the confirmation heading, and `Quay lại chỉnh sửa` SHALL close the confirmation and show the button again. Choosing `Xác nhận xuất bản` or `Xác nhận cập nhật` SHALL work as follows:
 
 1. The Studio SHALL first settle pending saves as specified in `studio-autosave` ("Pending saves settled before dependent Studio actions").
-2. Only when the draft is saved at that point SHALL the Studio send `POST /api/gifts/{publicId}/publish` with the body `{ "expectedRevision": <revision of the last successful save>, "planId": <plan> }` and an `Idempotency-Key` UUID. `<plan>` is the selected plan for a draft, and the `planId` of the gift's entitlement for a published gift. The Studio SHALL generate a key per page instance and reuse it for every attempt until one is answered `201`; after each `201` it SHALL generate a new key for the next publish.
+2. Only when the draft is saved at that point SHALL the Studio send `POST /api/gifts/{publicId}/publish` with the body `{ "expectedRevision": <revision of the last successful save>, "planId": <plan>, "rightsConfirmed": true }` and an `Idempotency-Key` UUID. `<plan>` is the selected plan for a draft, and the `planId` of the gift's entitlement for a published gift. The Studio SHALL generate a key per page instance and reuse it for every attempt until one is answered `201`; after each `201` it SHALL generate a new key for the next publish.
 3. On `201` for a draft, the Studio SHALL show the published panel of `gift-publishing` ("Published gift in the Studio") for the returned `shareId`, `planId` and `expiresAt` above the editor, without a page reload, keep autosaving, and from then on offer `Cập nhật món quà`. On `201` for a published gift, the panel's status SHALL change to `Người nhận đang xem bản mới nhất.` and the step SHALL show `Đã cập nhật món quà.`
 
 While the action runs, both confirmation actions SHALL be disabled, `Xác nhận xuất bản` SHALL read `Đang xuất bản…` and `Xác nhận cập nhật` SHALL read `Đang cập nhật…`, so repeated clicks send at most one request, and the editor's fields SHALL be read-only as specified in "Read-only editor states". When the action ends without `201`, the confirmation SHALL close and the button is shown again with the outcome below. When the saves do not settle as saved, no publish request SHALL be sent, and the matching save status, invalid-content message, conflict banner or non-editable alert stays visible. When the publish request fails, the Studio SHALL stay on the page with the content unchanged and handle the response as follows; for a published gift, the messages that say `xuất bản` use their update wording given in brackets:
@@ -386,6 +386,13 @@ While the action runs, both confirmation actions SHALL be disabled, `Xác nhận
 
 - **WHEN** the owner of a gift published on `free` has 4 photos in the working copy
 - **THEN** `Cập nhật món quà` is disabled with `Gói Miễn phí cho tối đa 3 ảnh. Hãy bớt ảnh để cập nhật.`
+
+#### Scenario: Rights must be confirmed before publishing
+
+- **WHEN** the owner opens the publish confirmation
+- **THEN** `Xác nhận xuất bản` is disabled until the rights checkbox is checked, and the confirmation
+  shows `Người nhận mở được trong 14 ngày. Bạn có thể tạm dừng hoặc xoá món quà bất cứ lúc nào.` for
+  the `free` plan
 
 ### Requirement: Read-only editor states
 

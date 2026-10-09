@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@love-memory/ui";
+import Link from "next/link";
 import { type FormEvent, useState } from "react";
 
 import { authClient } from "@/composition/auth-client";
@@ -73,6 +74,13 @@ export function MagicLinkForm({ callbackUrl = "/studio/new" }: Readonly<{ callba
       <Button className="w-full" disabled={isPending} size="lg" type="submit">
         {isPending ? "Đang gửi…" : "Gửi liên kết đăng nhập"}
       </Button>
+      <p className="text-xs leading-5 text-stone-500">
+        Khi tiếp tục, bạn đồng ý để LoveMemory xử lý dữ liệu như mô tả trong{" "}
+        <Link className="font-semibold underline" href="/privacy">
+          Chính sách quyền riêng tư
+        </Link>
+        .
+      </p>
       <p className="text-xs leading-5 text-stone-500">
         Vì an toàn, hệ thống luôn trả cùng một thông báo dù email đã có tài khoản hay chưa.
       </p>

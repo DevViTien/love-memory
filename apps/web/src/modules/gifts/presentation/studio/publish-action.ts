@@ -112,7 +112,7 @@ export async function requestPublish({
       fetchImpl,
       `/api/gifts/${encodeURIComponent(publicId)}/publish`,
       {
-        body: JSON.stringify({ expectedRevision: flushed.revision, planId }),
+        body: JSON.stringify({ expectedRevision: flushed.revision, planId, rightsConfirmed: true }),
         headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
         method: "POST",
       },
