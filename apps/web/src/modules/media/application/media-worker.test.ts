@@ -114,6 +114,7 @@ describe("media worker", () => {
   it("rejects decoded MIME spoofing and records processing failures for retry", async () => {
     const spoofRepo = repository();
     const spoofStorage = storage();
+    const spoofWake = vi.fn(() => Promise.resolve());
     const spoof = createMediaWorker({
       processImage: vi.fn<typeof processUploadedImageSet>(() =>
         Promise.resolve({
@@ -125,6 +126,7 @@ describe("media worker", () => {
       ),
       repository: spoofRepo,
       storage: spoofStorage,
+      wakeEmailJobs: spoofWake,
     });
     await expect(spoof.runNext()).resolves.toMatchObject({ status: "failed" });
     expect(spoofRepo.fail).toHaveBeenCalledWith(
@@ -134,8 +136,11 @@ describe("media worker", () => {
       null,
       expect.any(Date),
     );
+    // A final failure committed the owner's email (`system-emails`).
+    expect(spoofWake).toHaveBeenCalledTimes(1);
 
     const failedRepo = repository();
+    const retryWake = vi.fn(() => Promise.resolve());
     const reportProcessingFailure = vi.fn();
     const decodeError = new Error("decode");
     const failed = createMediaWorker({
@@ -143,6 +148,7 @@ describe("media worker", () => {
       reportProcessingFailure,
       repository: failedRepo,
       storage: storage(),
+      wakeEmailJobs: retryWake,
     });
     await expect(failed.runNext()).resolves.toMatchObject({ status: "failed" });
     expect(failedRepo.fail).toHaveBeenCalledWith(
@@ -153,6 +159,8 @@ describe("media worker", () => {
       expect.any(Date),
     );
     expect(reportProcessingFailure).toHaveBeenCalledWith(decodeError, asset.id);
+    // A retry may still succeed: no email yet.
+    expect(retryWake).not.toHaveBeenCalled();
   });
 
   it("drops a placeholder that exceeds the stored limit", async () => {
@@ -186,13 +194,16 @@ describe("media worker", () => {
       jobId: "job-1",
     });
     const objects = storage();
+    const wakeEmailJobs = vi.fn(() => Promise.resolve());
     const worker = createMediaWorker({
       processImage: vi.fn<typeof processUploadedImageSet>(() => Promise.reject(new Error("boom"))),
       repository: repo,
       storage: objects,
+      wakeEmailJobs,
     });
 
     await expect(worker.runNext()).resolves.toMatchObject({ status: "failed" });
+    expect(wakeEmailJobs).toHaveBeenCalledTimes(1);
     expect(repo.fail).toHaveBeenCalledWith(
       asset.id,
       "job-1",
@@ -225,9 +236,16 @@ describe("media worker", () => {
     vi.mocked(repo.claimNext).mockResolvedValueOnce({ exhaustedAsset: failedAsset });
     const objects = storage();
     const processImage = vi.fn<typeof processUploadedImageSet>();
-    const worker = createMediaWorker({ processImage, repository: repo, storage: objects });
+    const wakeEmailJobs = vi.fn(() => Promise.resolve());
+    const worker = createMediaWorker({
+      processImage,
+      repository: repo,
+      storage: objects,
+      wakeEmailJobs,
+    });
 
     await expect(worker.runNext()).resolves.toEqual({ assetId: asset.id, status: "failed" });
+    expect(wakeEmailJobs).toHaveBeenCalledTimes(1);
     expect(objects.deleteObject).toHaveBeenCalledWith(asset.sourceKey);
     expect(processImage).not.toHaveBeenCalled();
     expect(repo.fail).not.toHaveBeenCalled();

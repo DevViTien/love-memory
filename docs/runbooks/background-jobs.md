@@ -7,13 +7,21 @@ separate pipeline with its own runbook, the [media pipeline runbook](./media-pip
 
 ## Job types
 
-| Type                     | Enqueued by                                                         | Budget | What it does                                                                               |
-| ------------------------ | ------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------ |
-| `gift.assets.cleanup.v1` | Each update of a published gift, and the schema version 12 backfill | 5      | Deletes the detached photos of the gift that its current publication no longer references. |
-| `gift.delete.v1`         | An owner deleting a gift (`gift-lifecycle`)                         | 8      | Purges the gift: photo objects, derived records, analytics events; leaves a tombstone.     |
+| Type                     | Enqueued by                                                          | Budget | What it does                                                                               |
+| ------------------------ | -------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------ |
+| `gift.assets.cleanup.v1` | Each update of a published gift, and the schema version 12 backfill  | 5      | Deletes the detached photos of the gift that its current publication no longer references. |
+| `gift.delete.v1`         | An owner deleting a gift (`gift-lifecycle`)                          | 8      | Purges the gift: photo objects, derived records, analytics events; leaves a tombstone.     |
+| `email.send.v1`          | A first publish, a final photo failure, a takedown (`system-emails`) | 6      | Emails the gift's current owner, with a Studio link and no gift content.                   |
 
-**Payloads.** A payload holds identifiers only (`{ giftId }`). Nothing in a job, a job log or the
-commands below contains gift content, tokens or URLs.
+**Payloads.** A payload holds identifiers only (`{ giftId }`, plus `kind` and `eventKey` for
+emails). Nothing in a job, a job log or the commands below contains gift content, addresses,
+tokens or URLs.
+
+**Trigger.dev variables for emails.** Besides the database and Blob variables, the Trigger.dev
+environment of each tier needs `APP_URL`, `AUTH_EMAIL_FROM` and `RESEND_API_KEY` (the same values
+as the Vercel tier). Without them, `email.send.v1` jobs fail with `EMAIL_SEND_FAILED` or
+`JOB_FAILED` and end `dead`. Set the variables, then run `pnpm jobs:retry <jobId>` for each one.
+Resend deduplicates a resend of the same email within 24 hours.
 
 **Lifecycle.** `pending` → `processing` → `completed`. Two failure paths:
 

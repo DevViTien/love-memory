@@ -51,6 +51,7 @@ describe("Mongo moderation", () => {
       auditLog: collection(),
       giftTombstones: collection(),
       gifts: collection(),
+      jobOutbox: collection(),
     };
     databaseMocks.getDatabase.mockResolvedValue({
       collection: (name: string) => collections[name],
@@ -93,12 +94,24 @@ describe("Mongo moderation", () => {
         }),
         { session },
       );
+      // The owner's email, without any report detail (`system-emails`).
+      expect(collections["jobOutbox"]!["updateOne"]).toHaveBeenCalledWith(
+        { deduplicationKey: `email.send.v1:gift_taken_down:gift-1:${now.toISOString()}` },
+        {
+          $setOnInsert: expect.objectContaining({
+            payload: { eventKey: now.toISOString(), giftId: "gift-1", kind: "gift_taken_down" },
+            type: "email.send.v1",
+          }) as object,
+        },
+        { session, upsert: true },
+      );
     });
 
     it("records no takedown when the gift already holds one, or for a normal report", async () => {
       collections["gifts"]!["updateOne"]!.mockResolvedValueOnce({ modifiedCount: 0 });
       await mongoAbuseReportStore.insertReport({ emergency: true, report });
       expect(collections["auditLog"]!["insertOne"]).not.toHaveBeenCalled();
+      expect(collections["jobOutbox"]!["updateOne"]).not.toHaveBeenCalled();
 
       await mongoAbuseReportStore.insertReport({
         emergency: false,
@@ -140,6 +153,11 @@ describe("Mongo moderation", () => {
           metadata: { reason: "child_safety", reportId: "report-1" },
         }),
         { session },
+      );
+      expect(collections["jobOutbox"]!["updateOne"]).toHaveBeenCalledWith(
+        { deduplicationKey: `email.send.v1:gift_taken_down:gift-1:${now.toISOString()}` },
+        expect.anything(),
+        { session, upsert: true },
       );
     });
 

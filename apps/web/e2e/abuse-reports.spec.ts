@@ -2,7 +2,7 @@ import { type Browser, type Page } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 
 import { cleanupAdminAccount, signInAsSteppedUpAdmin } from "./support/admin";
-import { uniqueE2eEmail } from "./support/auth";
+import { capturedSystemEmails, uniqueE2eEmail } from "./support/auth";
 import {
   cleanupE2eRecord,
   type E2eRecord,
@@ -44,6 +44,7 @@ test("a recipient reports a gift, an admin reviews it, takes it down and restore
 }, testInfo) => {
   test.setTimeout(180_000);
   const adminEmail = uniqueE2eEmail("moderator", testInfo);
+  const ownerEmail = uniqueE2eEmail("reported-owner", testInfo);
   let record: E2eRecord | undefined;
   let giftId: string | undefined;
   let adminId: string | undefined;
@@ -52,8 +53,12 @@ test("a recipient reports a gift, an admin reviews it, takes it down and restore
     const published = await publishTypicalMemoryBox(
       page,
       resolve(dirname(testInfo.file), "fixtures"),
-      uniqueE2eEmail("reported-owner", testInfo),
+      ownerEmail,
     );
+    // The first publish emailed the owner a link to the gift's Studio page (`system-emails`).
+    await expect
+      .poll(async () => (await capturedSystemEmails(ownerEmail)).map((email) => email.kind))
+      .toEqual(["gift_published"]);
     record = published.record;
     giftId = published.giftId;
 
@@ -83,6 +88,19 @@ test("a recipient reports a gift, an admin reviews it, takes it down and restore
     await page.goto(`/studio/${published.record.publicId}`);
     await expect(page.getByRole("heading", { name: "Món quà đã bị tạm khoá" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Tiếp tục chia sẻ" })).toHaveCount(0);
+
+    // The owner is emailed, without the gift's content, the share link or the report.
+    await expect
+      .poll(async () => (await capturedSystemEmails(ownerEmail)).map((email) => email.kind))
+      .toEqual(["gift_published", "gift_taken_down"]);
+    const emails = await capturedSystemEmails(ownerEmail);
+    for (const email of emails) {
+      expect(email.text).toContain(`/studio/${published.record.publicId}`);
+      expect(email.text).not.toContain(MEMORY_BOX_CONTENT.receiver);
+      expect(email.text).not.toContain(published.shareUrl);
+      expect(email.text).not.toContain("lăng mạ");
+    }
+    expect(emails[1]?.subject).toBe("Món quà của bạn đã bị tạm khoá");
 
     // 4. The admin restores; the link opens again, and every step is in the audit log.
     await admin.goto(reviewUrl);

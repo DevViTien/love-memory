@@ -98,7 +98,10 @@ The worker SHALL accept only images whose decoded format is JPEG, PNG or WebP an
 - `DECODE_FAILED`: the bytes are empty, cannot be decoded, exceed the pixel limit, or decode to an unsupported format such as SVG or GIF.
 - `PROCESSING_FAILED`: any other error, treated as transient.
 
-`OBJECT_MISSING`, `UPLOAD_INVALID` and `DECODE_FAILED` SHALL be terminal: the asset becomes `failed`, its job becomes `failed`, and the source object is deleted on a best-effort basis. For `PROCESSING_FAILED` the asset SHALL become `failed` and, while the asset has fewer than 3 attempts, its job SHALL return to `pending` with `availableAt` delayed by 2^attempts x 30 seconds (60 seconds after the first attempt, 120 seconds after the second); on the third attempt the job SHALL become `failed` and the source object SHALL be deleted on a best-effort basis, because no retry can use it any more.
+`OBJECT_MISSING`, `UPLOAD_INVALID` and `DECODE_FAILED` SHALL be terminal: the asset becomes `failed`, its job becomes `failed`, and the source object is deleted on a best-effort basis. For `PROCESSING_FAILED` the asset SHALL become `failed` and, while the asset has fewer than 3 attempts, its job SHALL return to `pending` with `availableAt` delayed by 2^attempts x 30 seconds (60 seconds after the first attempt, 120 seconds after the second); on the third attempt the job SHALL become `failed` and the source object SHALL be deleted on a best-effort basis, because no retry can use it any more. Whenever a processing failure leaves the job `failed` (a terminal code, or `PROCESSING_FAILED` on
+the last attempt), the same transaction SHALL enqueue one `email.send.v1` job of kind
+`photo_processing_failed` for the asset's gift (`system-emails`), with the deduplication key
+`email.send.v1:photo_processing_failed:{giftId}:{assetId}`.
 
 #### Scenario: MIME spoofing detected
 
@@ -121,6 +124,12 @@ The worker SHALL accept only images whose decoded format is JPEG, PNG or WebP an
 
 - **WHEN** processing fails with an unclassified error on the asset's third attempt
 - **THEN** the asset becomes `failed` with `failureCode` `PROCESSING_FAILED`, its job becomes `failed`, and the source object is deleted
+
+#### Scenario: Final failure notifies the owner
+
+- **WHEN** a photo fails with `DECODE_FAILED`
+- **THEN** the asset becomes `failed` and one `photo_processing_failed` email job is enqueued for its
+  gift
 
 ### Requirement: Abandoned upload and interrupted delete cleanup
 

@@ -28,6 +28,7 @@ import {
   GIFT_ASSETS_CLEANUP_JOB,
   giftAssetsCleanupKey,
 } from "@/modules/media/application/gift-assets-cleanup";
+import { systemEmailJob } from "@/modules/notifications/application/system-emails";
 import {
   type GiftPublicationDocument,
   toPublicationDocument,
@@ -447,6 +448,16 @@ export const mongoGiftRepository: GiftRepository = {
                 payload: { giftId: gift.id },
                 type: GIFT_ASSETS_CLEANUP_JOB,
               },
+              session,
+            );
+          } else {
+            // The owner hears that the gift is live (`system-emails`); an update stays silent.
+            await enqueueJob(
+              database,
+              systemEmailJob(
+                { eventKey: "first", giftId: gift.id, kind: "gift_published" },
+                publication.publishedAt,
+              ),
               session,
             );
           }

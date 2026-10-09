@@ -361,6 +361,52 @@ describe("Mongo media repositories", () => {
       { $set: { failureCode: "PROCESSING_FAILED", status: "failed", updatedAt: now } },
       { returnDocument: "after", session },
     );
+    expect(jobs.updateOne).toHaveBeenCalledWith(
+      {
+        deduplicationKey: `email.send.v1:photo_processing_failed:${baseAsset.giftId}:${baseAsset.id}`,
+      },
+      expect.anything(),
+      { session, upsert: true },
+    );
+  });
+
+  it("enqueues the owner's email with a final failure, and none while a retry remains", async () => {
+    assets.findOneAndUpdate.mockResolvedValueOnce({ _id: baseAsset.id, giftId: baseAsset.giftId });
+    await mongoMediaWorkerRepository.fail(baseAsset.id, "job-1", "DECODE_FAILED", null, now);
+
+    expect(assets.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: baseAsset.id, status: "processing" },
+      { $set: { failureCode: "DECODE_FAILED", status: "failed", updatedAt: now } },
+      { projection: { _id: 1, giftId: 1 }, session },
+    );
+    expect(jobs.updateOne).toHaveBeenCalledWith(
+      {
+        deduplicationKey: `email.send.v1:photo_processing_failed:${baseAsset.giftId}:${baseAsset.id}`,
+      },
+      {
+        $setOnInsert: expect.objectContaining({
+          payload: {
+            eventKey: baseAsset.id,
+            giftId: baseAsset.giftId,
+            kind: "photo_processing_failed",
+          },
+          type: "email.send.v1",
+        }) as object,
+      },
+      { session, upsert: true },
+    );
+
+    jobs.updateOne.mockClear();
+    assets.findOneAndUpdate.mockResolvedValueOnce({ _id: baseAsset.id, giftId: baseAsset.giftId });
+    const retryAt = new Date(now.getTime() + 30_000);
+    await mongoMediaWorkerRepository.fail(baseAsset.id, "job-1", "PROCESSING_FAILED", retryAt, now);
+    // Only the media job's own update: no email while a retry may still succeed.
+    expect(jobs.updateOne).toHaveBeenCalledTimes(1);
+    expect(jobs.updateOne).toHaveBeenCalledWith(
+      { _id: "job-1", status: "processing" },
+      { $set: { availableAt: retryAt, status: "pending", updatedAt: now } },
+      { session },
+    );
   });
 
   it("discards the job of an asset that was deleted after it was enqueued", async () => {

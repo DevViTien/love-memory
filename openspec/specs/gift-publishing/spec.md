@@ -258,6 +258,9 @@ A successful publish SHALL, in one database transaction, do all of the following
 - for an update, enqueue one `gift.assets.cleanup.v1` job for the gift (`media-upload` "Cleanup of
   detached assets"), with the deduplication key `gift.assets.cleanup.v1:{giftId}:{revision}` of the
   published revision. A first publish enqueues no cleanup job.
+- for a first publish, enqueue one `email.send.v1` job of kind `gift_published` (`system-emails`),
+  with the deduplication key `email.send.v1:gift_published:{giftId}:first`. An update enqueues no
+  email.
 
 The new publication becomes the gift's current publication when the transaction commits. Earlier
 publication records of the gift SHALL NOT be served to recipients, and SHALL be deleted by the
@@ -330,6 +333,12 @@ exactly `publicId`, `status` (`published`), `shareId`, `sharePath` (`/g/{shareId
 
 - **WHEN** the owner updates a published gift and the cleanup job of the new revision runs
 - **THEN** only the publication record of the new revision remains for the gift
+
+#### Scenario: First publish notifies the owner
+
+- **WHEN** a draft is published for the first time
+- **THEN** the same transaction enqueues one `email.send.v1` job of kind `gift_published`, and a
+  later update enqueues none
 
 ### Requirement: Share id
 

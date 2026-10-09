@@ -21,6 +21,7 @@ import {
   mongoMediaWorkerRepository,
 } from "@/modules/media/infrastructure/mongo-media-repository";
 import { getGiftTemplateManifest } from "@/composition/gifts";
+import { wakeSystemEmailJobs } from "@/composition/notifications";
 import { reportOperationalFailure } from "@/observability/operational-errors";
 
 let mediaSpikeService: MediaSpikeService | undefined;
@@ -78,6 +79,7 @@ export function getMediaWorker(): MediaWorker {
         reportOperationalFailure("media.processing", error, assetId),
       repository: mongoMediaWorkerRepository,
       storage: createStorage(),
+      wakeEmailJobs: wakeSystemEmailJobs,
     });
   }
   return mediaWorker;

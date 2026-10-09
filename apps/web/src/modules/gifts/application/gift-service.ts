@@ -25,6 +25,7 @@ import { z } from "zod";
 
 import { type JobType } from "@/modules/jobs/application/job-registry";
 import { GIFT_ASSETS_CLEANUP_JOB } from "@/modules/media/application/gift-assets-cleanup";
+import { SYSTEM_EMAIL_JOB } from "@/modules/notifications/application/system-emails";
 import {
   collectContentIssues,
   issuesToFieldErrors,
@@ -732,6 +733,12 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
             }
             // A first publish only records `gift_published`: updates record nothing.
             return success(toPublicationDto(published.data, outcome.publication));
+          }
+          // The first publish committed the owner's `gift_published` email (`system-emails`).
+          try {
+            await dependencies.jobs?.dispatch(SYSTEM_EMAIL_JOB);
+          } catch {
+            // The dispatcher already reports and swallows; this guards a misbehaving port.
           }
           try {
             dependencies.analytics?.publish.giftPublished({

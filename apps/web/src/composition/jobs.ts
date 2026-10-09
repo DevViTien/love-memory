@@ -1,4 +1,5 @@
 import { createStorage } from "@/composition/media";
+import { createSystemEmailJobHandler } from "@/composition/notifications";
 import { type AnyJobHandler, type JobType } from "@/modules/jobs/application/job-registry";
 import { assertJobOutboxFlowing } from "@/modules/jobs/application/job-outbox-health";
 import { createJobRunner, type JobRunner } from "@/modules/jobs/application/job-runner";
@@ -15,6 +16,7 @@ import { GIFT_DELETE_JOB } from "@/modules/gifts/application/gift-lifecycle";
 import { mongoGiftDeletionRepository } from "@/modules/gifts/infrastructure/mongo-gift-deletion-repository";
 import { mongoGiftPublicationRepository } from "@/modules/gifts/infrastructure/mongo-gift-publication-repository";
 import { mongoGiftRepository } from "@/modules/gifts/infrastructure/mongo-gift-repository";
+import { SYSTEM_EMAIL_JOB } from "@/modules/notifications/application/system-emails";
 import {
   createGiftAssetsCleanupHandler,
   GIFT_ASSETS_CLEANUP_JOB,
@@ -29,7 +31,11 @@ import { reportJobFailure, reportOperationalFailure } from "@/observability/oper
 let jobRunner: JobRunner | undefined;
 
 /** The registered generic types; `createHandlers` builds exactly these (`jobs.test.ts`). */
-export const REGISTERED_JOB_TYPES: readonly JobType[] = [GIFT_ASSETS_CLEANUP_JOB, GIFT_DELETE_JOB];
+export const REGISTERED_JOB_TYPES: readonly JobType[] = [
+  GIFT_ASSETS_CLEANUP_JOB,
+  GIFT_DELETE_JOB,
+  SYSTEM_EMAIL_JOB,
+];
 
 /** Every registered generic job type (`background-jobs`); `media.process.v1` is not one of them. */
 export function createHandlers(): AnyJobHandler[] {
@@ -47,6 +53,7 @@ export function createHandlers(): AnyJobHandler[] {
       gifts: mongoGiftDeletionRepository,
       storage,
     }),
+    createSystemEmailJobHandler(),
   ];
 }
 

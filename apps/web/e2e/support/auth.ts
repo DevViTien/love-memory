@@ -12,20 +12,40 @@ export function uniqueE2eEmail(prefix: string, testInfo: TestInfo): string {
   return `${prefix}-${testInfo.project.name}-${Date.now()}@example.test`;
 }
 
-/** The newest magic link captured for this address, or `null`. */
-export async function capturedMagicLink(email: string): Promise<string | null> {
+async function capturedLines<T>(): Promise<T[]> {
   const content = await readFile(authCapturePath, "utf8").catch(() => "");
-  const messages = content
+  return content
     .split("\n")
     .filter(Boolean)
     .flatMap((line) => {
       try {
-        return [JSON.parse(line) as Readonly<{ email: string; url: string }>];
+        return [JSON.parse(line) as T];
       } catch {
         return [];
       }
     });
+}
+
+/** The newest magic link captured for this address, or `null`. */
+export async function capturedMagicLink(email: string): Promise<string | null> {
+  const messages = await capturedLines<Readonly<{ email?: string; url?: string }>>();
   return messages.findLast((message) => message.email === email)?.url ?? null;
+}
+
+export type CapturedSystemEmail = Readonly<{
+  kind: string;
+  subject: string;
+  text: string;
+  to: string;
+}>;
+
+/** The system emails (`system-emails`) captured for this address, oldest first. */
+export async function capturedSystemEmails(to: string): Promise<CapturedSystemEmail[]> {
+  const messages = await capturedLines<Partial<CapturedSystemEmail>>();
+  return messages.filter(
+    (message): message is CapturedSystemEmail =>
+      message.to === to && typeof message.kind === "string",
+  );
 }
 
 /**

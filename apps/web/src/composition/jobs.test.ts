@@ -25,7 +25,7 @@ describe("jobs composition", () => {
     const types = createHandlers().map((handler) => handler.type);
 
     expect(types).toEqual([...REGISTERED_JOB_TYPES]);
-    expect(types).toEqual(["gift.assets.cleanup.v1", "gift.delete.v1"]);
+    expect(types).toEqual(["gift.assets.cleanup.v1", "gift.delete.v1", "email.send.v1"]);
     expect(types).not.toContain("media.process.v1");
   });
 

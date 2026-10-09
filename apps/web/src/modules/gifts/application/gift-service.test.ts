@@ -1468,11 +1468,12 @@ describe("gift publishing", () => {
       expect(gift.expiresAt).toEqual(new Date("2026-10-15T08:00:00.000Z"));
     });
 
-    it("wakes the job worker after an update, and only then", async () => {
+    it("wakes the email worker after a first publish, and the cleanup worker after an update", async () => {
       const dispatch = vi.fn(() => Promise.resolve());
       service = createService({ jobs: { dispatch } });
       await publish();
-      expect(dispatch).not.toHaveBeenCalled();
+      expect(dispatch).toHaveBeenCalledExactlyOnceWith("email.send.v1");
+      dispatch.mockClear();
       await publishedAndEdited();
       service = createService({ clock: () => later, jobs: { dispatch } });
 

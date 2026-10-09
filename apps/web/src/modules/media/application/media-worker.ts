@@ -57,6 +57,8 @@ type Dependencies = Readonly<{
   reportProcessingFailure?: (error: unknown, assetId: string) => void;
   repository: MediaWorkerRepository;
   storage: ObjectStorage;
+  /** Wakes the worker for the email a final failure committed (`system-emails`); never throws. */
+  wakeEmailJobs?: () => Promise<void>;
 }>;
 
 export function createMediaWorker({
@@ -66,6 +68,7 @@ export function createMediaWorker({
   reportProcessingFailure = () => undefined,
   repository,
   storage,
+  wakeEmailJobs = () => Promise.resolve(),
 }: Dependencies) {
   function nonRetryableFailureCode(error: unknown): NonNullable<MediaAsset["failureCode"]> | null {
     if (error instanceof ObjectNotFoundError) return "OBJECT_MISSING";
@@ -115,6 +118,7 @@ export function createMediaWorker({
     if ("discardedJobId" in claimed) return { status: "discarded" };
     if ("exhaustedAsset" in claimed) {
       await deleteSourceBestEffort(claimed.exhaustedAsset);
+      await wakeEmailJobs();
       return { assetId: claimed.exhaustedAsset.id, status: "failed" };
     }
 
@@ -126,6 +130,7 @@ export function createMediaWorker({
       if (output.sourceContentType !== asset.declaredContentType) {
         await deleteSourceBestEffort(asset);
         await repository.fail(asset.id, jobId, "UPLOAD_INVALID", null, clock());
+        await wakeEmailJobs();
         return { assetId: asset.id, status: "failed" };
       }
 
@@ -185,6 +190,7 @@ export function createMediaWorker({
       if (retryAt === null) await deleteSourceBestEffort(asset);
       await repository.fail(asset.id, jobId, failureCode, retryAt, clock());
       reportProcessingFailure(error, asset.id);
+      if (retryAt === null) await wakeEmailJobs();
       return { assetId: asset.id, status: "failed" };
     }
   }

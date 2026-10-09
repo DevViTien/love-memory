@@ -65,6 +65,8 @@ type Dependencies = Readonly<{
   clock?: () => Date;
   /** The reported gift's current publication as a viewer payload (signed photos), or `null`. */
   loadContent: (giftId: string) => Promise<ViewerPayload | null>;
+  /** Wakes the worker for the owner's takedown email; never throws. */
+  notifyOwner?: () => Promise<void>;
   repository: ModerationRepository;
 }>;
 
@@ -75,6 +77,7 @@ export function createModerationService({
   audit,
   clock = () => new Date(),
   loadContent,
+  notifyOwner = () => Promise.resolve(),
   repository,
 }: Dependencies) {
   async function listQueue(): Promise<readonly ReportQueueItem[]> {
@@ -107,7 +110,9 @@ export function createModerationService({
     }
     if (action === "takedown") {
       const outcome = await repository.takeDown(input);
-      return outcome === "done" ? { kind: "ok", reportStatus: "actioned" } : { kind: "gift-gone" };
+      if (outcome !== "done") return { kind: "gift-gone" };
+      await notifyOwner();
+      return { kind: "ok", reportStatus: "actioned" };
     }
     const outcome = await repository.restore(input);
     if (outcome === "gift-gone") return { kind: "gift-gone" };

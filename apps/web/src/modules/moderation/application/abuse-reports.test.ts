@@ -15,10 +15,12 @@ const shareId = "Ab0_-cdefghijklmnopqrs";
 describe("abuse reports", () => {
   const insertReport = vi.fn<AbuseReportStore["insertReport"]>();
   const findLiveGiftId = vi.fn<(shareId: string) => Promise<string | null>>();
+  const notifyOwner = vi.fn(() => Promise.resolve());
   const service = createAbuseReportService({
     clock: () => now,
     createId: () => "report-1",
     findLiveGiftId,
+    notifyOwner,
     reports: { insertReport },
   });
 
@@ -61,6 +63,7 @@ describe("abuse reports", () => {
       },
     });
     expect(JSON.stringify(insertReport.mock.calls)).not.toContain(shareId);
+    expect(notifyOwner).not.toHaveBeenCalled();
   });
 
   it("asks for an emergency takedown for a critical report (Critical report pauses the gift at once)", async () => {
@@ -74,6 +77,8 @@ describe("abuse reports", () => {
         severityRank: 0,
       }) as unknown,
     });
+    // The takedown committed the owner's email: the worker is woken.
+    expect(notifyOwner).toHaveBeenCalledTimes(1);
   });
 
   it("stores nothing for a link that does not open (Report for a link that does not open)", async () => {

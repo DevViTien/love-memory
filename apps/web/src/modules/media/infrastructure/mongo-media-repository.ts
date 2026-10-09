@@ -1,16 +1,17 @@
 import "server-only";
 
-import { COLLECTIONS, getDatabase, getMongoClient } from "@love-memory/database";
+import { COLLECTIONS, enqueueJob, getDatabase, getMongoClient } from "@love-memory/database";
 import {
   EDITABLE_GIFT_STATUSES,
   MEDIA_ASSET_LIMITS,
   MediaAssetSchema,
   type MediaAsset,
 } from "@love-memory/domain";
-import { MongoServerError } from "mongodb";
+import { type ClientSession, type Db, MongoServerError } from "mongodb";
 import { randomUUID } from "node:crypto";
 
 import { type GiftAssetPurgeRepository } from "@/modules/gifts/application/gift-deletion";
+import { systemEmailJob } from "@/modules/notifications/application/system-emails";
 
 import { type DetachedAssetRepository } from "../application/gift-assets-cleanup";
 import { type MarkDeletingResult, type MediaAssetRepository } from "../application/media-service";
@@ -30,6 +31,23 @@ type MediaJobDocument = Readonly<{
   type: "media.process.v1";
   updatedAt: Date;
 }>;
+
+/** A photo failed for good: its gift's owner is asked to retry or replace it (`system-emails`). */
+async function enqueuePhotoFailureEmail(
+  database: Db,
+  asset: Readonly<{ _id: string; giftId: string }>,
+  now: Date,
+  session: ClientSession,
+): Promise<void> {
+  await enqueueJob(
+    database,
+    systemEmailJob(
+      { eventKey: asset._id, giftId: asset.giftId, kind: "photo_processing_failed" },
+      now,
+    ),
+    session,
+  );
+}
 
 function toDocument(asset: MediaAsset): MediaAssetDocument {
   const { id, ...document } = asset;
@@ -402,6 +420,7 @@ export const mongoMediaWorkerRepository: MediaWorkerRepository = {
                 },
                 { returnDocument: "after", session },
               );
+            if (failed) await enqueuePhotoFailureEmail(database, failed, now, session);
             // The job is closed either way: a step that ends the drain here would leave every job
             // behind it waiting for the next dispatch or sweep.
             claimed = failed
@@ -439,6 +458,7 @@ export const mongoMediaWorkerRepository: MediaWorkerRepository = {
               },
               { returnDocument: "after", session },
             );
+          if (failed) await enqueuePhotoFailureEmail(database, failed, now, session);
           // An unclaimable asset (typically deleted after its job was enqueued) closes the job; the
           // step is reported as discarded, not idle, so the drain moves on to the next job.
           claimed = failed ? { exhaustedAsset: toDomain(failed) } : { discardedJobId: job._id };
@@ -498,13 +518,17 @@ export const mongoMediaWorkerRepository: MediaWorkerRepository = {
     const client = await getMongoClient();
     await client.withSession(async (session) => {
       await session.withTransaction(async () => {
-        await database
+        const failed = await database
           .collection<MediaAssetDocument>(COLLECTIONS.assets)
-          .updateOne(
+          .findOneAndUpdate(
             { _id: assetId, status: "processing" },
             { $set: { failureCode, status: "failed", updatedAt: now } },
-            { session },
+            { projection: { _id: 1, giftId: 1 }, session },
           );
+        // Only a final failure: a retry may still succeed.
+        if (failed && retryAt === null) {
+          await enqueuePhotoFailureEmail(database, failed, now, session);
+        }
         await database.collection<MediaJobDocument>(COLLECTIONS.jobOutbox).updateOne(
           { _id: jobId, status: "processing" },
           {

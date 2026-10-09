@@ -72,6 +72,8 @@ type Dependencies = Readonly<{
   createId?: () => string;
   /** The internal id of the gift a share id opens right now, or `null` (`public-gift-viewer`). */
   findLiveGiftId: (shareId: string) => Promise<string | null>;
+  /** Wakes the worker for the owner's takedown email after an emergency; never throws. */
+  notifyOwner?: () => Promise<void>;
   reports: AbuseReportStore;
 }>;
 
@@ -81,6 +83,7 @@ export function createAbuseReportService({
   // The global Web Crypto API: this module is also bundled into the report form.
   createId = () => crypto.randomUUID(),
   findLiveGiftId,
+  notifyOwner = () => Promise.resolve(),
   reports,
 }: Dependencies) {
   return {
@@ -104,6 +107,8 @@ export function createAbuseReportService({
           updatedAt: now,
         },
       });
+      // An emergency takedown committed the owner's email with the report.
+      if (severity === "critical") await notifyOwner();
       return "received";
     },
   } as const;

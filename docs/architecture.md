@@ -454,6 +454,15 @@ Retryable work runs after the request that caused it has committed. Behavior is 
   The expired-asset cleanup of the media worker finishes any removal that failed. A detached photo
   can never be referenced by a save again, so no later publication can need it.
 
+- **System emails** (`email.send.v1`, `modules/notifications`, `system-emails`).
+  - **Events.** A first publish, a final photo failure and a takedown each enqueue one email in
+    their own transaction. The payload is `{ kind, giftId, eventKey }`.
+  - **Sending.** The handler reads the gift and its owner's address when it runs, composes the
+    email from the kind and the Studio link only, and sends it through Resend. The deduplication
+    key is also the provider's idempotency key.
+  - **Configuration.** `config/system-email.ts` reads `APP_URL`, `AUTH_EMAIL_FROM` and
+    `RESEND_API_KEY`, never the auth secret. Development and E2E write to the capture file instead.
+
 - **Health.** Readiness fails with `JobOutboxStalledError` when a generic job has been due for more
   than 10 minutes. This is a separate check from `MediaOutboxStalledError`.
 

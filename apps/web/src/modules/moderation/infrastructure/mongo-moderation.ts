@@ -1,8 +1,9 @@
-import { COLLECTIONS, getDatabase, getMongoClient } from "@love-memory/database";
+import { COLLECTIONS, enqueueJob, getDatabase, getMongoClient } from "@love-memory/database";
 import { type ClientSession, type Db } from "mongodb";
 
 import { buildAuditRecord, type AuditInput } from "@/modules/admin/application/audit";
 import { insertAuditRecord } from "@/modules/admin/infrastructure/mongo-audit-log";
+import { systemEmailJob } from "@/modules/notifications/application/system-emails";
 
 import { type AbuseReport, type AbuseReportStore } from "../application/abuse-reports";
 import { type ModerationRepository, type ReportedGiftState } from "../application/moderation";
@@ -62,7 +63,17 @@ async function applyTakedown(
     ],
     { session },
   );
-  return result.modifiedCount === 1;
+  if (result.modifiedCount !== 1) return false;
+  // The owner is told, without any report detail (`system-emails`).
+  await enqueueJob(
+    database,
+    systemEmailJob(
+      { eventKey: input.now.toISOString(), giftId: input.giftId, kind: "gift_taken_down" },
+      input.now,
+    ),
+    session,
+  );
+  return true;
 }
 
 async function findGiftState(

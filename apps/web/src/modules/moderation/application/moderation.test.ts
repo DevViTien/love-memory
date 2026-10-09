@@ -39,10 +39,12 @@ describe("moderation", () => {
   };
   const record = vi.fn();
   const loadContent = vi.fn();
+  const notifyOwner = vi.fn(() => Promise.resolve());
   const service = createModerationService({
     audit: { record },
     clock: () => now,
     loadContent,
+    notifyOwner,
     repository,
   });
   const actor = { id: "admin-1", requestId: "r-1" };
@@ -87,6 +89,7 @@ describe("moderation", () => {
       report: report(),
       requestId: "r-1",
     });
+    expect(notifyOwner).toHaveBeenCalledTimes(1);
 
     await expect(service.act("report-1", "dismiss", actor)).resolves.toEqual({
       kind: "ok",

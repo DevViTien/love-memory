@@ -1,6 +1,7 @@
 import { auditService, getAdminAccess, limitAdminAction } from "@/composition/admin";
 import { getPublicGiftService } from "@/composition/public-gifts";
 import { isAutomatedUserAgent } from "@/modules/analytics/application/automated-traffic";
+import { wakeSystemEmailJobs } from "@/composition/notifications";
 import { rateLimiter } from "@/composition/rate-limits";
 import {
   publicReadLinkSubject,
@@ -17,12 +18,14 @@ import { type ReportRouteDependencies } from "@/modules/moderation/presentation/
 
 export const abuseReportService = createAbuseReportService({
   findLiveGiftId: (shareId) => getPublicGiftService().findLiveGiftId(shareId),
+  notifyOwner: wakeSystemEmailJobs,
   reports: mongoAbuseReportStore,
 });
 
 export const moderationService = createModerationService({
   audit: auditService,
   loadContent: (giftId) => getPublicGiftService().openForReview(giftId),
+  notifyOwner: wakeSystemEmailJobs,
   repository: mongoModerationRepository,
 });
 

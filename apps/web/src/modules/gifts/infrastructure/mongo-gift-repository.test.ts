@@ -492,8 +492,18 @@ describe("Mongo gift repository publishing", () => {
     expect(collections.giftPublications.insertOne).toHaveBeenCalledWith(publicationDocument, {
       session: inSession,
     });
-    // A first publish has no detached photos: no cleanup job.
-    expect(collections.jobOutbox.updateOne).not.toHaveBeenCalled();
+    // A first publish has no detached photos: no cleanup job, only the owner's email.
+    expect(collections.jobOutbox.updateOne).toHaveBeenCalledTimes(1);
+    expect(collections.jobOutbox.updateOne).toHaveBeenCalledWith(
+      { deduplicationKey: `email.send.v1:gift_published:${published.id}:first` },
+      {
+        $setOnInsert: expect.objectContaining({
+          payload: { eventKey: "first", giftId: published.id, kind: "gift_published" },
+          type: "email.send.v1",
+        }) as object,
+      },
+      { session: inSession, upsert: true },
+    );
     expect(collections.idempotencyKeys.insertOne).toHaveBeenCalledWith(
       {
         _id: `gift-publish:${publishIdempotency.key}`,
@@ -655,7 +665,9 @@ describe("Mongo gift repository publishing", () => {
       expect.objectContaining({ returnDocument: "after", session: inSession }),
     );
     expect(update.publication).toMatchObject({ revision: 2, shareId });
-    // The cleanup of photos this revision no longer shows commits with the publication.
+    // The cleanup of photos this revision no longer shows commits with the publication; an
+    // update sends no email.
+    expect(collections.jobOutbox.updateOne).toHaveBeenCalledTimes(1);
     expect(collections.jobOutbox.updateOne).toHaveBeenCalledWith(
       { deduplicationKey: `gift.assets.cleanup.v1:${owned.id}:2` },
       {
