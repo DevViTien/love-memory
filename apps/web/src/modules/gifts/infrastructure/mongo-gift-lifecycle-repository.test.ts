@@ -48,7 +48,7 @@ describe("Mongo gift lifecycle repository", () => {
 
     await expect(mongoGiftLifecycleRepository.resume(giftId, now)).resolves.toBe(false);
     expect(gifts.updateOne).toHaveBeenCalledWith(
-      { _id: giftId, expiresAt: { $gt: now }, status: "paused" },
+      { _id: giftId, expiresAt: { $gt: now }, status: "paused", takedown: { $exists: false } },
       { $set: { status: "published", updatedAt: now }, $unset: { pausedAt: "" } },
     );
   });

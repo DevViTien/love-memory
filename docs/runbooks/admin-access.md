@@ -96,6 +96,33 @@ suspected compromised. It takes effect on the next request:
 The factor stays stored but grants nothing without the role. Run `admin:reset-mfa` as well if the
 role may be granted again later to the same person on a new device.
 
+## Reports and takedown
+
+`/admin/reports` lists open reports:
+
+- `Khẩn cấp` (`child_safety`, `self_harm`) first, then `Cao`, then `Thường`, newest first;
+- with the gift's `publicId`, its status, whether it is taken down, and how many reports are open
+  on it.
+
+**Emergency reports.** A `child_safety` or `self_harm` report has already taken the gift down by
+the system when it reaches the queue. Review those first. Confirm with `Gỡ món quà`, or lift the
+takedown with `Khôi phục` if the report is unfounded.
+
+**Reviewing.** `Xem nội dung` opens the reported publication (text and photos). Every opening is
+recorded as `admin.gift.content_viewed`, so open it only to decide on a report.
+
+| Action       | Effect                                                                                                                                                                   | Audit action             |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------ |
+| `Gỡ món quà` | The gift is paused with a takedown: the link is not-found, and the owner sees `Món quà đã bị tạm khoá` and can only delete. Every open report of the gift is `actioned`. | `admin.gift.taken_down`  |
+| `Bỏ qua`     | Only this report is `dismissed`.                                                                                                                                         | `admin.report.dismissed` |
+| `Khôi phục`  | The takedown is lifted. The gift is published again unless it has expired, and its open reports are `dismissed`.                                                         | `admin.gift.restored`    |
+
+**Severe content** (child sexual abuse material, credible threats to life). Do not download
+anything. Take the gift down if it is not already down, and escalate through the legal contact in
+the incident process. The report and its audit records are kept for 365 days. No email reaches
+the owner yet: the takedown notice in the Studio is the only notification until `email.send`
+exists.
+
 ## Deleted gifts
 
 A lookup finds a gift that its owner is deleting with the status `deleting`. Its purge job runs

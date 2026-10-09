@@ -32,6 +32,8 @@ export type PublicGiftServiceDependencies = Readonly<{
   /** Server time, read once per request: it alone decides expiry (`gift-plans`). */
   clock: () => Date;
   gifts: Pick<GiftRepository, "findPublishedByShareId">;
+  /** A published or paused gift by id, for the admin review of reported content only. */
+  findReviewableGift?: (giftId: string) => Promise<Gift | null>;
   payload: BuildViewerPayloadDependencies;
   publications: Pick<GiftPublicationRepository, "findByGiftRevision">;
   templates: Pick<GiftTemplateRepository, "findEditableManifest">;
@@ -101,6 +103,37 @@ export function createPublicGiftService(dependencies: PublicGiftServiceDependenc
      * The viewer payload of the publication snapshot, pinned to the artifact bytes it was
      * published with: a changed artifact gives `artifactUrl: null` (the static rendering).
      */
+    /** The internal id of the gift a share id opens now, for a report (`abuse-reports`). */
+    async findLiveGiftId(shareId: string): Promise<string | null> {
+      return (await resolveLiveShare(shareId))?.gift.id ?? null;
+    },
+
+    /**
+     * The current publication of a reported gift, even while taken down, for the admin review
+     * page only; the caller records `admin.gift.content_viewed` first.
+     */
+    async openForReview(giftId: string): Promise<PublicViewerPayload | null> {
+      const gift = await dependencies.findReviewableGift?.(giftId);
+      if (!gift || gift.publishedRevision === undefined) return null;
+      const publication = await dependencies.publications.findByGiftRevision(
+        gift.id,
+        gift.publishedRevision,
+      );
+      if (!publication || publication.giftId !== gift.id) return null;
+      const manifest = await dependencies.templates.findEditableManifest(
+        publication.templateId,
+        publication.templateVersion,
+      );
+      if (!manifest) return null;
+      const assets = await dependencies.assets.listByIdsForGift(gift.id, publication.assetIds);
+      const viewer = await buildViewerPayload(
+        { assets, content: publication.content, giftId: gift.id, manifest },
+        dependencies.payload,
+      );
+      const { issues: _creatorIssues, ...review } = viewer;
+      return review;
+    },
+
     async openPublicGift(shareId: string): Promise<PublicViewerPayload | null> {
       const live = await resolveLiveShare(shareId);
       if (!live) return null;

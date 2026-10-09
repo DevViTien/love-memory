@@ -106,6 +106,14 @@ There is no backfill and no new environment variable. Run `pnpm jobs:deploy` aft
 the tier's workers run `gift.delete.v1`. Until the migration runs, pause, resume and delete requests
 answer `500`: the rate-limit write is refused by the old validator.
 
+Schema version `15` (`add-abuse-reports-and-takedown`):
+
+- makes `abuseReports` a managed collection (queue and gift indexes, a 365-day TTL);
+- adds the rate-limit scopes `abuse-report` and `abuse-report-ip`.
+
+There is no backfill and no new environment variable. Until the migration runs, report requests
+answer `500`. After it, check that the queue at `/admin/reports` loads on the tier.
+
 ## Environment variables
 
 Configure shared Preview secrets once and override environment identity per branch:

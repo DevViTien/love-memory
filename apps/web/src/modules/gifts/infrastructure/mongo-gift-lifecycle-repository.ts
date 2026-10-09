@@ -71,7 +71,8 @@ export const mongoGiftLifecycleRepository: GiftLifecycleRepository = {
     const result = await (
       await gifts()
     ).updateOne(
-      { _id: giftId, expiresAt: { $gt: now }, status: "paused" },
+      // A takedown (`abuse-reports`) is never lifted by the owner, even in a race.
+      { _id: giftId, expiresAt: { $gt: now }, status: "paused", takedown: { $exists: false } },
       { $set: { status: "published", updatedAt: now }, $unset: { pausedAt: "" } },
     );
     return result.modifiedCount === 1;

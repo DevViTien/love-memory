@@ -551,6 +551,35 @@ Owners pause, resume and delete their gifts (`openspec/specs/gift-lifecycle`).
 There is no backfill. The previous build never serves `paused` or `deleting` gifts, and runs no
 `gift.delete.v1`. Pending deletions wait for the roll forward.
 
+## Abuse reports and takedown
+
+Recipients report gifts, and the operations team reviews and takes them down
+(`openspec/specs/abuse-reports`, `modules/moderation`).
+
+- **Report.** `POST /api/reports` follows the public mutation pattern of `/api/events`:
+  1. the guards;
+  2. a silent `202` for automated user agents;
+  3. a body of at most 4 KiB;
+  4. the limits `abuse-report` (per network and link) and `abuse-report-ip`;
+  5. the live-link check (`findLiveGiftId`).
+
+  The report stores the gift's internal id, its category, severity and details, never the share
+  id or a reporter identity. It expires after 365 days.
+
+- **Takedown.** A takedown is `status: "paused"` plus a `takedown` record (`at`, `by`, `reason`).
+  The owner's resume filter excludes it, so the owner can delete but never resume. A restore lifts
+  it, and republishes the gift only while `expiresAt` lasts.
+- **Emergency flow.** A `critical` report (`child_safety`, `self_harm`) takes the gift down in the
+  same transaction as the report, and records `gift.taken_down`.
+- **Admin queue.** `/admin/reports` lists open reports by `severityRank`, then newest first. The
+  actions take down, dismiss or restore, each in one transaction with its audit record.
+  `/admin/reports/{id}` is the only page where an admin sees gift content: the current
+  publication's static rendering, audited as `admin.gift.content_viewed` before it loads.
+
+**Schema version 15 rollout and rollback.** `abuseReports` becomes managed, and the two report
+scopes are added; there is no backfill. The previous build ignores `takedown`, so an owner could
+resume a taken-down gift there. Roll forward promptly.
+
 ## Configuration
 
 Each infrastructure boundary owns and validates its environment variables. Server-only URLs use

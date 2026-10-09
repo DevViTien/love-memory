@@ -100,13 +100,33 @@ export function PausedGiftPanel({
   expired,
   expiresAt,
   publicId,
+  takenDown = false,
 }: Readonly<{
   confirm?: (message: string) => boolean;
   expired: boolean;
   expiresAt: string;
   publicId: string;
+  takenDown?: boolean;
 }>) {
   const { failed, pending, router, run } = useLifecycleAction(publicId);
+  if (takenDown) {
+    // Held by the operations team (`abuse-reports`): the owner may only delete.
+    return (
+      <section
+        aria-labelledby="taken-down-gift-heading"
+        className="space-y-4 rounded-3xl border border-red-200 bg-red-50 p-6"
+      >
+        <h2 className="text-xl font-black text-red-950" id="taken-down-gift-heading">
+          Món quà đã bị tạm khoá
+        </h2>
+        <p className="text-sm leading-6 text-red-950">
+          Món quà bị tạm khoá vì có báo cáo vi phạm quy định nội dung. Người nhận không mở được món
+          quà. Bạn vẫn có thể xoá món quà.
+        </p>
+        <DeleteGiftButton publicId={publicId} {...(confirm ? { confirm } : {})} />
+      </section>
+    );
+  }
   return (
     <section
       aria-labelledby="paused-gift-heading"

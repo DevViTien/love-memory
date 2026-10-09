@@ -16,6 +16,11 @@ export const AuditActionSchema = z.enum([
   "admin.template.killed",
   "admin.template.restored",
   "gift.deleted",
+  "admin.gift.taken_down",
+  "admin.gift.restored",
+  "admin.report.dismissed",
+  "admin.gift.content_viewed",
+  "gift.taken_down",
 ]);
 
 export type AuditAction = z.infer<typeof AuditActionSchema>;

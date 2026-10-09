@@ -117,6 +117,15 @@ function accessFilter(accessors: readonly GiftAccessor[]): Filter<GiftDocument> 
   return filters.length === 1 ? filters[0]! : { $or: filters };
 }
 
+/** A published or paused gift by internal id, for an admin's audited review (`abuse-reports`). */
+export async function findReviewableGift(giftId: string): Promise<Gift | null> {
+  const database = await getDatabase();
+  const document = await database
+    .collection<GiftDocument>(COLLECTIONS.gifts)
+    .findOne({ _id: giftId, status: { $in: ["published", "paused"] } });
+  return document ? toDomain(document) : null;
+}
+
 /** A gift being deleted, read by `gift.delete.v1` (`gift-lifecycle`); `null` in any other status. */
 export async function findDeletingGift(giftId: string): Promise<Gift | null> {
   const database = await getDatabase();

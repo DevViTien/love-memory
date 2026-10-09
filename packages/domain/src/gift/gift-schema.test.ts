@@ -154,6 +154,25 @@ describe("GiftSchema", () => {
       ).toBe(false);
     });
 
+    it("accepts a takedown by admin or system and refuses another author", () => {
+      const takedown = {
+        at: new Date("2026-10-10T00:00:00.000Z"),
+        by: "system",
+        reason: "child_safety",
+      };
+      expect(
+        GiftSchema.safeParse({ ...base, ...shareFields, status: "paused", takedown }).success,
+      ).toBe(true);
+      expect(
+        GiftSchema.safeParse({
+          ...base,
+          ...shareFields,
+          status: "paused",
+          takedown: { ...takedown, by: "owner" },
+        }).success,
+      ).toBe(false);
+    });
+
     it("accepts a deleting draft and a deleting published gift", () => {
       const deletionRequestedAt = new Date("2026-09-21T00:00:00.000Z");
       expect(

@@ -3,7 +3,10 @@ import { viewerPayloadDependencies } from "@/composition/viewer";
 import { getAuthEnvironment } from "@/modules/auth/infrastructure/auth-environment";
 import { consumeApiRateLimit } from "@/modules/gifts/infrastructure/mongo-gift-rate-limiter";
 import { mongoGiftPublicationRepository } from "@/modules/gifts/infrastructure/mongo-gift-publication-repository";
-import { mongoGiftRepository } from "@/modules/gifts/infrastructure/mongo-gift-repository";
+import {
+  findReviewableGift,
+  mongoGiftRepository,
+} from "@/modules/gifts/infrastructure/mongo-gift-repository";
 import { mongoGiftTemplateRepository } from "@/modules/gifts/infrastructure/mongo-gift-template-repository";
 import { mongoMediaAssetRepository } from "@/modules/media/infrastructure/mongo-media-repository";
 import {
@@ -20,6 +23,7 @@ export function getPublicGiftService(): PublicGiftService {
     analytics: { contextForGift: analyticsContextForGift },
     assets: mongoMediaAssetRepository,
     clock: () => new Date(),
+    findReviewableGift,
     gifts: mongoGiftRepository,
     payload: viewerPayloadDependencies,
     publications: mongoGiftPublicationRepository,

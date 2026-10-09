@@ -44,7 +44,9 @@ function errorResponse(error: GiftLifecycleError, id: string): Response {
     message:
       error.code === "GIFT_EXPIRED"
         ? "The gift has expired and cannot be shared again."
-        : "The gift has not been published.",
+        : error.code === "GIFT_TAKEN_DOWN"
+          ? "The gift is held paused after a report."
+          : "The gift has not been published.",
     requestId: id,
     status: 409,
   });

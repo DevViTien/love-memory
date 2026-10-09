@@ -90,6 +90,15 @@ export const GiftSchema = z
     revision: z.number().int().nonnegative(),
     shareId: ShareIdSchema.optional(),
     status: GiftStatusSchema,
+    /** Set while the operations team keeps the gift paused (`abuse-reports` "Takedown"). */
+    takedown: z
+      .object({
+        at: z.coerce.date(),
+        by: z.enum(["admin", "system"]),
+        reason: z.string().min(1).max(40),
+      })
+      .strict()
+      .optional(),
     updatedAt: z.coerce.date(),
   })
   .strict()

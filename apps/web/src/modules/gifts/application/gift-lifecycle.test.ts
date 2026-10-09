@@ -116,6 +116,18 @@ describe("gift lifecycle", () => {
       expect(resume).not.toHaveBeenCalled();
     });
 
+    it("refuses a taken-down gift (Taken-down gift cannot be resumed)", async () => {
+      findAuthorized.mockResolvedValueOnce(
+        gift({ status: "paused", takedown: { at: now, by: "admin", reason: "harassment" } }),
+      );
+
+      await expect(service.resume("pub-1", [owner])).resolves.toEqual({
+        error: { code: "GIFT_TAKEN_DOWN" },
+        ok: false,
+      });
+      expect(resume).not.toHaveBeenCalled();
+    });
+
     it("answers a published gift unchanged and refuses a draft", async () => {
       findAuthorized.mockResolvedValueOnce(gift());
       await expect(service.resume("pub-1", [owner])).resolves.toMatchObject({ ok: true });
@@ -197,7 +209,13 @@ describe("gift lifecycle", () => {
       expired: false,
       expiresAt: "2026-10-24T10:00:00.000Z",
       publicId: "pub-1",
+      takenDown: false,
     });
+
+    findAuthorized.mockResolvedValueOnce(
+      gift({ status: "paused", takedown: { at: now, by: "system", reason: "self_harm" } }),
+    );
+    await expect(service.findPaused("pub-1", [owner])).resolves.toMatchObject({ takenDown: true });
 
     findAuthorized.mockResolvedValueOnce(gift({ expiresAt: now, status: "paused" }));
     await expect(service.findPaused("pub-1", [owner])).resolves.toMatchObject({ expired: true });

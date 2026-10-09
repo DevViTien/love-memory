@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { createAnalyticsClient } from "@/modules/analytics/presentation/analytics-client";
 import { createRecipientEventReporter } from "@/modules/analytics/presentation/recipient-events";
 
+import { ReportGiftForm } from "@/modules/moderation/presentation/report-gift-form";
 import { type ViewerSource } from "@/modules/viewer/application/viewer-payload";
 import { GiftViewer } from "@/modules/viewer/presentation/gift-viewer";
 
@@ -52,25 +53,29 @@ export function PublicGiftScreen({
   );
 
   return (
-    <div
-      className="relative mx-auto aspect-[9/16] max-h-[85vh] w-full max-w-md overflow-hidden rounded-[2rem] border border-rose-100 bg-white shadow-lg shadow-rose-100/50 sm:aspect-[3/4]"
-      data-public-gift=""
-    >
-      <GiftViewer
-        muted={muted}
-        onLifecycleEvent={onLifecycleEvent}
-        onMutedChange={setMuted}
-        source={source}
-      />
-      {watermark ? (
-        // Host chrome over the frame, outside the template's iframe; taps pass through to the gift.
-        <p
-          className="pointer-events-none absolute right-3 bottom-2 z-10 rounded-full bg-white/85 px-2.5 py-1 text-[11px] font-semibold text-stone-700 shadow-sm select-none"
-          data-gift-watermark=""
-        >
-          Tạo bằng LoveMemory
-        </p>
-      ) : null}
-    </div>
+    <>
+      <div
+        className="relative mx-auto aspect-[9/16] max-h-[85vh] w-full max-w-md overflow-hidden rounded-[2rem] border border-rose-100 bg-white shadow-lg shadow-rose-100/50 sm:aspect-[3/4]"
+        data-public-gift=""
+      >
+        <GiftViewer
+          muted={muted}
+          onLifecycleEvent={onLifecycleEvent}
+          onMutedChange={setMuted}
+          source={source}
+        />
+        {watermark ? (
+          // Host chrome over the frame, outside the template's iframe; taps pass through to the gift.
+          <p
+            className="pointer-events-none absolute right-3 bottom-2 z-10 rounded-full bg-white/85 px-2.5 py-1 text-[11px] font-semibold text-stone-700 shadow-sm select-none"
+            data-gift-watermark=""
+          >
+            Tạo bằng LoveMemory
+          </p>
+        ) : null}
+      </div>
+      {/* Outside the card and the template's frame (`abuse-reports`). */}
+      <ReportGiftForm shareId={shareId} />
+    </>
   );
 }

@@ -19,7 +19,8 @@ scope `gift-lifecycle`.
 - **Resume.** A `paused` gift becomes `published` again, with the same share id, publication,
   entitlement and `expiresAt`, and `pausedAt` is removed. A paused gift whose `expiresAt` has passed
   SHALL NOT be resumed; the answer is `409` with code `CONFLICT` and `details.reason`
-  `GIFT_EXPIRED`.
+  `GIFT_EXPIRED`. A paused gift that holds a takedown (`abuse-reports` "Takedown") SHALL NOT
+  be resumed by its owner; the answer is `409` with `details.reason` `GIFT_TAKEN_DOWN`.
 
 **Answers.** Both answer `200` with `data.gift` holding `publicId` and `status`. Pausing a paused
 gift, or resuming a published one, SHALL answer the same `200` and change nothing. Pausing or
@@ -51,6 +52,11 @@ with no gift data. The gift SHALL NOT be edited, previewed or published until re
 
 - **WHEN** a browser without the owner's session sends the pause request
 - **THEN** the response is `404` with code `NOT_FOUND`, and the gift stays published
+
+#### Scenario: Taken-down gift cannot be resumed
+
+- **WHEN** the owner resumes a gift that an admin took down
+- **THEN** the response is `409` with `details.reason` `GIFT_TAKEN_DOWN`, and the gift stays paused
 
 ### Requirement: Delete a gift
 
@@ -160,6 +166,11 @@ The Studio SHALL offer the owner these controls:
   After its `expiresAt`, the panel shows `Món quà đã hết hạn nên không thể tiếp tục chia sẻ.` and no
   resume.
 
+- **Taken-down gift.** When the paused gift holds a takedown, the panel shows instead the heading
+  `Món quà đã bị tạm khoá` and the text
+  `Món quà bị tạm khoá vì có báo cáo vi phạm quy định nội dung. Người nhận không mở được món quà. Bạn vẫn có thể xoá món quà.`,
+  with `Xoá món quà` and no resume.
+
 **Delete confirmation.** `Xoá món quà` SHALL ask for confirmation with the text
 `Xoá vĩnh viễn món quà này? Người nhận sẽ không mở được nữa, và ảnh cùng nội dung sẽ bị xoá hẳn trong vòng 24 giờ. Không thể hoàn tác.`
 After a successful delete, the page SHALL show `Đã xoá món quà.` with a link `Tạo món quà mới` to
@@ -181,3 +192,8 @@ A failed request SHALL show `Chưa thực hiện được — thử lại.` and 
 
 - **WHEN** the owner chooses `Xoá món quà` and declines the confirmation
 - **THEN** no request is sent and the gift is unchanged
+
+#### Scenario: Owner sees the takedown notice
+
+- **WHEN** the owner opens the Studio of a taken-down gift
+- **THEN** the page shows `Món quà đã bị tạm khoá` with `Xoá món quà` and no `Tiếp tục chia sẻ`

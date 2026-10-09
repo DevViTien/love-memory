@@ -11,7 +11,7 @@ import {
 import { COLLECTIONS, type CollectionName } from "./collections";
 import { enqueueJob } from "./job-outbox";
 
-export const DATABASE_SCHEMA_VERSION = 14;
+export const DATABASE_SCHEMA_VERSION = 15;
 
 type DatabaseMigrationDocument = Readonly<{
   _id: string;
@@ -113,6 +113,8 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
           expiresAt: { bsonType: "date" },
           scope: {
             enum: [
+              "abuse-report",
+              "abuse-report-ip",
               "admin-mfa",
               "analytics-event",
               "analytics-event-ip",
@@ -700,6 +702,62 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
           "publishedAt",
           "deletionRequestedAt",
           "deletedAt",
+          "expiresAt",
+        ],
+      },
+    },
+  },
+  {
+    indexes: [
+      {
+        // The admin queue: open reports, critical first, newest first.
+        key: { status: 1, severityRank: 1, createdAt: -1 },
+        options: { name: "abuse_reports_queue" },
+      },
+      { key: { giftId: 1, status: 1 }, options: { name: "abuse_reports_gift_status" } },
+      {
+        key: { expiresAt: 1 },
+        options: { expireAfterSeconds: 0, name: "abuse_reports_expiry_ttl" },
+      },
+    ],
+    name: COLLECTIONS.abuseReports,
+    validator: {
+      $jsonSchema: {
+        additionalProperties: true,
+        bsonType: "object",
+        properties: {
+          _id: { bsonType: "string", minLength: 1 },
+          category: {
+            enum: [
+              "child_safety",
+              "self_harm",
+              "violence",
+              "sexual",
+              "illegal",
+              "harassment",
+              "spam",
+              "other",
+            ],
+          },
+          createdAt: { bsonType: "date" },
+          details: { bsonType: ["string", "null"], maxLength: 1000 },
+          expiresAt: { bsonType: "date" },
+          giftId: { bsonType: "string", minLength: 1 },
+          severity: { enum: ["critical", "high", "normal"] },
+          severityRank: { bsonType: "int", maximum: 2, minimum: 0 },
+          status: { enum: ["open", "actioned", "dismissed"] },
+          updatedAt: { bsonType: "date" },
+        },
+        required: [
+          "_id",
+          "giftId",
+          "category",
+          "severity",
+          "severityRank",
+          "details",
+          "status",
+          "createdAt",
+          "updatedAt",
           "expiresAt",
         ],
       },

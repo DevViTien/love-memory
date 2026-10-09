@@ -96,6 +96,12 @@ describe("gift lifecycle routes", () => {
       error: { details: { reason: "GIFT_NOT_PUBLISHED" } },
     });
 
+    resume.mockResolvedValueOnce({ error: { code: "GIFT_TAKEN_DOWN" }, ok: false });
+    const takenDown = await handleGiftLifecycle("resume", post("resume"), context, dependencies);
+    await expect(takenDown.json()).resolves.toMatchObject({
+      error: { details: { reason: "GIFT_TAKEN_DOWN" } },
+    });
+
     deleteGift.mockResolvedValueOnce({ error: { code: "NOT_FOUND" }, ok: false });
     const missing = await handleGiftLifecycle("delete", post("delete"), context, dependencies);
     expect(missing.status).toBe(404);

@@ -104,6 +104,26 @@ describe("gift lifecycle controls", () => {
     expect(router.refresh).toHaveBeenCalledTimes(1);
   });
 
+  it("shows the takedown notice with delete only (Owner sees the takedown notice)", () => {
+    render(
+      createElement(PausedGiftPanel, {
+        expired: false,
+        expiresAt: "2026-10-22T10:00:00.000Z",
+        publicId,
+        takenDown: true,
+      }),
+    );
+
+    expect(screen.getByRole("heading", { name: "Món quà đã bị tạm khoá" })).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Món quà bị tạm khoá vì có báo cáo vi phạm quy định nội dung. Người nhận không mở được món quà. Bạn vẫn có thể xoá món quà.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Xoá món quà" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Tiếp tục chia sẻ" })).toBeNull();
+  });
+
   it("offers no resume once the gift has expired", () => {
     render(
       createElement(PausedGiftPanel, {

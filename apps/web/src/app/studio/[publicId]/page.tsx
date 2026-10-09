@@ -44,6 +44,7 @@ export default async function StudioDraftPage({ params }: StudioDraftPageProps) 
             expired={paused.expired}
             expiresAt={paused.expiresAt}
             publicId={paused.publicId}
+            takenDown={paused.takenDown}
           />
         </Container>
       </main>

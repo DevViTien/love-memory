@@ -23,7 +23,10 @@ export interface GiftLifecycleRepository {
 }
 
 export type GiftLifecycleError = Readonly<
-  { code: "GIFT_EXPIRED" } | { code: "GIFT_NOT_PUBLISHED" } | { code: "NOT_FOUND" }
+  | { code: "GIFT_EXPIRED" }
+  | { code: "GIFT_NOT_PUBLISHED" }
+  | { code: "GIFT_TAKEN_DOWN" }
+  | { code: "NOT_FOUND" }
 >;
 
 export type GiftLifecycleResult<T> =
@@ -42,6 +45,8 @@ export type PausedGiftView = Readonly<{
   expired: boolean;
   expiresAt: string;
   publicId: string;
+  /** Held paused by the operations team (`abuse-reports` "Takedown"): no resume. */
+  takenDown: boolean;
 }>;
 
 type Dependencies = Readonly<{
@@ -113,6 +118,7 @@ export function createGiftLifecycleService({
       if (gift.status !== "paused" || !canTransitionGift("paused", "published")) {
         return fail("NOT_FOUND");
       }
+      if (gift.takedown) return fail("GIFT_TAKEN_DOWN");
       const now = clock();
       if (!gift.expiresAt || gift.expiresAt.getTime() <= now.getTime()) return fail("GIFT_EXPIRED");
       if (await gifts.resume(gift.id, now)) {
@@ -162,6 +168,7 @@ export function createGiftLifecycleService({
       expired: gift.expiresAt.getTime() <= clock().getTime(),
       expiresAt: gift.expiresAt.toISOString(),
       publicId,
+      takenDown: gift.takedown !== undefined,
     };
   }
 

@@ -374,6 +374,44 @@ describe("public gift service", () => {
     expect(contextForGift).not.toHaveBeenCalled();
   });
 
+  it("gives a report the internal id of a live gift only (abuse-reports)", async () => {
+    const service = createPublicGiftService(dependencies);
+    await expect(service.findLiveGiftId(shareId)).resolves.toBe(giftId);
+
+    findPublishedByShareId.mockResolvedValueOnce(null);
+    await expect(service.findLiveGiftId(shareId)).resolves.toBeNull();
+  });
+
+  it("opens a reported gift's current publication for review, even while paused", async () => {
+    const paused = publishedGift({ pausedAt: now, status: "paused" });
+    const findReviewableGift = vi.fn((_giftId: string) => Promise.resolve<Gift | null>(paused));
+    const service = createPublicGiftService({ ...dependencies, findReviewableGift });
+
+    const review = await service.openForReview(giftId);
+
+    expect(findReviewableGift).toHaveBeenCalledWith(giftId);
+    expect(review?.payload).toEqual(completeContent());
+    expect(Object.keys(review?.assets ?? {}).sort()).toEqual([...assetIds.slice(0, 3)].sort());
+    expect(review).not.toHaveProperty("issues");
+  });
+
+  it("opens nothing for review without a gift, a publication or a manifest", async () => {
+    await expect(createPublicGiftService(dependencies).openForReview(giftId)).resolves.toBeNull();
+
+    const findReviewableGift = vi.fn((_giftId: string) => Promise.resolve<Gift | null>(gift));
+    const service = createPublicGiftService({ ...dependencies, findReviewableGift });
+    publication = null;
+    await expect(service.openForReview(giftId)).resolves.toBeNull();
+
+    publication = snapshot();
+    manifestAvailable = false;
+    await expect(service.openForReview(giftId)).resolves.toBeNull();
+
+    const { publishedRevision: _revision, ...unpublished } = publishedGift();
+    findReviewableGift.mockResolvedValueOnce(unpublished);
+    await expect(service.openForReview(giftId)).resolves.toBeNull();
+  });
+
   it("keeps the recipient payload type equal to the contract", () => {
     expectTypeOf<keyof PublicViewerPayload>().toEqualTypeOf<keyof ViewerPayloadDto>();
     expectTypeOf<keyof ViewerPayload["fields"][number]>().toEqualTypeOf<

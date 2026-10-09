@@ -199,7 +199,7 @@ describe("database schema migration", () => {
       CORE_COLLECTION_DEFINITIONS.map((definition) => [definition.name, definition]),
     );
 
-    expect(DATABASE_SCHEMA_VERSION).toBe(14);
+    expect(DATABASE_SCHEMA_VERSION).toBe(15);
     expect(definitions.has(COLLECTIONS.users)).toBe(true);
     expect(definitions.has(COLLECTIONS.apiRateLimits)).toBe(true);
     expect(definitions.has(COLLECTIONS.templates)).toBe(true);
@@ -268,6 +268,8 @@ describe("database schema migration", () => {
     )?.$jsonSchema.properties.scope.enum;
 
     expect(scope).toEqual([
+      "abuse-report",
+      "abuse-report-ip",
       "admin-mfa",
       "analytics-event",
       "analytics-event-ip",
@@ -420,7 +422,7 @@ describe("database schema migration", () => {
       fake.collection(COLLECTIONS.gifts).indexDefinitions.map((index) => index["name"]),
     ).toContain("gifts_share_id_unique");
     expect(fake.collections.has(COLLECTIONS.analyticsEvents)).toBe(true);
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(14);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(15);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
   });
 
@@ -450,7 +452,7 @@ describe("database schema migration", () => {
       fake.collection(COLLECTIONS.giftPublications).indexDefinitions.map((index) => index["name"]),
     ).toEqual(["_id_", "gift_publications_gift_revision_unique"]);
     expect(fake.collections.has(COLLECTIONS.analyticsEvents)).toBe(true);
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(14);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(15);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
   });
 
@@ -491,7 +493,7 @@ describe("database schema migration", () => {
       },
       { _id: "draft", revision: 2, status: "draft" },
     ]);
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(14);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(15);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
   });
 
@@ -748,6 +750,63 @@ describe("database schema migration", () => {
     });
   });
 
+  it("manages abuse reports with their queue, gift and expiry indexes", () => {
+    const reports = CORE_COLLECTION_DEFINITIONS.find(
+      (definition) => definition.name === COLLECTIONS.abuseReports,
+    );
+    const schema = (
+      reports?.validator as
+        | {
+            $jsonSchema: {
+              properties: Record<string, Record<string, unknown>>;
+              required: string[];
+            };
+          }
+        | undefined
+    )?.$jsonSchema;
+
+    expect(schema?.required).toEqual([
+      "_id",
+      "giftId",
+      "category",
+      "severity",
+      "severityRank",
+      "details",
+      "status",
+      "createdAt",
+      "updatedAt",
+      "expiresAt",
+    ]);
+    expect(schema?.properties["status"]).toEqual({ enum: ["open", "actioned", "dismissed"] });
+    expect(Object.keys(schema?.properties ?? {})).not.toContain("shareId");
+    expect(reports?.indexes.map((index) => index.options.name)).toEqual([
+      "abuse_reports_queue",
+      "abuse_reports_gift_status",
+      "abuse_reports_expiry_ttl",
+    ]);
+  });
+
+  it("detects a database not yet migrated to version 15", async () => {
+    const fake = new FakeDatabase();
+    const database = fake as unknown as Db;
+    await runDatabaseMigrations(database);
+    fake.collections.delete(COLLECTIONS.abuseReports);
+    fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 14;
+
+    await expect(verifyDatabaseSchema(database)).rejects.toThrow(
+      "Missing MongoDB collection: abuseReports",
+    );
+
+    await runDatabaseMigrations(database);
+    await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(15);
+
+    fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 14;
+    await expect(verifyDatabaseSchema(database)).rejects.toThrow(
+      "MongoDB schema version mismatch: expected 15, received 14.",
+    );
+  });
+
   it("detects a database not yet migrated to version 14", async () => {
     const fake = new FakeDatabase();
     const database = fake as unknown as Db;
@@ -761,11 +820,11 @@ describe("database schema migration", () => {
 
     await runDatabaseMigrations(database);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(14);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(15);
 
     fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 13;
     await expect(verifyDatabaseSchema(database)).rejects.toThrow(
-      "MongoDB schema version mismatch: expected 14, received 13.",
+      "MongoDB schema version mismatch: expected 15, received 13.",
     );
   });
 
@@ -786,7 +845,7 @@ describe("database schema migration", () => {
 
     await runDatabaseMigrations(database);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(14);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(15);
     expect(
       fake.collection(COLLECTIONS.auditLog).indexDefinitions.map((index) => index["name"]),
     ).toEqual(
@@ -796,7 +855,7 @@ describe("database schema migration", () => {
 
     fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 12;
     await expect(verifyDatabaseSchema(database)).rejects.toThrow(
-      "MongoDB schema version mismatch: expected 14, received 12.",
+      "MongoDB schema version mismatch: expected 15, received 12.",
     );
   });
 
@@ -820,12 +879,12 @@ describe("database schema migration", () => {
     );
     fake.validators.set(COLLECTIONS.jobOutbox, jobOutbox);
     await expect(verifyDatabaseSchema(database)).rejects.toThrow(
-      "MongoDB schema version mismatch: expected 14, received 11.",
+      "MongoDB schema version mismatch: expected 15, received 11.",
     );
 
     await runDatabaseMigrations(database);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(14);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(15);
   });
 
   it("detects a database not yet migrated to version 11", async () => {
@@ -846,12 +905,12 @@ describe("database schema migration", () => {
     );
     fake.validators.set(COLLECTIONS.gifts, gifts);
     await expect(verifyDatabaseSchema(database)).rejects.toThrow(
-      "MongoDB schema version mismatch: expected 14, received 10.",
+      "MongoDB schema version mismatch: expected 15, received 10.",
     );
 
     await runDatabaseMigrations(database);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(14);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(15);
   });
 
   it("validates the publication pointer and the detach time", () => {
@@ -957,7 +1016,7 @@ describe("database schema migration", () => {
       expect.arrayContaining(["analytics_events_expiry_ttl", "analytics_events_name_occurred"]),
     );
     expect(JSON.stringify(publications.indexDefinitions)).toBe(indexesBefore);
-    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(14);
+    expect(fake.collection(COLLECTIONS.databaseMigrations).migrationVersion).toBe(15);
     await expect(verifyDatabaseSchema(database)).resolves.toBeUndefined();
   });
 
@@ -1103,7 +1162,7 @@ describe("database schema migration", () => {
     await runDatabaseMigrations(database);
     fake.collection(COLLECTIONS.databaseMigrations).migrationVersion = 1;
     await expect(verifyDatabaseSchema(database)).rejects.toThrow(
-      "MongoDB schema version mismatch: expected 14, received 1.",
+      "MongoDB schema version mismatch: expected 15, received 1.",
     );
 
     await runDatabaseMigrations(database);

@@ -91,9 +91,9 @@ collections: `users`,
 `sessions`, `accounts`, `verifications`, `authRateLimits`, `apiRateLimits`, `templates`,
 `templateVersions`, `gifts`, `giftRevisions`, `assets`, `idempotencyKeys`, `jobOutbox`,
 `previewTokens`, `giftPublications`, `analyticsEvents`, `twoFactors`, `adminStepUps`, `auditLog`,
-`giftTombstones`;
+`giftTombstones`, `abuseReports`;
 `databaseMigrations` SHALL hold the
-migration ledger. The names `abuseReports`, `orders`, `paymentAttempts`, `reactions` and
+migration ledger. The names `orders`, `paymentAttempts`, `reactions` and
 `technicalSpikes` are reserved and are not created or verified by the migration.
 
 #### Scenario: Migration creates managed collections
@@ -136,15 +136,21 @@ migration ledger. The names `abuseReports`, `orders`, `paymentAttempts`, `reacti
 - **THEN** `giftTombstones` exists with its validator and indexes, and no existing document is
   changed
 
+#### Scenario: Report collection created
+
+- **WHEN** migrations run against a database at version `14`
+- **THEN** `abuseReports` exists with its validator and indexes, and no existing document is
+  changed
+
 ### Requirement: JSON-schema validators
 
 The system SHALL apply a `$jsonSchema` validator (allowing additional properties) to `apiRateLimits`,
 `templates`, `templateVersions`, `gifts`, `giftRevisions`, `assets`, `idempotencyKeys`,
-`jobOutbox`, `previewTokens`, `giftPublications`, `analyticsEvents`, `adminStepUps`, `auditLog` and
-`giftTombstones`, including at least these constraints:
+`jobOutbox`, `previewTokens`, `giftPublications`, `analyticsEvents`, `adminStepUps`, `auditLog`,
+`giftTombstones` and `abuseReports`, including at least these constraints:
 
-- `apiRateLimits` requires `_id`, `count` (int >= 1), `scope` (one of `admin-mfa`,
-  `analytics-event`, `analytics-event-ip`, `gift-claim`, `gift-create`, `gift-lifecycle`,
+- `apiRateLimits` requires `_id`, `count` (int >= 1), `scope` (one of `abuse-report`,
+  `abuse-report-ip`, `admin-mfa`, `analytics-event`, `analytics-event-ip`, `gift-claim`, `gift-create`, `gift-lifecycle`,
   `gift-preview`, `gift-publish`, `gift-update`, `media-upload`, `public-gift-read`,
   `public-gift-read-ip`),
   `subjectHash` (64 lowercase hex characters), `expiresAt`, `createdAt`, `updatedAt`;
@@ -194,7 +200,12 @@ The system SHALL apply a `$jsonSchema` validator (allowing additional properties
   (object or null), `requestId` (string or null), `metadata` (object) and `expiresAt` (date);
 - `giftTombstones` requires `_id` (non-empty string), `publicId` (string), `ownerId` (string or
   null), `createdAt` (date), `publishedAt` (date or null), `deletionRequestedAt` (date),
-  `deletedAt` (date) and `expiresAt` (date).
+  `deletedAt` (date) and `expiresAt` (date);
+- `abuseReports` requires `_id` (non-empty string), `giftId` (non-empty string), `category` (one of
+  `child_safety`, `self_harm`, `violence`, `sexual`, `illegal`, `harassment`, `spam`, `other`),
+  `severity` (`critical`, `high` or `normal`), `severityRank` (int 0–2), `details` (string of at
+  most 1000 characters, or null), `status` (`open`, `actioned` or `dismissed`), `createdAt`,
+  `updatedAt` and `expiresAt` (dates).
 
 Existing collections SHALL have their validator replaced with the current definition on every
 migration run.
@@ -274,6 +285,11 @@ migration run.
 - **WHEN** a `giftTombstones` document without `deletedAt` is written
 - **THEN** MongoDB rejects the write with a document validation error
 
+#### Scenario: Report with an unknown category rejected
+
+- **WHEN** an `abuseReports` document with the category `rude` is written
+- **THEN** MongoDB rejects the write with a document validation error
+
 ### Requirement: Named indexes
 
 The system SHALL maintain these named indexes and MUST keep every index name unique:
@@ -309,12 +325,14 @@ The system SHALL maintain these named indexes and MUST keep every index name uni
 - `adminStepUps`: `admin_step_ups_user` (`userId`), `admin_step_ups_expiry_ttl`;
 - `auditLog`: `audit_log_at` (`at` descending), `audit_log_target_at` (`target.id` + `at`
   descending), `audit_log_expiry_ttl`;
-- `giftTombstones`: `gift_tombstones_public_id` (`publicId`), `gift_tombstones_expiry_ttl`.
+- `giftTombstones`: `gift_tombstones_public_id` (`publicId`), `gift_tombstones_expiry_ttl`;
+- `abuseReports`: `abuse_reports_queue` (`status` + `severityRank` + `createdAt` descending),
+  `abuse_reports_gift_status` (`giftId` + `status`), `abuse_reports_expiry_ttl`.
 
 The indexes `sessions_expiry_ttl`, `verifications_expiry_ttl`, `api_rate_limits_expiry_ttl`,
 `idempotency_expiry_ttl`, `preview_tokens_expiry_ttl`, `analytics_events_expiry_ttl`,
-`admin_step_ups_expiry_ttl`, `audit_log_expiry_ttl` and `gift_tombstones_expiry_ttl` SHALL be TTL
-indexes on `expiresAt` with
+`admin_step_ups_expiry_ttl`, `audit_log_expiry_ttl`, `gift_tombstones_expiry_ttl` and
+`abuse_reports_expiry_ttl` SHALL be TTL indexes on `expiresAt` with
 `expireAfterSeconds` `0`, so MongoDB deletes documents once `expiresAt` has passed. An existing
 index with an expected name but a different key, uniqueness, sparseness, TTL, partial filter or
 collation SHALL be dropped and recreated. The legacy indexes `assets_storage_key_unique` and
@@ -374,7 +392,7 @@ second publication of a gift, which keeps its share id.
 The system SHALL provide `db:migrate`, which converges the database to the current schema (creating
 missing collections with validators, updating validators, reconciling indexes) and then upserts the
 ledger document `_id: "core"` in `databaseMigrations` with `version` equal to the current schema
-version `14`, `appliedAt` set to now, and `createdAt` set only on first insert. Before writing the
+version `15`, `appliedAt` set to now, and `createdAt` set only on first insert. Before writing the
 ledger it SHALL run these backfills, in this order:
 
 1. set `publishedRevision` to the gift's `revision` on every `published` gift that has no
@@ -404,7 +422,7 @@ and always close the MongoDB client before exiting. An unrecognized command MUST
 #### Scenario: Re-running migrations is safe
 
 - **WHEN** `db:migrate` is run twice against the same database
-- **THEN** both runs succeed, the schema verifies, and the ledger `version` is `14`
+- **THEN** both runs succeed, the schema verifies, and the ledger `version` is `15`
 
 #### Scenario: Published gifts backfilled
 
@@ -441,12 +459,12 @@ The system SHALL provide `db:verify`, which fails without modifying the database
 collection is missing (`Missing MongoDB collection`), a validator differs from its definition
 (`MongoDB validator mismatch`), a legacy index remains (`Legacy MongoDB index remains`), an expected
 index is missing (`Missing MongoDB index`) or differs in key or options (`MongoDB index mismatch`),
-or the ledger version differs from `14` or is missing (`MongoDB schema version mismatch`).
+or the ledger version differs from `15` or is missing (`MongoDB schema version mismatch`).
 
 #### Scenario: Schema drift detected
 
 - **WHEN** the ledger document records `version` `1`
-- **THEN** `db:verify` fails with `MongoDB schema version mismatch: expected 14, received 1.`
+- **THEN** `db:verify` fails with `MongoDB schema version mismatch: expected 15, received 1.`
 
 #### Scenario: Database not yet migrated to version 7
 
@@ -454,7 +472,7 @@ or the ledger version differs from `14` or is missing (`MongoDB schema version m
 - **THEN** `db:verify` fails without modifying the database, for example with
   `MongoDB validator mismatch` for `apiRateLimits` or `gifts`, or `Missing MongoDB collection` for
   `previewTokens`, `giftPublications` or `analyticsEvents`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `14`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `15`
 
 #### Scenario: Database not yet migrated to version 8
 
@@ -462,7 +480,7 @@ or the ledger version differs from `14` or is missing (`MongoDB schema version m
 - **THEN** `db:verify` fails without modifying the database, for example with
   `MongoDB validator mismatch` for `apiRateLimits` or `gifts`, or `Missing MongoDB collection` for
   `giftPublications` or `analyticsEvents`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `14`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `15`
 
 #### Scenario: Database not yet migrated to version 9
 
@@ -470,7 +488,7 @@ or the ledger version differs from `14` or is missing (`MongoDB schema version m
 - **THEN** `db:verify` fails without modifying the database, for example with
   `MongoDB validator mismatch` for `apiRateLimits`, or `Missing MongoDB collection` for
   `analyticsEvents`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `14`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `15`
 
 #### Scenario: Database not yet migrated to version 10
 
@@ -478,21 +496,21 @@ or the ledger version differs from `14` or is missing (`MongoDB schema version m
 - **THEN** `db:verify` fails without modifying the database, for example with
   `MongoDB validator mismatch` for `gifts` or `assets`, or `Legacy MongoDB index remains` for
   `giftPublications.gift_publications_share_id_unique`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `14`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `15`
 
 #### Scenario: Database not yet migrated to version 11
 
 - **WHEN** the ledger document records `version` `10`
 - **THEN** `db:verify` fails without modifying the database, with `MongoDB validator mismatch` for
   `gifts` or `MongoDB schema version mismatch: expected 11, received 10.`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `14`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `15`
 
 #### Scenario: Database not yet migrated to version 12
 
 - **WHEN** the ledger document records `version` `11`
 - **THEN** `db:verify` fails without modifying the database, with `MongoDB validator mismatch` for
   `jobOutbox` or `MongoDB schema version mismatch: expected 12, received 11.`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `14`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `15`
 
 #### Scenario: Database not yet migrated to version 13
 
@@ -500,7 +518,7 @@ or the ledger version differs from `14` or is missing (`MongoDB schema version m
 - **THEN** `db:verify` fails without modifying the database, for example with
   `Missing MongoDB collection` for `twoFactors`, `adminStepUps` or `auditLog`, or
   `MongoDB validator mismatch` for `apiRateLimits`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `14`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `15`
 
 #### Scenario: Empty database fails verification
 
@@ -513,7 +531,15 @@ or the ledger version differs from `14` or is missing (`MongoDB schema version m
 - **THEN** `db:verify` fails without modifying the database, for example with
   `Missing MongoDB collection` for `giftTombstones`, or `MongoDB validator mismatch` for
   `apiRateLimits`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `14`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `15`
+
+#### Scenario: Database not yet migrated to version 15
+
+- **WHEN** the ledger document records `version` `14`
+- **THEN** `db:verify` fails without modifying the database, for example with
+  `Missing MongoDB collection` for `abuseReports`, or `MongoDB validator mismatch` for
+  `apiRateLimits`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `15`
 
 ### Requirement: Template catalog seed
 

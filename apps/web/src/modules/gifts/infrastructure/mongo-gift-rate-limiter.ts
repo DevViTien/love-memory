@@ -5,6 +5,8 @@ import { createHmac } from "node:crypto";
 import { isIP } from "node:net";
 
 export type ApiRateLimitScope =
+  | "abuse-report"
+  | "abuse-report-ip"
   | "admin-mfa"
   | "analytics-event"
   | "analytics-event-ip"
@@ -29,6 +31,9 @@ type RateLimit = Readonly<{
 }>;
 
 const RATE_LIMITS: Readonly<Record<ApiRateLimitScope, RateLimit>> = {
+  // Abuse reports (`abuse-reports`): per network and link, plus a looser per-network cap.
+  "abuse-report": { max: 3, windowSeconds: 60 * 60 },
+  "abuse-report-ip": { max: 20, windowSeconds: 60 * 60 },
   // Admin step-up codes: per signed-in admin (`user:{id}`), on top of the factor's own lockout.
   "admin-mfa": { max: 10, sharedBucketMultiplier: false, windowSeconds: 10 * 60 },
   // Funnel events: per network subject and tab session, plus a looser per-network cap. The session
