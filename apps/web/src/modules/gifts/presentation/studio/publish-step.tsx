@@ -11,8 +11,8 @@ import { useStore } from "zustand";
 import { ClaimDraftButton } from "../claim-draft-button";
 import { selectCanUpdatePublication } from "./draft-editor-store";
 import { PlanChoice, planOptions, selectedPlan } from "./plan-choice";
-import { formatRetention, planName } from "./plan-format";
-import { reloadStudioPage, requestPublish } from "./publish-action";
+import { formatPlanPrice, formatRetention, planName } from "./plan-format";
+import { navigateToCheckout, reloadStudioPage, requestPublish } from "./publish-action";
 import { studioLinkHandler, useStudio } from "./studio-context";
 import { useNow } from "./use-now";
 
@@ -27,10 +27,15 @@ const MESSAGES = {
   anonymous: "Đăng nhập và lưu quà vào tài khoản để xuất bản.",
   expired: "Món quà đã hết hạn nên không thể cập nhật.",
   noPlan: "Chọn một gói để xuất bản.",
+  checkoutAmount: (price: string) =>
+    `Số tiền: ${price}. Món quà được xuất bản sau khi thanh toán được xác nhận.`,
+  checkoutBusy: "Đang chuyển đến trang thanh toán…",
+  checkoutConfirm: (price: string) => `Thanh toán ${price}`,
   overPlanLimit: (name: string, maxPhotos: number) =>
     `Gói ${name} cho tối đa ${maxPhotos} ảnh. Hãy bớt ảnh để cập nhật.`,
   photoLimit: (maxPhotos: number, photoCount: number) =>
     `Gói đã chọn cho tối đa ${maxPhotos} ảnh, món quà đang có ${photoCount} ảnh.`,
+  paymentUnavailable: "Chưa kết nối được cổng thanh toán. Hãy thử lại sau ít phút.",
   planUnavailable: "Gói này chưa mở cho tài khoản của bạn.",
   sessionExpired: "Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại để xuất bản.",
   unpublishable: "Phiên bản mẫu của món quà này không hỗ trợ xuất bản.",
@@ -102,6 +107,8 @@ export function PublishStep({ incomplete }: Readonly<{ incomplete: boolean }>) {
   const [chosenPlanId, setChosenPlanId] = useState<string | null>(null);
   const options = planOptions(publish.planOffers, photoCount);
   const selected = selectedPlan(options, chosenPlanId);
+  // A first publish on a plan that needs a payment goes through checkout (`billing-checkout`).
+  const checkout = mode === "publish" && selected?.checkout === true;
   const now = useNow();
   // Display only: the server refuses an expired update with `GIFT_EXPIRED` and the page reloads.
   const expired = publication !== null && Date.parse(publication.expiresAt) <= now;
@@ -191,10 +198,19 @@ export function PublishStep({ incomplete }: Readonly<{ incomplete: boolean }>) {
       idempotencyKey: idempotencyKey.current,
       planId,
       publicId,
+      target: checkout ? "checkout" : "publish",
     });
     const state = store.getState();
     state.setPublishing(false);
     switch (outcome.kind) {
+      case "checkout":
+        // The editor stays frozen: the provider's page replaces this one.
+        state.setPublishing(true);
+        navigateToCheckout(outcome.checkoutUrl);
+        return;
+      case "payment-unavailable":
+        setNotice({ kind: "message", text: MESSAGES.paymentUnavailable });
+        break;
       case "published": {
         const { expiresAt, publishedAt, revision, shareId, sharePath } = outcome.publication;
         // A first publish is granted the current version of the chosen plan, as offered; an
@@ -307,6 +323,11 @@ export function PublishStep({ incomplete }: Readonly<{ incomplete: boolean }>) {
               <p className="text-sm text-stone-700">
                 {formatRetention(selected.retentionDays)}. {RETENTION_NOTE}
               </p>
+              {checkout ? (
+                <p className="text-sm font-semibold text-stone-800">
+                  {MESSAGES.checkoutAmount(formatPlanPrice(selected.priceVnd))}
+                </p>
+              ) : null}
             </>
           ) : null}
           <label className="flex items-start gap-2 text-sm leading-6 text-stone-800">
@@ -325,7 +346,13 @@ export function PublishStep({ incomplete }: Readonly<{ incomplete: boolean }>) {
               onClick={() => void startPublish()}
               size="lg"
             >
-              {busy ? texts.busy : texts.confirm}
+              {checkout && selected
+                ? busy
+                  ? MESSAGES.checkoutBusy
+                  : MESSAGES.checkoutConfirm(formatPlanPrice(selected.priceVnd))
+                : busy
+                  ? texts.busy
+                  : texts.confirm}
             </Button>
             <Button disabled={busy} onClick={() => setConfirming(false)} variant="outline">
               Quay lại chỉnh sửa

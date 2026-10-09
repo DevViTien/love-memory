@@ -475,6 +475,28 @@ Retryable work runs after the request that caused it has committed. Behavior is 
   `db:migrate` restores the old validator, under which any remaining `dead` job no longer
   validates on update. Leave them untouched until the roll forward; nothing runs them meanwhile.
 
+## Billing and checkout
+
+Paid plans are bought through a billing provider (ADR-0009). Behavior is in
+`openspec/specs/billing-checkout`; operations are in the [payments runbook](./runbooks/payments.md).
+
+- **Plan availability.** `planGrantPolicy` (`composition/gifts.ts`) makes Standard a `checkout`
+  plan while `BILLING_PROVIDER` is configured. Otherwise the internal grant applies, until the
+  webhook change removes it. The publish endpoint answers `PAYMENT_REQUIRED` for a checkout plan.
+- **Checkout** (`modules/billing/application/checkout-service.ts`):
+  1. It runs the gift's first-publish checks (`giftService.checkCheckout`, which shares
+     `checkPublishable` with publishing).
+  2. One transaction closes the gift's older `pending` order and inserts the new one.
+  3. It asks the provider for a payment link, and on success stores its URL.
+  4. A provider failure marks the order `failed` and releases its per-owner idempotency key.
+- **Providers.**
+  - `createPayosProvider` uses `fetch`, the payOS signing rules and verified answers.
+  - `createFakeProvider` keeps its links in memory, for development and E2E.
+  - `billingProviderFor` picks one per call from the environment.
+- **The browser never decides.** The return and cancel pages poll `GET /api/orders/{orderId}`, which
+  reads only the owner's order. A `pending` order is reconciled with the provider before the
+  answer, to `cancelled` or `expired` only.
+
 ## Admin access and audit
 
 The admin area lets operations look up a gift and read the audit log. Behavior is in

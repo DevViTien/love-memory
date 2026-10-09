@@ -159,10 +159,13 @@ export interface GiftPublicationRepository {
 
 /**
  * Whether a plan can be granted for a first publish, and how (`gift-plans` "Plan availability"):
- * Free always, Standard only through the internal paid-plan grant until checkout adds its outcome.
+ * Free always; Standard through checkout while a billing provider is configured, otherwise through
+ * the internal paid-plan grant, otherwise not at all.
  */
 export type PlanGrant =
-  Readonly<{ kind: "grant"; source: PlanGrantSource }> | Readonly<{ kind: "unavailable" }>;
+  | Readonly<{ kind: "checkout" }>
+  | Readonly<{ kind: "grant"; source: PlanGrantSource }>
+  | Readonly<{ kind: "unavailable" }>;
 
 export type PlanGrantSource = Extract<EntitlementSource, "free" | "internal">;
 
@@ -233,6 +236,8 @@ export type GiftServiceError = Readonly<
   | { code: "NO_UNPUBLISHED_CHANGES" }
   | { code: "GIFT_EXPIRED" }
   | { code: "PLAN_NOT_AVAILABLE" }
+  | { code: "PAYMENT_REQUIRED" }
+  | { code: "NO_PAYMENT_REQUIRED" }
   | { code: "PLAN_CHANGE_UNSUPPORTED" }
   | { code: "PLAN_PHOTO_LIMIT_EXCEEDED"; maxPhotos: number; photoCount: number }
   | { code: "TEMPLATE_NOT_EDITABLE" }
@@ -418,7 +423,137 @@ function toFieldErrors(error: z.ZodError): Readonly<Record<string, string>> {
 }
 
 export function createGiftService(dependencies: GiftServiceDependencies) {
+  /**
+   * The pre-publish checks after ownership (`gift-publishing` "Pre-publish checks"), shared by a
+   * publish and a checkout (`billing-checkout`). They differ only in the plan step: a publish
+   * needs a plan granted without payment, a checkout a plan that needs one.
+   */
+  async function checkPublishable(
+    gift: Gift,
+    input: Readonly<{ expectedRevision: number; planId: PlanId }>,
+    now: Date,
+    purpose: "checkout" | "publish",
+  ) {
+    const publishing = dependencies.publishing;
+    if (!publishing) throw new Error("Gift publishing is not configured.");
+    if (!isEditableGiftStatus(gift.status)) return failure({ code: "INVALID_STATE" });
+    // An update is never paid for again (PO decision S3).
+    if (purpose === "checkout" && gift.status === "published") {
+      return failure({ code: "NO_PAYMENT_REQUIRED" });
+    }
+    if (gift.revision !== input.expectedRevision) {
+      return failure({
+        actualRevision: gift.revision,
+        code: "REVISION_CONFLICT",
+        expectedRevision: input.expectedRevision,
+      });
+    }
+    const isUpdate = gift.status === "published";
+    if (isUpdate && input.expectedRevision <= (gift.publishedRevision ?? 0)) {
+      return failure({ code: "NO_UNPUBLISHED_CHANGES" });
+    }
+
+    // The plan: the gift's own entitlement for an update (never the catalog), the current
+    // version of the requested plan for a first publish.
+    let photoLimit: Readonly<{ maxPhotos: number | null }>;
+    let grantSource: PlanGrantSource = "free";
+    if (isUpdate) {
+      const { entitlement, expiresAt } = grantedEntitlement(gift);
+      if (expiresAt.getTime() <= now.getTime()) return failure({ code: "GIFT_EXPIRED" });
+      if (input.planId !== entitlement.planId) {
+        return failure({ code: "PLAN_CHANGE_UNSUPPORTED" });
+      }
+      photoLimit = entitlement;
+    } else {
+      const planGrant = publishing.plans.grantFor(input.planId);
+      if (planGrant.kind === "unavailable") return failure({ code: "PLAN_NOT_AVAILABLE" });
+      if (purpose === "publish" && planGrant.kind === "checkout") {
+        return failure({ code: "PAYMENT_REQUIRED" });
+      }
+      if (purpose === "checkout" && planGrant.kind === "grant") {
+        return failure({ code: "NO_PAYMENT_REQUIRED" });
+      }
+      photoLimit = currentPlan(input.planId);
+      if (planGrant.kind === "grant") grantSource = planGrant.source;
+    }
+
+    if (gift.access.mode !== "unlisted") return failure({ code: "ACCESS_POLICY_UNSUPPORTED" });
+
+    const manifest = await dependencies.templates.findEditableManifest(
+      gift.content.templateId,
+      gift.content.templateVersion,
+    );
+    if (!manifest) return failure({ code: "TEMPLATE_NOT_EDITABLE" });
+    const artifact = await publishing.artifacts.resolve(manifest.id, manifest.version);
+    if (!artifact) return failure({ code: "TEMPLATE_UNPUBLISHABLE" });
+
+    const content = gift.content.data;
+    const contentIssuesFor = (assets: readonly MediaAsset[]) =>
+      collectContentIssues(
+        { assets, content, giftId: gift.id, manifest },
+        dependencies.audioTracks,
+      );
+    const checkedAssets = await publishing.assets.listByGiftId(gift.id);
+    const issues = contentIssuesFor(checkedAssets);
+    if (issues.length > 0) {
+      return failure({
+        code: "INVALID_CONTENT",
+        fieldErrors: issuesToFieldErrors(issues, toViewerFields(manifest)),
+      });
+    }
+
+    // Last: a content issue is more actionable, and the count needs valid content.
+    const photoCount = countImageItems(manifest, content);
+    if (photoLimit.maxPhotos !== null && exceedsPhotoLimit(photoLimit, photoCount)) {
+      return failure({
+        code: "PLAN_PHOTO_LIMIT_EXCEEDED",
+        maxPhotos: photoLimit.maxPhotos,
+        photoCount,
+      });
+    }
+    return success({
+      artifact,
+      checkedAssets,
+      content,
+      contentIssuesFor,
+      grantSource,
+      isUpdate,
+      manifest,
+    });
+  }
+
   return {
+    /**
+     * `billing-checkout` "Checkout endpoint": the checks of a first publish for a plan that needs a
+     * payment. It writes nothing; the order is the caller's.
+     */
+    async checkCheckout(
+      input: Readonly<{
+        expectedRevision: number;
+        planId: PlanId;
+        publicId: string;
+        userId: string | null;
+      }>,
+    ): Promise<
+      GiftServiceResult<
+        Readonly<{ giftId: string; giftPublicId: string; ownerId: string; revision: number }>
+      >
+    > {
+      if (!input.userId) return failure({ code: "NOT_AUTHENTICATED" });
+      const gift = await dependencies.gifts.findAuthorized(input.publicId, [
+        { kind: "user", userId: input.userId },
+      ]);
+      if (!gift) return failure({ code: "NOT_FOUND" });
+      const checked = await checkPublishable(gift, input, dependencies.clock(), "checkout");
+      if (!checked.ok) return checked;
+      return success({
+        giftId: gift.id,
+        giftPublicId: gift.publicId,
+        ownerId: input.userId,
+        revision: gift.revision,
+      });
+    },
+
     async claimDraft(
       input: Readonly<{
         anonymousDraftId: string | null;
@@ -618,71 +753,17 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
           : failure({ code: "IDEMPOTENCY_CONFLICT" });
       }
 
-      if (!isEditableGiftStatus(gift.status)) return failure({ code: "INVALID_STATE" });
-      if (gift.revision !== input.expectedRevision) {
-        return failure({
-          actualRevision: gift.revision,
-          code: "REVISION_CONFLICT",
-          expectedRevision: input.expectedRevision,
-        });
-      }
-      const isUpdate = gift.status === "published";
-      if (isUpdate && input.expectedRevision <= (gift.publishedRevision ?? 0)) {
-        return failure({ code: "NO_UNPUBLISHED_CHANGES" });
-      }
-
-      // The plan: the gift's own entitlement for an update (never the catalog), the current
-      // version of the requested plan for a first publish.
-      let photoLimit: Readonly<{ maxPhotos: number | null }>;
-      let grantSource: PlanGrantSource = "free";
-      if (isUpdate) {
-        const { entitlement, expiresAt } = grantedEntitlement(gift);
-        if (expiresAt.getTime() <= now.getTime()) return failure({ code: "GIFT_EXPIRED" });
-        if (input.planId !== entitlement.planId) {
-          return failure({ code: "PLAN_CHANGE_UNSUPPORTED" });
-        }
-        photoLimit = entitlement;
-      } else {
-        const planGrant = publishing.plans.grantFor(input.planId);
-        if (planGrant.kind === "unavailable") return failure({ code: "PLAN_NOT_AVAILABLE" });
-        photoLimit = currentPlan(input.planId);
-        grantSource = planGrant.source;
-      }
-
-      if (gift.access.mode !== "unlisted") return failure({ code: "ACCESS_POLICY_UNSUPPORTED" });
-
-      const manifest = await dependencies.templates.findEditableManifest(
-        gift.content.templateId,
-        gift.content.templateVersion,
-      );
-      if (!manifest) return failure({ code: "TEMPLATE_NOT_EDITABLE" });
-      const artifact = await publishing.artifacts.resolve(manifest.id, manifest.version);
-      if (!artifact) return failure({ code: "TEMPLATE_UNPUBLISHABLE" });
-
-      const content = gift.content.data;
-      const contentIssuesFor = (assets: readonly MediaAsset[]) =>
-        collectContentIssues(
-          { assets, content, giftId: gift.id, manifest },
-          dependencies.audioTracks,
-        );
-      const checkedAssets = await publishing.assets.listByGiftId(gift.id);
-      const issues = contentIssuesFor(checkedAssets);
-      if (issues.length > 0) {
-        return failure({
-          code: "INVALID_CONTENT",
-          fieldErrors: issuesToFieldErrors(issues, toViewerFields(manifest)),
-        });
-      }
-
-      // Last: a content issue is more actionable, and the count needs valid content.
-      const photoCount = countImageItems(manifest, content);
-      if (photoLimit.maxPhotos !== null && exceedsPhotoLimit(photoLimit, photoCount)) {
-        return failure({
-          code: "PLAN_PHOTO_LIMIT_EXCEEDED",
-          maxPhotos: photoLimit.maxPhotos,
-          photoCount,
-        });
-      }
+      const checked = await checkPublishable(gift, input, now, "publish");
+      if (!checked.ok) return checked;
+      const {
+        artifact,
+        checkedAssets,
+        content,
+        contentIssuesFor,
+        grantSource,
+        isUpdate,
+        manifest,
+      } = checked.data;
 
       const published = isUpdate
         ? republishGift(gift, { expectedRevision: input.expectedRevision, now })

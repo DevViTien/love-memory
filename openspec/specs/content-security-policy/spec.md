@@ -17,7 +17,8 @@ The system SHALL select exactly one CSP mode per request path:
 - `template` for `/template-spikes`, any path under `/template-spikes/`, and any path under
   `/template-artifacts/`;
 - `nonce` for `/studio`, any path under `/studio/`, any path under `/viewer/`, `/preview`, any path
-  under `/preview/`, `/g`, any path under `/g/`, `/admin`, and any path under `/admin/`;
+  under `/preview/`, `/g`, any path under `/g/`, `/admin`, any path under `/admin/`, `/checkout`,
+  any path under `/checkout/`, and any path under `/billing/`;
 - `static` for every other path (for example `/`, `/templates`, `/templates/memory-box`,
   `/auth/sign-in`).
 
@@ -55,6 +56,11 @@ The template classification SHALL take precedence over the other rules.
   them
 - **THEN** the response `Content-Security-Policy` is the nonce policy containing `'strict-dynamic'`,
   and `/administration-guide` stays static
+
+#### Scenario: Checkout pages use the nonce policy
+
+- **WHEN** `/checkout/return?order=…` or `/billing/fake-checkout/{paymentId}` is requested
+- **THEN** the response `Content-Security-Policy` is the nonce policy
 
 ### Requirement: Static-compatible application policy
 

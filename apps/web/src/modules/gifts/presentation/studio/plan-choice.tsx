@@ -5,6 +5,7 @@ import { type PlanOfferDto } from "@love-memory/contracts";
 import { formatPhotoLimit, formatPlanPrice, formatRetention, formatWatermark } from "./plan-format";
 
 export const PLAN_CHOICE_MESSAGES = {
+  checkout: "Thanh toán trực tuyến sau khi xác nhận.",
   internalGrant: "Cấp nội bộ để thử nghiệm, không thu phí.",
   notAvailable: "Sắp mở thanh toán.",
   tooManyPhotos: (photoCount: number, maxPhotos: number) =>
@@ -95,6 +96,10 @@ export function PlanChoice({
                 ) : offer.internalGrant ? (
                   <span className="mt-1 block font-semibold text-amber-800">
                     {PLAN_CHOICE_MESSAGES.internalGrant}
+                  </span>
+                ) : offer.checkout ? (
+                  <span className="mt-1 block font-semibold text-stone-600">
+                    {PLAN_CHOICE_MESSAGES.checkout}
                   </span>
                 ) : null}
               </span>

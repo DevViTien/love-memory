@@ -134,6 +134,22 @@ function mapGiftServiceError(error: GiftServiceError, id: string): Response {
         requestId: id,
         status: 409,
       });
+    case "PAYMENT_REQUIRED":
+      return createApiErrorResponse({
+        code: API_ERROR_CODES.conflict,
+        details: { reason: "PAYMENT_REQUIRED" },
+        message: "This plan is published after a payment.",
+        requestId: id,
+        status: 409,
+      });
+    case "NO_PAYMENT_REQUIRED":
+      return createApiErrorResponse({
+        code: API_ERROR_CODES.conflict,
+        details: { reason: "NO_PAYMENT_REQUIRED" },
+        message: "This gift needs no payment.",
+        requestId: id,
+        status: 409,
+      });
     case "PLAN_CHANGE_UNSUPPORTED":
       return createApiErrorResponse({
         code: API_ERROR_CODES.conflict,

@@ -240,6 +240,7 @@ describe("gift API contracts", () => {
 describe("plan offers", () => {
   const offer = {
     available: true,
+    checkout: false,
     internalGrant: false,
     maxPhotos: 3,
     name: "Miễn phí",

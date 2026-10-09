@@ -734,6 +734,7 @@ describe("gift publishing", () => {
   let publications: GiftPublication[];
   let keys: Map<string, StoredKey>;
   let standardAvailable: boolean;
+  let standardCheckout: boolean;
   let editable: boolean;
   let publishInputs: GiftPublishInput[];
   let beforeWrite: (() => GiftPublishPersistenceResult | null) | null;
@@ -893,9 +894,11 @@ describe("gift publishing", () => {
           grantFor: (planId) =>
             planId === "free"
               ? { kind: "grant", source: "free" }
-              : standardAvailable
-                ? { kind: "grant", source: "internal" }
-                : { kind: "unavailable" },
+              : standardCheckout
+                ? { kind: "checkout" }
+                : standardAvailable
+                  ? { kind: "grant", source: "internal" }
+                  : { kind: "unavailable" },
         },
       },
       templates: {
@@ -920,6 +923,7 @@ describe("gift publishing", () => {
     publications = [];
     keys = new Map();
     standardAvailable = false;
+    standardCheckout = false;
     editable = true;
     publishInputs = [];
     beforeWrite = null;
@@ -1126,6 +1130,62 @@ describe("gift publishing", () => {
       });
       expect(gift.status).toBe("draft");
       expect(publishInputs).toHaveLength(0);
+    });
+
+    it("refuses a direct publish of a checkout plan (Paid plan needs a checkout)", async () => {
+      standardCheckout = true;
+
+      await expect(publish({ planId: "standard" })).resolves.toEqual({
+        error: { code: "PAYMENT_REQUIRED" },
+        ok: false,
+      });
+      expect(publishInputs).toHaveLength(0);
+    });
+
+    it("runs the first-publish checks for a checkout, writing nothing (Checkout endpoint)", async () => {
+      standardCheckout = true;
+      const check = (input: Partial<{ planId: "free" | "standard"; userId: string | null }> = {}) =>
+        service.checkCheckout({
+          expectedRevision: 7,
+          planId: "standard",
+          publicId,
+          userId: ownerId,
+          ...input,
+        });
+
+      await expect(check()).resolves.toEqual({
+        data: { giftId: gift.id, giftPublicId: publicId, ownerId, revision: 7 },
+        ok: true,
+      });
+      await expect(check({ planId: "free" })).resolves.toEqual({
+        error: { code: "NO_PAYMENT_REQUIRED" },
+        ok: false,
+      });
+      await expect(check({ userId: null })).resolves.toEqual({
+        error: { code: "NOT_AUTHENTICATED" },
+        ok: false,
+      });
+      await expect(check({ userId: "someone-else" })).resolves.toEqual({
+        error: { code: "NOT_FOUND" },
+        ok: false,
+      });
+      standardCheckout = false;
+      await expect(check()).resolves.toEqual({ error: { code: "PLAN_NOT_AVAILABLE" }, ok: false });
+      standardAvailable = true;
+      await expect(check()).resolves.toEqual({
+        error: { code: "NO_PAYMENT_REQUIRED" },
+        ok: false,
+      });
+      expect(publishInputs).toHaveLength(0);
+      expect(gift.status).toBe("draft");
+    });
+
+    it("needs no payment for a published gift (an update is free)", async () => {
+      await publish();
+      standardCheckout = true;
+      await expect(
+        service.checkCheckout({ expectedRevision: 7, planId: "free", publicId, userId: ownerId }),
+      ).resolves.toEqual({ error: { code: "NO_PAYMENT_REQUIRED" }, ok: false });
     });
 
     it("grants Standard through the internal grant (Grant on outside Production)", async () => {

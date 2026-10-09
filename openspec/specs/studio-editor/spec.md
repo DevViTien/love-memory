@@ -181,7 +181,7 @@ An option SHALL be disabled, with one explanation, in the first of these cases t
 - the plan is not available to the owner (`gift-plans` "Plan availability"): `Sắp mở thanh toán.`;
 - the content's photo count exceeds the plan's `maxPhotos`: `Món quà đang có {photoCount} ảnh, gói này cho tối đa {maxPhotos} ảnh.`
 
-A paid plan made available by the internal paid-plan grant SHALL show the note `Cấp nội bộ để thử nghiệm, không thu phí.`. The first enabled option SHALL be selected by default and the selection SHALL follow the creator's choice. When the selected option becomes disabled (for example after a photo is added), the selection SHALL move to the first enabled option, or to none.
+A paid plan made available by the internal paid-plan grant SHALL show the note `Cấp nội bộ để thử nghiệm, không thu phí.`. A plan available through checkout (`gift-plans` "Plan availability") SHALL show the note `Thanh toán trực tuyến sau khi xác nhận.`. The first enabled option SHALL be selected by default and the selection SHALL follow the creator's choice. When the selected option becomes disabled (for example after a photo is added), the selection SHALL move to the first enabled option, or to none.
 
 The `Xuất bản` button SHALL be disabled, with one explanation, in the first of these cases that applies:
 
@@ -191,6 +191,8 @@ The `Xuất bản` button SHALL be disabled, with one explanation, in the first 
 - no plan is selected: `Chọn một gói để xuất bản.`
 
 Otherwise the button SHALL be enabled, with the note `Sau khi xuất bản, bạn vẫn có thể chỉnh sửa và cập nhật món quà tại cùng đường dẫn.`. Choosing `Xuất bản` SHALL NOT send any request. It SHALL replace the button with a confirmation that has the heading `Xuất bản món quà này?`, the text `Ai có đường dẫn đều mở được món quà. Bạn có thể chỉnh sửa và cập nhật sau, nhưng chưa thể thu hồi đường dẫn.`, the line `Gói đã chọn: {planName}.`, the retention line `{retentionLabel}. Bạn có thể tạm dừng hoặc xoá món quà bất cứ lúc nào.` (where `{retentionLabel}` is the retention label of the plan choice above, such as `Người nhận mở được trong 14 ngày`), the rights checkbox of `privacy-notice` ("Upload-rights confirmation"), and two actions, `Xác nhận xuất bản` and `Quay lại chỉnh sửa`. `Xác nhận xuất bản` SHALL stay disabled until the checkbox is checked. The plan choice SHALL be disabled while the confirmation is open.
+
+For a selected plan available through checkout, the confirmation SHALL also show `Số tiền: {price}. Món quà được xuất bản sau khi thanh toán được xác nhận.`, and its action SHALL read `Thanh toán {price}` instead of `Xác nhận xuất bản` (`{price}` as in the plan choice, such as `49.000đ`). Confirming SHALL settle pending saves as below, then send `POST /api/gifts/{publicId}/checkout` (`billing-checkout` "Checkout endpoint") with the publish body and the same `Idempotency-Key` rules, read `Đang chuyển đến trang thanh toán…` while it runs, and on `201` navigate the window to `data.order.checkoutUrl`. Its failures SHALL be handled as for a publish, plus: `503` with `error.details.reason` `PAYMENT_PROVIDER_UNAVAILABLE` shows `Chưa kết nối được cổng thanh toán. Hãy thử lại sau ít phút.`, and `409` with `error.details.reason` `NO_PAYMENT_REQUIRED` or `PAYMENT_REQUIRED` reloads the page.
 
 For a published gift, the `Xuất bản` step SHALL show no plan choice, the line `Gói {planName}` of the gift's entitlement, and a `Cập nhật món quà` button instead. It SHALL be disabled, with one explanation, in the first of these cases that applies:
 
@@ -229,7 +231,7 @@ While the action runs, both confirmation actions SHALL be disabled, `Xác nhận
 
 #### Scenario: Action not yet available
 
-- **WHEN** every template step is `Đã xong`, the draft holds 5 photos, the internal paid-plan grant of `gift-plans` is off, and the owner opens `Xuất bản`
+- **WHEN** every template step is `Đã xong`, the draft holds 5 photos, no billing provider is configured, the internal paid-plan grant of `gift-plans` is off, and the owner opens `Xuất bản`
 - **THEN** the summary shows `Tất cả các bước đã sẵn sàng.`, `Miễn phí` is disabled with `Món quà đang có 5 ảnh, gói này cho tối đa 3 ảnh.`, `Tiêu chuẩn` is disabled with `Sắp mở thanh toán.`, and the `Xuất bản` button is disabled with `Chọn một gói để xuất bản.`
 
 #### Scenario: Preview after a pending change
@@ -284,7 +286,7 @@ While the action runs, both confirmation actions SHALL be disabled, `Xác nhận
 
 #### Scenario: Publishing not enabled
 
-- **WHEN** the owner opens step `Xuất bản` of a complete 3-photo draft while the internal paid-plan grant is off
+- **WHEN** the owner opens step `Xuất bản` of a complete 3-photo draft while no billing provider is configured and the internal paid-plan grant is off
 - **THEN** `Miễn phí` is selected, `Tiêu chuẩn` is disabled with `Sắp mở thanh toán.`, and the `Xuất bản` button is enabled
 
 #### Scenario: Incomplete steps block publishing
@@ -364,7 +366,7 @@ While the action runs, both confirmation actions SHALL be disabled, `Xác nhận
 
 #### Scenario: Standard through the internal grant
 
-- **WHEN** the internal paid-plan grant is on and the owner of a complete 8-photo draft opens `Xuất bản`
+- **WHEN** no billing provider is configured, the internal paid-plan grant is on, and the owner of a complete 8-photo draft opens `Xuất bản`
 - **THEN** `Miễn phí` is disabled with `Món quà đang có 8 ảnh, gói này cho tối đa 3 ảnh.`, `Tiêu chuẩn` is selected with `49.000đ` and `Cấp nội bộ để thử nghiệm, không thu phí.`, and confirming sends `planId` `standard`
 
 #### Scenario: Selection follows the photo count
@@ -393,6 +395,11 @@ While the action runs, both confirmation actions SHALL be disabled, `Xác nhận
 - **THEN** `Xác nhận xuất bản` is disabled until the rights checkbox is checked, and the confirmation
   shows `Người nhận mở được trong 14 ngày. Bạn có thể tạm dừng hoặc xoá món quà bất cứ lúc nào.` for
   the `free` plan
+
+#### Scenario: Standard through checkout in the Studio
+
+- **WHEN** the fake billing provider is configured and the owner of a complete 8-photo draft opens `Xuất bản`
+- **THEN** `Tiêu chuẩn` is selected with `49.000đ` and `Thanh toán trực tuyến sau khi xác nhận.`, the confirmation shows `Số tiền: 49.000đ. Món quà được xuất bản sau khi thanh toán được xác nhận.`, and `Thanh toán 49.000đ` sends `POST /api/gifts/{publicId}/checkout` and opens the returned checkout URL
 
 ### Requirement: Read-only editor states
 

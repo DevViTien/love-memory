@@ -6,6 +6,7 @@ export type ApiRateLimitScope =
   | "admin-mfa"
   | "analytics-event"
   | "analytics-event-ip"
+  | "gift-checkout"
   | "gift-claim"
   | "gift-create"
   | "gift-lifecycle"
@@ -16,6 +17,7 @@ export type ApiRateLimitScope =
   | "media-read"
   | "media-upload"
   | "media-write"
+  | "order-read"
   | "public-gift-read"
   | "public-gift-read-ip";
 

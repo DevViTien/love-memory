@@ -27,6 +27,7 @@ export type PatchBody = Readonly<{
 
 type StudioFetchOptions = Readonly<{
   assets?: readonly MediaAssetDto[];
+  checkout?: (init: RequestInit) => Response | Promise<Response>;
   get?: () => Response | Promise<Response>;
   patch?: (body: PatchBody, init: RequestInit) => Response | Promise<Response>;
   preview?: (init: RequestInit) => Response | Promise<Response>;
@@ -36,15 +37,16 @@ type StudioFetchOptions = Readonly<{
 }>;
 
 /**
- * The offers the page renders: Free, and Standard unavailable (no checkout yet) or granted
- * internally. The values are those of `gift-plans`.
+ * The offers the page renders: Free, and Standard unavailable, granted internally or offered
+ * through checkout. The values are those of `gift-plans`.
  */
 export function studioPlanOffers(
-  standard: "internal" | "unavailable" = "unavailable",
+  standard: "checkout" | "internal" | "unavailable" = "unavailable",
 ): PlanOfferDto[] {
   return [
     {
       available: true,
+      checkout: false,
       internalGrant: false,
       maxPhotos: 3,
       name: "Miễn phí",
@@ -55,7 +57,8 @@ export function studioPlanOffers(
       watermark: true,
     },
     {
-      available: standard === "internal",
+      available: standard !== "unavailable",
+      checkout: standard === "checkout",
       internalGrant: standard === "internal",
       maxPhotos: null,
       name: "Tiêu chuẩn",
@@ -107,6 +110,9 @@ export function stubStudioFetch(options: StudioFetchOptions = {}) {
     }
     if (url.endsWith("/preview") && init?.method === "POST" && options.preview) {
       return Promise.resolve(options.preview(init));
+    }
+    if (url.endsWith("/checkout") && init?.method === "POST" && options.checkout) {
+      return Promise.resolve(options.checkout(init));
     }
     if (url.endsWith("/publish") && init?.method === "POST" && options.publish) {
       return Promise.resolve(options.publish(init));

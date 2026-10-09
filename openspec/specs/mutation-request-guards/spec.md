@@ -63,8 +63,10 @@ The system SHALL apply fixed-window rate limits to mutations, with counters stor
 | `media-read`      | `GET /api/media/assets` and `GET /api/media/assets/{assetId}`                                                         | 120 requests per 60 seconds  |
 | `media-write`     | `POST /api/media/uploads/complete`, `DELETE /api/media/assets/{assetId}` and `POST /api/media/assets/{assetId}/retry` | 60 requests per 60 seconds   |
 | `admin-action`    | `POST /api/admin/template-versions`, `POST /api/admin/reports/{reportId}` and `POST /api/admin/mfa/enroll`, per admin | 60 requests per 60 seconds   |
+| `gift-checkout`   | `POST /api/gifts/{publicId}/checkout`                                                                                 | 10 requests per 600 seconds  |
+| `order-read`      | `GET /api/orders/{orderId}`                                                                                           | 120 requests per 60 seconds  |
 
-`POST /api/gifts/{publicId}/preview` and `POST /api/gifts/{publicId}/publish` are guarded mutation endpoints: they pass the media-type and origin checks of this capability and use the standard response envelope. Windows SHALL align to multiples of the window length. The limit SHALL be checked after the media-type, origin, path, and required-header checks, and before the request body is parsed. A request over the limit SHALL be rejected with HTTP `429`, code `RATE_LIMITED`, `details.retryAfterSeconds`, and a `Retry-After` header. Both carry the number of seconds until the current window ends, with a minimum of 1.
+`POST /api/gifts/{publicId}/preview`, `POST /api/gifts/{publicId}/publish` and `POST /api/gifts/{publicId}/checkout` are guarded mutation endpoints: they pass the media-type and origin checks of this capability and use the standard response envelope. Windows SHALL align to multiples of the window length. The limit SHALL be checked after the media-type, origin, path, and required-header checks, and before the request body is parsed. A request over the limit SHALL be rejected with HTTP `429`, code `RATE_LIMITED`, `details.retryAfterSeconds`, and a `Retry-After` header. Both carry the number of seconds until the current window ends, with a minimum of 1.
 
 #### Scenario: Create limit exceeded
 

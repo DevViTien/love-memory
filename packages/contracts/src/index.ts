@@ -1,6 +1,7 @@
 export * from "./analytics";
 export * from "./api";
 export * from "./audio";
+export * from "./billing";
 export * from "./gift";
 export * from "./health";
 export * from "./media";

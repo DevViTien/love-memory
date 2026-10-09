@@ -100,7 +100,8 @@ check fails:
    `details.reason` `GIFT_EXPIRED`.
 5. The plan. For a `draft`, `planId` SHALL be available to the owner (`gift-plans` "Plan
    availability"). Otherwise the response SHALL be `409` with code `CONFLICT` and `details.reason`
-   `PLAN_NOT_AVAILABLE`. For a `published` gift, `planId` SHALL equal the `planId` of the gift's
+   `PLAN_NOT_AVAILABLE`. A plan available to the owner only through checkout SHALL answer `409` with
+   code `CONFLICT` and `details.reason` `PAYMENT_REQUIRED`. For a `published` gift, `planId` SHALL equal the `planId` of the gift's
    entitlement. Otherwise the response SHALL be `409` with code `CONFLICT` and `details.reason`
    `PLAN_CHANGE_UNSUPPORTED`.
 6. The gift's access policy SHALL be `unlisted`, the only policy this change can serve. Any other
@@ -232,6 +233,12 @@ carry content.
 - **WHEN** the owner of a gift whose `expiresAt` has passed saves the working copy and publishes it
 - **THEN** the response is `409` with code `CONFLICT` and `error.details.reason` `GIFT_EXPIRED`,
   and nothing is written
+
+#### Scenario: Paid plan needs a checkout
+
+- **WHEN** a billing provider is configured and the owner publishes a complete draft on `standard`
+- **THEN** the response is `409` with code `CONFLICT` and `details.reason` `PAYMENT_REQUIRED`, and
+  the gift stays a `draft`
 
 ### Requirement: Immutable publication snapshot
 

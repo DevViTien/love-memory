@@ -16,6 +16,7 @@ describe("plan offers", () => {
     expect(offers).toEqual([
       {
         available: true,
+        checkout: false,
         internalGrant: false,
         maxPhotos: 3,
         name: "Miễn phí",
@@ -27,6 +28,7 @@ describe("plan offers", () => {
       },
       {
         available: false,
+        checkout: false,
         internalGrant: false,
         maxPhotos: null,
         name: "Tiêu chuẩn",
@@ -44,5 +46,16 @@ describe("plan offers", () => {
     const [, standard] = listPlanOffers(grants({ kind: "grant", source: "internal" }));
 
     expect(standard).toMatchObject({ available: true, internalGrant: true, planId: "standard" });
+  });
+
+  it("marks Standard as available through checkout (Standard through checkout)", () => {
+    const [, standard] = listPlanOffers(grants({ kind: "checkout" }));
+
+    expect(standard).toMatchObject({
+      available: true,
+      checkout: true,
+      internalGrant: false,
+      planId: "standard",
+    });
   });
 });

@@ -32,6 +32,8 @@ const RATE_LIMITS: Readonly<Record<ApiRateLimitScope, RateLimit>> = {
   // counter keeps 60 even for `unidentified`, because its subject includes the session id.
   "analytics-event": { max: 60, sharedBucketMultiplier: false, windowSeconds: 10 * 60 },
   "analytics-event-ip": { max: 1200, windowSeconds: 10 * 60 },
+  // Checkout (`billing-checkout`): each attempt creates an order and a provider payment link.
+  "gift-checkout": { max: 10, windowSeconds: 10 * 60 },
   "gift-claim": { max: 10, windowSeconds: 5 * 60 },
   "gift-create": { max: 10, windowSeconds: 10 * 60 },
   // Pause, resume and delete (`gift-lifecycle`): rare owner actions, each idempotent by state.
@@ -45,6 +47,8 @@ const RATE_LIMITS: Readonly<Record<ApiRateLimitScope, RateLimit>> = {
   "media-read": { max: 120, windowSeconds: 60 },
   "media-upload": { max: 30, windowSeconds: 10 * 60 },
   "media-write": { max: 60, windowSeconds: 60 },
+  // Order status reads: the return page polls every 3 seconds.
+  "order-read": { max: 120, windowSeconds: 60 },
   // Public reads: per network subject and share id, plus a looser per-network cap, so recipients
   // behind one carrier-grade NAT address opening different gifts do not share one small budget.
   "public-gift-read": { max: 60, windowSeconds: 10 * 60 },

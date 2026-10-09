@@ -167,6 +167,10 @@ describe("content security policy", () => {
     ["/admin", "nonce"],
     ["/admin/mfa", "nonce"],
     ["/admin/audit", "nonce"],
+    ["/checkout", "nonce"],
+    ["/checkout/return", "nonce"],
+    ["/billing/fake-checkout/abc", "nonce"],
+    ["/checkoutx", "static"],
     ["/administration-guide", "static"],
     ["/privacy", "static"],
   ] as const)("selects %s as %s policy", (pathname, mode) => {

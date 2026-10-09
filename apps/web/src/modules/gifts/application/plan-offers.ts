@@ -15,7 +15,8 @@ export function listPlanOffers(
   return plans.map((plan) => {
     const grant = policy.grantFor(plan.planId);
     return {
-      available: grant.kind === "grant",
+      available: grant.kind !== "unavailable",
+      checkout: grant.kind === "checkout",
       internalGrant: grant.kind === "grant" && grant.source === "internal",
       maxPhotos: plan.maxPhotos,
       name: plan.name,

@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { analyticsContextForGift, publishAnalytics } from "@/composition/analytics";
 import { audioCatalog } from "@/composition/audio";
 import { resolveTemplateArtifact } from "@/composition/templates";
+import { getBillingEnvironment } from "@/config/billing";
 import { getInternalPlanGrantEnvironment } from "@/config/internal-plan-grant";
 import { createGiftLifecycleService } from "@/modules/gifts/application/gift-lifecycle";
 import { createGiftService, type PlanGrantPolicy } from "@/modules/gifts/application/gift-service";
@@ -19,12 +20,14 @@ import { mongoGiftTemplateRepository } from "@/modules/gifts/infrastructure/mong
 import { mongoMediaAssetRepository } from "@/modules/media/infrastructure/mongo-media-repository";
 
 /**
- * `gift-plans` "Plan availability": Free always; Standard only through the internal paid-plan grant
- * until checkout exists. Read per request, so a corrected environment applies without a rebuild.
+ * `gift-plans` "Plan availability": Free always; Standard through checkout while a billing provider
+ * is configured, otherwise through the internal paid-plan grant, otherwise not at all. Read per
+ * request, so a corrected environment applies without a rebuild.
  */
 export const planGrantPolicy: PlanGrantPolicy = {
   grantFor: (planId) => {
     if (planId === "free") return { kind: "grant", source: "free" };
+    if (getBillingEnvironment().kind !== "off") return { kind: "checkout" };
     return getInternalPlanGrantEnvironment().enabled
       ? { kind: "grant", source: "internal" }
       : { kind: "unavailable" };

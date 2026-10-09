@@ -20,11 +20,12 @@ import {
   urlOf,
 } from "./test/render-editor";
 
-const publishMocks = vi.hoisted(() => ({ reload: vi.fn() }));
+const publishMocks = vi.hoisted(() => ({ navigate: vi.fn(), reload: vi.fn() }));
 
 vi.mock("next/navigation", () => import("./test/next-navigation"));
 vi.mock("./publish-action", async (importOriginal) => ({
   ...(await importOriginal<typeof PublishActionModule>()),
+  navigateToCheckout: publishMocks.navigate,
   reloadStudioPage: publishMocks.reload,
 }));
 
@@ -232,6 +233,92 @@ describe("Xuất bản step: availability", () => {
     await waitFor(() => expect(publishPosts(fetchMock)).toHaveLength(1));
     const [, init] = publishPosts(fetchMock)[0]!;
     expect(JSON.parse(init?.body as string)).toMatchObject({ planId: "standard" });
+  });
+
+  it("starts a checkout for a plan that needs a payment (Standard through checkout in the Studio)", async () => {
+    const photos = studioPhotos(8);
+    const fetchMock = stubStudioFetch({
+      assets: photos.assets,
+      checkout: () =>
+        jsonResponse(
+          {
+            data: {
+              order: {
+                amountVnd: 49_000,
+                checkoutUrl: "https://pay.example/checkout/1",
+                createdAt: "2026-10-10T10:00:00.000Z",
+                currency: "VND",
+                expiresAt: "2026-10-10T10:15:00.000Z",
+                giftPublicId: publicId,
+                orderId: "0b3c5a7e-1f1c-4b8e-9a51-6c0f2d7e8a90",
+                planId: "standard",
+                status: "pending",
+              },
+            },
+          },
+          201,
+        ),
+    });
+    const user = userEvent.setup();
+    setStudioUrl("?step=publish");
+    renderEditor({
+      ...owner,
+      content: { ...completeContent, memories: photos.memories },
+      planOffers: studioPlanOffers("checkout"),
+    });
+    await screen.findAllByText("8/8 ảnh");
+
+    expect(planRadio(/^Tiêu chuẩn · 49\.000đ/).checked).toBe(true);
+    expect(publishStep().getByText("Thanh toán trực tuyến sau khi xác nhận.")).toBeTruthy();
+
+    await user.click(publishButton());
+    expect(
+      publishStep().getByText(
+        "Số tiền: 49.000đ. Món quà được xuất bản sau khi thanh toán được xác nhận.",
+      ),
+    ).toBeTruthy();
+    await confirmRights(user);
+    await user.click(publishStep().getByRole("button", { name: "Thanh toán 49.000đ" }));
+
+    await waitFor(() =>
+      expect(publishMocks.navigate).toHaveBeenCalledWith("https://pay.example/checkout/1"),
+    );
+    const posts = fetchMock.mock.calls.filter(([input]) => urlOf(input).endsWith("/checkout"));
+    expect(posts).toHaveLength(1);
+    expect(JSON.parse(posts[0]?.[1]?.body as string)).toMatchObject({
+      planId: "standard",
+      rightsConfirmed: true,
+    });
+    expect(publishPosts(fetchMock)).toHaveLength(0);
+  });
+
+  it("says when the payment provider cannot be reached", async () => {
+    const photos = studioPhotos(8);
+    stubStudioFetch({
+      assets: photos.assets,
+      checkout: () =>
+        jsonResponse(
+          apiError("SERVICE_UNAVAILABLE", { details: { reason: "PAYMENT_PROVIDER_UNAVAILABLE" } }),
+          503,
+        ),
+    });
+    const user = userEvent.setup();
+    setStudioUrl("?step=publish");
+    renderEditor({
+      ...owner,
+      content: { ...completeContent, memories: photos.memories },
+      planOffers: studioPlanOffers("checkout"),
+    });
+    await screen.findAllByText("8/8 ảnh");
+
+    await user.click(publishButton());
+    await confirmRights(user);
+    await user.click(publishStep().getByRole("button", { name: "Thanh toán 49.000đ" }));
+
+    expect(
+      await publishStep().findByText("Chưa kết nối được cổng thanh toán. Hãy thử lại sau ít phút."),
+    ).toBeTruthy();
+    expect(publishMocks.navigate).not.toHaveBeenCalled();
   });
 
   it("lets the creator choose Standard and sends it", async () => {

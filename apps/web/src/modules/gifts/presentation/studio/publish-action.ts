@@ -2,6 +2,7 @@ import {
   ApiErrorResponseSchema,
   type GiftPublicationDto,
   GiftPublicationResponseSchema,
+  OrderResponseSchema,
   type PlanOfferDto,
 } from "@love-memory/contracts";
 
@@ -18,10 +19,12 @@ export const PUBLISH_REQUEST_TIMEOUT_MILLISECONDS = 30_000;
 export type PublishOutcome =
   | Readonly<{ kind: "access-unsupported" }>
   | Readonly<{ kind: "blocked" }>
+  | Readonly<{ checkoutUrl: string; kind: "checkout" }>
   | Readonly<{ actualRevision: number; kind: "conflict" }>
   | Readonly<{ kind: "failed" }>
   | Readonly<{ kind: "gone" }>
   | Readonly<{ fieldErrors: Readonly<Record<string, string>>; kind: "invalid" }>
+  | Readonly<{ kind: "payment-unavailable" }>
   | Readonly<{ kind: "photo-limit"; maxPhotos: number; photoCount: number }>
   | Readonly<{ kind: "plan-unavailable" }>
   | Readonly<{ kind: "published"; publication: GiftPublicationDto }>
@@ -38,6 +41,8 @@ export type RequestPublishInput = Readonly<{
   /** The selected plan of a draft, or the entitlement's plan of a published gift. */
   planId: PlanOfferDto["planId"];
   publicId: string;
+  /** `checkout` for a plan that needs a payment (`billing-checkout`); `publish` otherwise. */
+  target?: "checkout" | "publish";
 }>;
 
 const UNPUBLISHABLE_REASONS: readonly string[] = [
@@ -50,6 +55,9 @@ const RELOAD_REASONS: readonly string[] = [
   "NO_UNPUBLISHED_CHANGES",
   "PLAN_CHANGE_UNSUPPORTED",
   "GIFT_EXPIRED",
+  // The plan's payment need changed under the page: the reload shows the current offers.
+  "NO_PAYMENT_REQUIRED",
+  "PAYMENT_REQUIRED",
 ];
 
 /**
@@ -58,6 +66,11 @@ const RELOAD_REASONS: readonly string[] = [
  */
 export function reloadStudioPage(): void {
   window.location.reload();
+}
+
+/** Leaves the Studio for the provider's checkout page (`billing-checkout`). */
+export function navigateToCheckout(url: string): void {
+  window.location.assign(url);
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -101,6 +114,7 @@ export async function requestPublish({
   idempotencyKey,
   planId,
   publicId,
+  target = "publish",
 }: RequestPublishInput): Promise<PublishOutcome> {
   const flushed = await flush();
   // The save status, invalid-content message or conflict banner already shows why.
@@ -110,7 +124,7 @@ export async function requestPublish({
   try {
     response = await fetchWithTimeout(
       fetchImpl,
-      `/api/gifts/${encodeURIComponent(publicId)}/publish`,
+      `/api/gifts/${encodeURIComponent(publicId)}/${target}`,
       {
         body: JSON.stringify({ expectedRevision: flushed.revision, planId, rightsConfirmed: true }),
         headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
@@ -125,6 +139,11 @@ export async function requestPublish({
   const payload = await readJson(response);
   switch (response.status) {
     case 201: {
+      if (target === "checkout") {
+        const order = OrderResponseSchema.safeParse(payload);
+        const checkoutUrl = order.success ? order.data.data.order.checkoutUrl : null;
+        return checkoutUrl ? { checkoutUrl, kind: "checkout" } : { kind: "failed" };
+      }
       const parsed = GiftPublicationResponseSchema.safeParse(payload);
       return parsed.success
         ? { kind: "published", publication: parsed.data.data.publication }
@@ -141,6 +160,13 @@ export async function requestPublish({
       return { kind: "gone" };
     case 409:
       return classifyConflict(payload);
+    case 503: {
+      const error = ApiErrorResponseSchema.safeParse(payload);
+      return error.success &&
+        error.data.error.details?.["reason"] === "PAYMENT_PROVIDER_UNAVAILABLE"
+        ? { kind: "payment-unavailable" }
+        : { kind: "failed" };
+    }
     case 429: {
       const error = ApiErrorResponseSchema.safeParse(payload);
       const retryAfterSeconds = error.success

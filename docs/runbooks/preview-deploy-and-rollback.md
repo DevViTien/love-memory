@@ -62,6 +62,15 @@ Until it runs, the new build serves published gifts normally, but an update of a
 (`Cập nhật món quà`) answers `500`: the legacy unique index rejects a second publication with the
 same share id. Recipients keep the first publication.
 
+Schema version `17` (`add-payos-checkout`):
+
+- creates `orders` with its validator and indexes (one `pending` order per gift, per-owner checkout
+  idempotency keys);
+- adds the rate limit scopes `gift-checkout` and `order-read` to the `apiRateLimits` validator.
+
+Run it before the build that offers checkout: without `orders`, a checkout answers `500`. Rolling
+back needs no data repair; the previous build ignores `orders`.
+
 Schema version `12` (`add-job-outbox-dispatcher`):
 
 - allows `dead` and `lastErrorCode` in the `jobOutbox` validator;
@@ -135,20 +144,22 @@ See also the [credential rotation runbook](./credential-rotation.md) and the
 
 Configure shared Preview secrets once and override environment identity per branch:
 
-| Variable                      | `dev` Preview branch                                      | `stg` Preview branch                                  | Production                                       |
-| ----------------------------- | --------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------ |
-| `APP_URL`                     | Development stable URL                                    | Staging stable URL                                    | Production stable URL                            |
-| `BETTER_AUTH_URL`             | Development stable URL                                    | Staging stable URL                                    | Production stable URL                            |
-| `MONGODB_DATABASE`            | `love_memory_development`                                 | `love_memory_staging`                                 | `love_memory_production`                         |
-| `MONGODB_URI`                 | Shared Preview secret or dedicated development credential | Shared Preview secret or dedicated staging credential | Dedicated Production secret                      |
-| `BETTER_AUTH_SECRET`          | Shared Preview secret or a branch-specific secret         | Shared Preview secret or a branch-specific secret     | Dedicated Production secret                      |
-| `RESEND_API_KEY`              | Preview secret                                            | Preview secret                                        | Production secret                                |
-| `INTERNAL_PLAN_GRANT_ENABLED` | `true`                                                    | `true`                                                | Absent (forced off anyway)                       |
-| `ANALYTICS_ENABLED`           | `true`                                                    | `true`                                                | Absent (off) until the Product Owner turns it on |
-| `ANALYTICS_GIFT_REF_SECRET`   | 48 random bytes, base64url; development only              | 48 random bytes, base64url; staging only              | Its own 48 random bytes, provisioned now         |
-| `MEDIA_WORKER_MODE`           | `trigger`, or `inline` until Trigger.dev is configured    | `trigger`                                             | `trigger`                                        |
-| `TRIGGER_SECRET_KEY`          | Secret of its Trigger.dev environment (never `tr_dev_…`)  | Secret of its Trigger.dev environment                 | Trigger.dev Production secret                    |
-| `TRIGGER_PROJECT_REF`         | LoveMemory Trigger.dev project ref                        | LoveMemory Trigger.dev project ref                    | LoveMemory Trigger.dev project ref               |
+| Variable                                                 | `dev` Preview branch                                      | `stg` Preview branch                                                        | Production                                           |
+| -------------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `APP_URL`                                                | Development stable URL                                    | Staging stable URL                                                          | Production stable URL                                |
+| `BETTER_AUTH_URL`                                        | Development stable URL                                    | Staging stable URL                                                          | Production stable URL                                |
+| `MONGODB_DATABASE`                                       | `love_memory_development`                                 | `love_memory_staging`                                                       | `love_memory_production`                             |
+| `MONGODB_URI`                                            | Shared Preview secret or dedicated development credential | Shared Preview secret or dedicated staging credential                       | Dedicated Production secret                          |
+| `BETTER_AUTH_SECRET`                                     | Shared Preview secret or a branch-specific secret         | Shared Preview secret or a branch-specific secret                           | Dedicated Production secret                          |
+| `RESEND_API_KEY`                                         | Preview secret                                            | Preview secret                                                              | Production secret                                    |
+| `INTERNAL_PLAN_GRANT_ENABLED`                            | `true`                                                    | `true`                                                                      | Absent (forced off anyway)                           |
+| `BILLING_PROVIDER`                                       | Absent until payOS credentials exist (never `fake`)       | Absent, then `payos` for the smoke test ([payments runbook](./payments.md)) | Absent until the webhook change is verified on `stg` |
+| `PAYOS_CLIENT_ID`, `PAYOS_API_KEY`, `PAYOS_CHECKSUM_KEY` | Only with `BILLING_PROVIDER=payos`                        | Staging payOS channel                                                       | Production payOS channel                             |
+| `ANALYTICS_ENABLED`                                      | `true`                                                    | `true`                                                                      | Absent (off) until the Product Owner turns it on     |
+| `ANALYTICS_GIFT_REF_SECRET`                              | 48 random bytes, base64url; development only              | 48 random bytes, base64url; staging only                                    | Its own 48 random bytes, provisioned now             |
+| `MEDIA_WORKER_MODE`                                      | `trigger`, or `inline` until Trigger.dev is configured    | `trigger`                                                                   | `trigger`                                            |
+| `TRIGGER_SECRET_KEY`                                     | Secret of its Trigger.dev environment (never `tr_dev_…`)  | Secret of its Trigger.dev environment                                       | Trigger.dev Production secret                        |
+| `TRIGGER_PROJECT_REF`                                    | LoveMemory Trigger.dev project ref                        | LoveMemory Trigger.dev project ref                                          | LoveMemory Trigger.dev project ref                   |
 
 The media worker variables and the Trigger.dev task deployment are described in the
 [media pipeline runbook](./media-pipeline.md#worker-mode-per-deployment). If the smoke test finds

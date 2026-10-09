@@ -11,7 +11,7 @@ import {
 import { COLLECTIONS, type CollectionName } from "./collections";
 import { enqueueJob } from "./job-outbox";
 
-export const DATABASE_SCHEMA_VERSION = 16;
+export const DATABASE_SCHEMA_VERSION = 17;
 
 type DatabaseMigrationDocument = Readonly<{
   _id: string;
@@ -119,6 +119,7 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
               "admin-mfa",
               "analytics-event",
               "analytics-event-ip",
+              "gift-checkout",
               "gift-claim",
               "gift-create",
               "gift-lifecycle",
@@ -129,6 +130,7 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
               "media-read",
               "media-upload",
               "media-write",
+              "order-read",
               "public-gift-read",
               "public-gift-read-ip",
             ],
@@ -763,6 +765,80 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
           "createdAt",
           "updatedAt",
           "expiresAt",
+        ],
+      },
+    },
+  },
+  {
+    indexes: [
+      { key: { orderCode: 1 }, options: { name: "orders_order_code_unique", unique: true } },
+      {
+        // At most one open payment link per gift (`billing-checkout`).
+        key: { giftId: 1 },
+        options: {
+          name: "orders_gift_pending_unique",
+          partialFilterExpression: { status: "pending" },
+          unique: true,
+        },
+      },
+      {
+        // Checkout idempotency keys are namespaced per owner; a failed order releases its key.
+        key: { ownerId: 1, idempotencyKey: 1 },
+        options: {
+          name: "orders_owner_idempotency_unique",
+          partialFilterExpression: { idempotencyKey: { $type: "string" } },
+          unique: true,
+        },
+      },
+      { key: { ownerId: 1, createdAt: -1 }, options: { name: "orders_owner_created" } },
+    ],
+    name: COLLECTIONS.orders,
+    validator: {
+      $jsonSchema: {
+        additionalProperties: true,
+        bsonType: "object",
+        properties: {
+          _id: { bsonType: "string", minLength: 1 },
+          amountVnd: { bsonType: "int", minimum: 0 },
+          checkoutUrl: { bsonType: ["string", "null"] },
+          createdAt: { bsonType: "date" },
+          currency: { enum: ["VND"] },
+          expiresAt: { bsonType: "date" },
+          giftId: { bsonType: "string", minLength: 1 },
+          giftPublicId: { bsonType: "string", minLength: 1 },
+          // A 12-digit integer: the driver stores it as a double.
+          orderCode: { bsonType: ["int", "long", "double"], minimum: 1 },
+          ownerId: { bsonType: "string", minLength: 1 },
+          planId: { enum: ["free", "standard"] },
+          planVersion: { bsonType: "int", minimum: 1 },
+          provider: { enum: ["payos", "fake"] },
+          providerPaymentId: { bsonType: ["string", "null"] },
+          revision: { bsonType: "int", minimum: 0 },
+          rightsConfirmedAt: { bsonType: "date" },
+          status: {
+            enum: ["pending", "paid", "fulfilled", "cancelled", "expired", "failed", "refunded"],
+          },
+          updatedAt: { bsonType: "date" },
+        },
+        required: [
+          "_id",
+          "orderCode",
+          "giftId",
+          "giftPublicId",
+          "ownerId",
+          "planId",
+          "planVersion",
+          "amountVnd",
+          "currency",
+          "revision",
+          "rightsConfirmedAt",
+          "provider",
+          "providerPaymentId",
+          "checkoutUrl",
+          "status",
+          "expiresAt",
+          "createdAt",
+          "updatedAt",
         ],
       },
     },
