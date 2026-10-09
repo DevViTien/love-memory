@@ -4,10 +4,17 @@ import { analyticsContextForGift, publishAnalytics } from "@/composition/analyti
 import { audioCatalog } from "@/composition/audio";
 import { resolveTemplateArtifact } from "@/composition/templates";
 import { getInternalPlanGrantEnvironment } from "@/config/internal-plan-grant";
+import { createGiftLifecycleService } from "@/modules/gifts/application/gift-lifecycle";
 import { createGiftService, type PlanGrantPolicy } from "@/modules/gifts/application/gift-service";
 import { getAuthEnvironment } from "@/modules/auth/infrastructure/auth-environment";
 import { createIdempotentAnonymousDraftIdentity } from "@/modules/gifts/infrastructure/anonymous-draft-identity";
+import { mongoGiftLifecycleRepository } from "@/modules/gifts/infrastructure/mongo-gift-lifecycle-repository";
 import { mongoGiftRepository } from "@/modules/gifts/infrastructure/mongo-gift-repository";
+import { type GiftLifecycleRouteDependencies } from "@/modules/gifts/presentation/gift-lifecycle-route-handler";
+import {
+  enforceGiftMutationRateLimit,
+  getGiftRequestContext,
+} from "@/modules/gifts/presentation/gift-route-helpers";
 import { mongoGiftTemplateRepository } from "@/modules/gifts/infrastructure/mongo-gift-template-repository";
 import { mongoMediaAssetRepository } from "@/modules/media/infrastructure/mongo-media-repository";
 
@@ -57,3 +64,24 @@ export const giftService = createGiftService({
 export function getGiftTemplateManifest(templateId: string, version: string) {
   return mongoGiftTemplateRepository.findEditableManifest(templateId, version);
 }
+
+/** Owner pause, resume and delete (`gift-lifecycle`). */
+export const giftLifecycleService = createGiftLifecycleService({
+  gifts: mongoGiftLifecycleRepository,
+  // Loaded on use, like the gift service's dispatcher: `composition/jobs` builds on this module.
+  jobs: {
+    dispatch: async (type) => (await import("@/composition/jobs")).jobDispatcher.dispatch(type),
+  },
+});
+
+export const giftLifecycleRouteDependencies: GiftLifecycleRouteDependencies = {
+  getAccessors: async (request) => (await getGiftRequestContext(request)).accessors,
+  limit: async (request, id) =>
+    enforceGiftMutationRateLimit(
+      request,
+      await getGiftRequestContext(request),
+      "gift-lifecycle",
+      id,
+    ),
+  service: giftLifecycleService,
+};

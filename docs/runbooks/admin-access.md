@@ -96,6 +96,14 @@ suspected compromised. It takes effect on the next request:
 The factor stays stored but grants nothing without the role. Run `admin:reset-mfa` as well if the
 role may be granted again later to the same person on a new device.
 
+## Deleted gifts
+
+A lookup finds a gift that its owner is deleting with the status `deleting`. Its purge job runs
+within minutes (see the [background jobs runbook](./background-jobs.md)). Once purged, the gift is
+found by its internal id or `publicId` in its tombstone. The page then shows `Đã xoá` with the
+owner id and the creation, publication, deletion-request and deletion times. The audit page lists
+`gift.deleted` for it, with the actor `system:gift.delete.v1`.
+
 ## Reading the audit page
 
 `/admin/audit` lists the latest 100 records, newest first. Times are shown as `HH:mm dd/MM/yyyy`

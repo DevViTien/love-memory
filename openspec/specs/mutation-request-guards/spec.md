@@ -47,15 +47,16 @@ Guarded mutation endpoints SHALL reject cross-origin browser requests with HTTP 
 
 The system SHALL apply fixed-window rate limits to mutations, with counters stored in the shared database so limits hold across server instances. Each counter SHALL be incremented atomically and SHALL expire when its window ends. Concurrent requests that create the same new counter SHALL each be counted: a request that loses the race to create the counter SHALL be charged to the counter that the other request created, and SHALL be rejected only when that counter is over its limit. The limits per scope are:
 
-| Scope          | Endpoint                             | Limit                       |
-| -------------- | ------------------------------------ | --------------------------- |
-| `gift-create`  | `POST /api/gifts`                    | 10 requests per 600 seconds |
-| `gift-update`  | `PATCH /api/gifts/{publicId}`        | 60 requests per 60 seconds  |
-| `gift-claim`   | `POST /api/gifts/{publicId}/claim`   | 10 requests per 300 seconds |
-| `gift-preview` | `POST /api/gifts/{publicId}/preview` | 30 requests per 600 seconds |
-| `gift-publish` | `POST /api/gifts/{publicId}/publish` | 10 requests per 600 seconds |
-| `media-upload` | media upload initialization          | 30 requests per 600 seconds |
-| `admin-mfa`    | `POST /api/admin/mfa/verify`         | 10 requests per 600 seconds |
+| Scope            | Endpoint                                                    | Limit                       |
+| ---------------- | ----------------------------------------------------------- | --------------------------- |
+| `gift-create`    | `POST /api/gifts`                                           | 10 requests per 600 seconds |
+| `gift-update`    | `PATCH /api/gifts/{publicId}`                               | 60 requests per 60 seconds  |
+| `gift-claim`     | `POST /api/gifts/{publicId}/claim`                          | 10 requests per 300 seconds |
+| `gift-preview`   | `POST /api/gifts/{publicId}/preview`                        | 30 requests per 600 seconds |
+| `gift-publish`   | `POST /api/gifts/{publicId}/publish`                        | 10 requests per 600 seconds |
+| `media-upload`   | media upload initialization                                 | 30 requests per 600 seconds |
+| `admin-mfa`      | `POST /api/admin/mfa/verify`                                | 10 requests per 600 seconds |
+| `gift-lifecycle` | `POST /api/gifts/{publicId}/pause`, `/resume` and `/delete` | 20 requests per 600 seconds |
 
 `POST /api/gifts/{publicId}/preview` and `POST /api/gifts/{publicId}/publish` are guarded mutation endpoints: they pass the media-type and origin checks of this capability and use the standard response envelope. Windows SHALL align to multiples of the window length. The limit SHALL be checked after the media-type, origin, path, and required-header checks, and before the request body is parsed. A request over the limit SHALL be rejected with HTTP `429`, code `RATE_LIMITED`, `details.retryAfterSeconds`, and a `Retry-After` header. Both carry the number of seconds until the current window ends, with a minimum of 1.
 
@@ -94,6 +95,13 @@ The system SHALL apply fixed-window rate limits to mutations, with counters stor
 - **WHEN** the same admin sends an eleventh `POST /api/admin/mfa/verify` within one 600-second window
 - **THEN** the response is `429` with code `RATE_LIMITED` and a `Retry-After` header, and the code is
   not checked
+
+#### Scenario: Lifecycle limit exceeded
+
+- **WHEN** the same subject sends a 21st pause, resume or delete request within one 600-second
+  window
+- **THEN** the response is `429` with code `RATE_LIMITED` and a `Retry-After` header, and the gift
+  is unchanged
 
 ### Requirement: Rate-limit subjects and key hashing
 

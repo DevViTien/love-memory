@@ -117,6 +117,15 @@ function accessFilter(accessors: readonly GiftAccessor[]): Filter<GiftDocument> 
   return filters.length === 1 ? filters[0]! : { $or: filters };
 }
 
+/** A gift being deleted, read by `gift.delete.v1` (`gift-lifecycle`); `null` in any other status. */
+export async function findDeletingGift(giftId: string): Promise<Gift | null> {
+  const database = await getDatabase();
+  const document = await database
+    .collection<GiftDocument>(COLLECTIONS.gifts)
+    .findOne({ _id: giftId, status: "deleting" });
+  return document ? toDomain(document) : null;
+}
+
 /** How many of a gift's most recent revision snapshots are kept (`gift-drafts`). */
 export const GIFT_REVISION_RETENTION = 20;
 

@@ -26,7 +26,7 @@ The system SHALL record each audited event as one document in `auditLog`, holdin
 
 The actions are `admin.role.granted`, `admin.role.revoked`, `admin.mfa.enrolled`, `admin.mfa.reset`,
 `admin.mfa.verified`, `admin.mfa.failed`, `admin.gift.looked_up`, `admin.template.retired`,
-`admin.template.killed` and `admin.template.restored`. Later capabilities add their own actions to
+`admin.template.killed`, `admin.template.restored` and `gift.deleted`. Later capabilities add their own actions to
 this list.
 
 **Contents.** A record MUST NOT contain gift content, captions, passwords, TOTP or backup codes,

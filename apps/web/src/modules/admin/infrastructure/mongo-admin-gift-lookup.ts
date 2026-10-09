@@ -1,7 +1,11 @@
 import { COLLECTIONS, getDatabase } from "@love-memory/database";
 import { type UUID } from "mongodb";
 
-import { type AdminGiftLookupRepository, type AdminGiftSummary } from "../application/gift-lookup";
+import {
+  type AdminGiftLookupRepository,
+  type AdminGiftSummary,
+  type AdminGiftTombstone,
+} from "../application/gift-lookup";
 import { authIdFilter } from "./better-auth-ids";
 
 /** Only the fields the summary shows are read: content never leaves the database. */
@@ -40,7 +44,40 @@ const SUMMARY_PROJECTION = {
  * Admin-only, cross-owner reads of `gifts`, `users` and `assets` (design Decision 5); no creator
  * repository gains a cross-owner method. Each branch of the match is served by a unique index.
  */
+type GiftTombstoneDocument = Omit<AdminGiftTombstone, "id"> & Readonly<{ _id: string }>;
+
 export const mongoAdminGiftLookup: AdminGiftLookupRepository = {
+  async findTombstone(query) {
+    const database = await getDatabase();
+    // `_id` and `gift_tombstones_public_id` serve the two branches; a share id never matches.
+    const tombstone = await database
+      .collection<GiftTombstoneDocument>(COLLECTIONS.giftTombstones)
+      .findOne(
+        { $or: [{ _id: query }, { publicId: query }] },
+        {
+          projection: {
+            _id: 1,
+            createdAt: 1,
+            deletedAt: 1,
+            deletionRequestedAt: 1,
+            ownerId: 1,
+            publicId: 1,
+            publishedAt: 1,
+          },
+        },
+      );
+    if (!tombstone) return null;
+    return {
+      createdAt: tombstone.createdAt,
+      deletedAt: tombstone.deletedAt,
+      deletionRequestedAt: tombstone.deletionRequestedAt,
+      id: tombstone._id,
+      ownerId: tombstone.ownerId,
+      publicId: tombstone.publicId,
+      publishedAt: tombstone.publishedAt,
+    };
+  },
+
   async findSummary(query) {
     const database = await getDatabase();
     const gift = await database.collection<GiftSummaryDocument>(COLLECTIONS.gifts).findOne(

@@ -10,6 +10,7 @@ export type ApiRateLimitScope =
   | "analytics-event-ip"
   | "gift-claim"
   | "gift-create"
+  | "gift-lifecycle"
   | "gift-preview"
   | "gift-publish"
   | "gift-update"
@@ -36,6 +37,8 @@ const RATE_LIMITS: Readonly<Record<ApiRateLimitScope, RateLimit>> = {
   "analytics-event-ip": { max: 1200, windowSeconds: 10 * 60 },
   "gift-claim": { max: 10, windowSeconds: 5 * 60 },
   "gift-create": { max: 10, windowSeconds: 10 * 60 },
+  // Pause, resume and delete (`gift-lifecycle`): rare owner actions, each idempotent by state.
+  "gift-lifecycle": { max: 20, windowSeconds: 10 * 60 },
   "gift-preview": { max: 30, windowSeconds: 10 * 60 },
   "gift-publish": { max: 10, windowSeconds: 10 * 60 },
   "gift-update": { max: 60, windowSeconds: 60 },

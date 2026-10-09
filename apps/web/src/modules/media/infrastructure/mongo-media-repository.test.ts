@@ -15,6 +15,7 @@ vi.mock("@love-memory/database", async (importOriginal) => ({
 
 import {
   mongoDetachedAssetRepository,
+  mongoGiftAssetPurgeRepository,
   mongoMediaAssetRepository,
   mongoMediaOutboxMonitor,
   mongoMediaWorkerRepository,
@@ -478,6 +479,42 @@ describe("Mongo media repositories", () => {
       expect(assets.updateOne).toHaveBeenCalledWith(
         { _id: baseAsset.id, status: "deleting" },
         { $set: { expiresAt: null, status: "deleted", updatedAt: now } },
+      );
+    });
+  });
+
+  describe("gift asset purge", () => {
+    it("lists every asset of the gift and moves any live one to deleting", async () => {
+      assets.find.mockReturnValue({
+        sort: () => ({ toArray: () => Promise.resolve([]) }),
+        toArray: () => Promise.resolve([document("processing")]),
+      });
+
+      await expect(
+        mongoGiftAssetPurgeRepository.listForGift(baseAsset.giftId),
+      ).resolves.toMatchObject([{ id: baseAsset.id, status: "processing" }]);
+      expect(assets.find).toHaveBeenCalledWith({ giftId: baseAsset.giftId });
+
+      await expect(
+        mongoGiftAssetPurgeRepository.markGiftAssetDeleting(baseAsset.id, baseAsset.giftId, now),
+      ).resolves.toBe(true);
+      expect(assets.updateOne).toHaveBeenCalledWith(
+        {
+          _id: baseAsset.id,
+          giftId: baseAsset.giftId,
+          status: { $in: ["initiated", "uploaded", "processing", "ready", "failed"] },
+        },
+        {
+          $set: {
+            expiresAt: new Date(now.getTime() + 60_000),
+            status: "deleting",
+            updatedAt: now,
+          },
+        },
+      );
+
+      await expect(mongoGiftAssetPurgeRepository.markDeleted(baseAsset.id, now)).resolves.toBe(
+        true,
       );
     });
   });

@@ -97,6 +97,15 @@ grant the tier's first admin with `pnpm admin:grant <email> --operator <name>` (
 [admin access runbook](./admin-access.md)). Rolling back past version 13 needs no data repair;
 admins step up again after the roll forward.
 
+Schema version `14` (`add-gift-pause-and-delete`):
+
+- creates `giftTombstones` (TTL, 365 days);
+- adds the `analytics_events_gift_ref` index and the `gift-lifecycle` rate-limit scope.
+
+There is no backfill and no new environment variable. Run `pnpm jobs:deploy` after `db:migrate`, so
+the tier's workers run `gift.delete.v1`. Until the migration runs, pause, resume and delete requests
+answer `500`: the rate-limit write is refused by the old validator.
+
 ## Environment variables
 
 Configure shared Preview secrets once and override environment identity per branch:

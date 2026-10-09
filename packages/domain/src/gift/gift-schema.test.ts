@@ -142,6 +142,29 @@ describe("GiftSchema", () => {
       ).toBe(false);
     });
 
+    it("treats a paused gift like a published one (Owner pauses a published gift)", () => {
+      const pausedAt = new Date("2026-09-20T00:00:00.000Z");
+      expect(
+        GiftSchema.safeParse({ ...base, ...shareFields, pausedAt, status: "paused" }).success,
+      ).toBe(true);
+      expect(GiftSchema.safeParse({ ...base, pausedAt, status: "paused" }).success).toBe(false);
+      const { entitlement: _entitlement, ...withoutEntitlement } = shareFields;
+      expect(
+        GiftSchema.safeParse({ ...base, ...withoutEntitlement, status: "paused" }).success,
+      ).toBe(false);
+    });
+
+    it("accepts a deleting draft and a deleting published gift", () => {
+      const deletionRequestedAt = new Date("2026-09-21T00:00:00.000Z");
+      expect(
+        GiftSchema.safeParse({ ...base, deletionRequestedAt, status: "deleting" }).success,
+      ).toBe(true);
+      expect(
+        GiftSchema.safeParse({ ...base, ...shareFields, deletionRequestedAt, status: "deleting" })
+          .success,
+      ).toBe(true);
+    });
+
     it("accepts a working copy ahead of its publication and rejects one behind it", () => {
       expect(
         GiftSchema.safeParse({ ...base, ...shareFields, publishedRevision: 1, status: "published" })

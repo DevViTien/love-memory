@@ -194,11 +194,16 @@ by content.
 It MUST NOT show content, captions, field values, asset ids, storage keys, share links or signed
 URLs. Only the `shareId` the admin typed may appear, in the search field.
 
+A gift being deleted (`gift-lifecycle`) SHALL be found like any other, with its status `deleting`.
+A purged gift SHALL be found by its internal id or `publicId` in its tombstone. The page SHALL then
+show `Đã xoá`, the internal id, `publicId`, owner id, and the creation, publication, deletion-request
+and deletion times, and nothing else.
+
 **No match** SHALL show `Không tìm thấy món quà nào.`
 
 **Audit.** Every search SHALL record `admin.gift.looked_up`:
 
-- with the gift as target and `{ matched: true }` for a match;
+- with the gift as target and `{ matched: true }` for a match, including a tombstone;
 - without a target and with `{ matched: false }` otherwise.
 
 The searched text MUST NOT be recorded, because a share id is a recipient's credential.
@@ -220,3 +225,9 @@ The searched text MUST NOT be recorded, because a share id is a recipient's cred
 - **WHEN** a stepped-up admin searches for a value that matches no gift
 - **THEN** the page shows `Không tìm thấy món quà nào.`, and the audit record has no target and
   `{ matched: false }`
+
+#### Scenario: Lookup of a deleted gift
+
+- **WHEN** a stepped-up admin searches for the `publicId` of a purged gift
+- **THEN** the page shows `Đã xoá` with the gift's ids and times, and no plan, template or asset
+  counts

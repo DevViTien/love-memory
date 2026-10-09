@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { type AdminSession } from "./admin-access";
-import { type AdminGiftSummary, createGiftLookupService } from "./gift-lookup";
+import {
+  type AdminGiftSummary,
+  type AdminGiftTombstone,
+  createGiftLookupService,
+} from "./gift-lookup";
 
 const session: AdminSession = {
   sessionId: "session-1",
@@ -28,7 +32,11 @@ const summary: AdminGiftSummary = {
 describe("admin gift lookup", () => {
   const record = vi.fn();
   const findSummary = vi.fn<(query: string) => Promise<AdminGiftSummary | null>>();
-  const service = createGiftLookupService({ audit: { record }, repository: { findSummary } });
+  const findTombstone = vi.fn<(query: string) => Promise<AdminGiftTombstone | null>>();
+  const service = createGiftLookupService({
+    audit: { record },
+    repository: { findSummary, findTombstone },
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -52,6 +60,31 @@ describe("admin gift lookup", () => {
       "r-1",
     );
     expect(JSON.stringify(record.mock.calls)).not.toContain("share-id-secret");
+  });
+
+  it("finds a purged gift's tombstone and audits its id (Lookup of a deleted gift)", async () => {
+    const tombstone: AdminGiftTombstone = {
+      createdAt: new Date("2026-10-01T00:00:00.000Z"),
+      deletedAt: new Date("2026-10-10T12:00:00.000Z"),
+      deletionRequestedAt: new Date("2026-10-10T11:00:00.000Z"),
+      id: summary.id,
+      ownerId: "user-1",
+      publicId: "abcDEF123456",
+      publishedAt: null,
+    };
+    findSummary.mockResolvedValueOnce(null);
+    findTombstone.mockResolvedValueOnce(tombstone);
+
+    await expect(
+      service.lookup({ query: "abcDEF123456", requestId: "r-1", session }),
+    ).resolves.toEqual({ kind: "deleted", tombstone });
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: { matched: true },
+        target: { id: summary.id, kind: "gift" },
+      }),
+      "r-1",
+    );
   });
 
   it("audits a miss without a target (Nothing found)", async () => {

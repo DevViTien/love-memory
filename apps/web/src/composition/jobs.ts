@@ -8,6 +8,11 @@ import {
   triggerJobsDrain,
 } from "@/modules/jobs/infrastructure/job-dispatcher";
 import { mongoJobOutbox } from "@/modules/jobs/infrastructure/mongo-job-outbox";
+import { getAnalyticsEnvironment } from "@/config/analytics";
+import { createAnalyticsGiftErasure } from "@/modules/analytics/infrastructure/mongo-analytics-gift-erasure";
+import { createGiftDeletionHandler } from "@/modules/gifts/application/gift-deletion";
+import { GIFT_DELETE_JOB } from "@/modules/gifts/application/gift-lifecycle";
+import { mongoGiftDeletionRepository } from "@/modules/gifts/infrastructure/mongo-gift-deletion-repository";
 import { mongoGiftPublicationRepository } from "@/modules/gifts/infrastructure/mongo-gift-publication-repository";
 import { mongoGiftRepository } from "@/modules/gifts/infrastructure/mongo-gift-repository";
 import {
@@ -15,22 +20,32 @@ import {
   GIFT_ASSETS_CLEANUP_JOB,
 } from "@/modules/media/application/gift-assets-cleanup";
 import { assertMediaRuntimeReady } from "@/modules/media/infrastructure/media-job-scheduler";
-import { mongoDetachedAssetRepository } from "@/modules/media/infrastructure/mongo-media-repository";
+import {
+  mongoDetachedAssetRepository,
+  mongoGiftAssetPurgeRepository,
+} from "@/modules/media/infrastructure/mongo-media-repository";
 import { reportJobFailure, reportOperationalFailure } from "@/observability/operational-errors";
 
 let jobRunner: JobRunner | undefined;
 
 /** The registered generic types; `createHandlers` builds exactly these (`jobs.test.ts`). */
-export const REGISTERED_JOB_TYPES: readonly JobType[] = [GIFT_ASSETS_CLEANUP_JOB];
+export const REGISTERED_JOB_TYPES: readonly JobType[] = [GIFT_ASSETS_CLEANUP_JOB, GIFT_DELETE_JOB];
 
 /** Every registered generic job type (`background-jobs`); `media.process.v1` is not one of them. */
 export function createHandlers(): AnyJobHandler[] {
+  const storage = createStorage();
   return [
     createGiftAssetsCleanupHandler({
       assets: mongoDetachedAssetRepository,
       gifts: mongoGiftRepository,
       publications: mongoGiftPublicationRepository,
-      storage: createStorage(),
+      storage,
+    }),
+    createGiftDeletionHandler({
+      analytics: createAnalyticsGiftErasure(() => getAnalyticsEnvironment().giftRefSecret),
+      assets: mongoGiftAssetPurgeRepository,
+      gifts: mongoGiftDeletionRepository,
+      storage,
     }),
   ];
 }

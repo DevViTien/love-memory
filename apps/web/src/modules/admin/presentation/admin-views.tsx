@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { type AuditRecord } from "../application/audit";
-import { type AdminGiftSummary } from "../application/gift-lookup";
+import { type AdminGiftSummary, type AdminGiftTombstone } from "../application/gift-lookup";
 
 export const ADMIN_LOOKUP_NOT_FOUND = "Không tìm thấy món quà nào.";
 
@@ -71,6 +71,30 @@ export function AdminGiftSummaryView({ gift }: Readonly<{ gift: AdminGiftSummary
           Nhật ký của món quà này
         </Link>
       </p>
+    </section>
+  );
+}
+
+/** A purged gift: `Đã xoá` with its ids and times, nothing else (`admin-access`). */
+export function AdminGiftTombstoneView({ tombstone }: Readonly<{ tombstone: AdminGiftTombstone }>) {
+  return (
+    <section
+      aria-label="Món quà đã xoá"
+      className="rounded-2xl border border-stone-200 bg-white p-5"
+    >
+      <p className="mb-3 font-black text-red-700">Đã xoá</p>
+      <dl>
+        <SummaryRow label="Mã nội bộ" value={tombstone.id} />
+        <SummaryRow label="Mã công khai" value={tombstone.publicId} />
+        <SummaryRow label="Chủ sở hữu" value={tombstone.ownerId ?? "Bản nháp ẩn danh"} />
+        <SummaryRow label="Tạo lúc" value={formatAdminTime(tombstone.createdAt)} />
+        <SummaryRow label="Đăng lúc" value={formatAdminTime(tombstone.publishedAt)} />
+        <SummaryRow
+          label="Yêu cầu xoá lúc"
+          value={formatAdminTime(tombstone.deletionRequestedAt)}
+        />
+        <SummaryRow label="Đã xoá lúc" value={formatAdminTime(tombstone.deletedAt)} />
+      </dl>
     </section>
   );
 }

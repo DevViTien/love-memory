@@ -4,7 +4,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { buildAuditRecord } from "../application/audit";
 import { type AdminGiftSummary } from "../application/gift-lookup";
-import { AdminAuditTable, AdminGiftSummaryView, formatAdminTime } from "./admin-views";
+import {
+  AdminAuditTable,
+  AdminGiftSummaryView,
+  AdminGiftTombstoneView,
+  formatAdminTime,
+} from "./admin-views";
 
 const gift: AdminGiftSummary = {
   assetCounts: { failed: 1, ready: 2 },
@@ -45,6 +50,28 @@ describe("admin views", () => {
     expect(screen.getByRole("link", { name: "Nhật ký của món quà này" }).getAttribute("href")).toBe(
       `/admin/audit?target=${gift.id}`,
     );
+  });
+
+  it("shows a deleted gift's ids and times only (Lookup of a deleted gift)", () => {
+    render(
+      createElement(AdminGiftTombstoneView, {
+        tombstone: {
+          createdAt: new Date("2026-10-01T01:05:00.000Z"),
+          deletedAt: new Date("2026-10-10T05:00:00.000Z"),
+          deletionRequestedAt: new Date("2026-10-10T04:00:00.000Z"),
+          id: gift.id,
+          ownerId: null,
+          publicId: "abcDEF123456",
+          publishedAt: null,
+        },
+      }),
+    );
+
+    const section = screen.getByRole("region", { name: "Món quà đã xoá" });
+    expect(section.textContent).toContain("Đã xoá");
+    expect(section.textContent).toContain("12:00 10/10/2026");
+    expect(section.textContent).toContain("Bản nháp ẩn danh");
+    expect(section.textContent).not.toContain("memory-box");
   });
 
   it("labels an anonymous draft", () => {

@@ -87,9 +87,11 @@ describe("gift draft behavior", () => {
   });
 
   it("refuses to save a gift whose status is not editable", () => {
-    const paused = GiftSchema.parse({ ...createAnonymousDraft(), status: "paused" });
+    const deleting = GiftSchema.parse({ ...createAnonymousDraft(), status: "deleting" });
 
-    expect(updateGiftDraft(paused, { content: paused.content, expectedRevision: 0, now })).toEqual({
+    expect(
+      updateGiftDraft(deleting, { content: deleting.content, expectedRevision: 0, now }),
+    ).toEqual({
       error: { code: "GIFT_NOT_DRAFT" },
       ok: false,
     });

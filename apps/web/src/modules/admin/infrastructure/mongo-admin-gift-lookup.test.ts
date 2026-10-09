@@ -34,11 +34,12 @@ describe("Mongo admin gift lookup", () => {
   const gifts = { findOne: vi.fn() };
   const users = { findOne: vi.fn() };
   const assets = { aggregate: vi.fn() };
+  const giftTombstones = { findOne: vi.fn() };
 
   beforeEach(() => {
     vi.clearAllMocks();
     databaseMocks.getDatabase.mockResolvedValue({
-      collection: (name: string) => ({ assets, gifts, users })[name],
+      collection: (name: string) => ({ assets, giftTombstones, gifts, users })[name],
     });
     assets.aggregate.mockReturnValue({
       toArray: () =>
@@ -145,5 +146,38 @@ describe("Mongo admin gift lookup", () => {
     await expect(mongoAdminGiftLookup.findSummary(giftId)).resolves.toMatchObject({
       owner: { email: null, id: "user-gone", kind: "user" },
     });
+  });
+
+  it("finds a tombstone by id or public id and returns only its ids and times", async () => {
+    const deletedAt = new Date("2026-10-10T12:00:00.000Z");
+    giftTombstones.findOne.mockResolvedValueOnce({
+      _id: giftId,
+      createdAt: new Date("2026-10-01T00:00:00.000Z"),
+      deletedAt,
+      deletionRequestedAt: new Date("2026-10-10T11:00:00.000Z"),
+      ownerId: null,
+      publicId: "abcDEF123456",
+      publishedAt: null,
+    });
+
+    const tombstone = await mongoAdminGiftLookup.findTombstone("abcDEF123456");
+
+    expect(giftTombstones.findOne).toHaveBeenCalledWith(
+      { $or: [{ _id: "abcDEF123456" }, { publicId: "abcDEF123456" }] },
+      expect.anything(),
+    );
+    expect(Object.keys(tombstone ?? {}).sort()).toEqual([
+      "createdAt",
+      "deletedAt",
+      "deletionRequestedAt",
+      "id",
+      "ownerId",
+      "publicId",
+      "publishedAt",
+    ]);
+    expect(tombstone).toMatchObject({ deletedAt, id: giftId, ownerId: null });
+
+    giftTombstones.findOne.mockResolvedValueOnce(null);
+    await expect(mongoAdminGiftLookup.findTombstone("nothing")).resolves.toBeNull();
   });
 });

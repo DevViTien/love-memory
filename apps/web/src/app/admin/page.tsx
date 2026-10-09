@@ -7,6 +7,7 @@ import { requireAdminPage } from "@/modules/admin/presentation/admin-guard";
 import {
   ADMIN_LOOKUP_NOT_FOUND,
   AdminGiftSummaryView,
+  AdminGiftTombstoneView,
 } from "@/modules/admin/presentation/admin-views";
 
 export const metadata: Metadata = {
@@ -51,6 +52,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         <Button type="submit">Tìm</Button>
       </form>
       {result.kind === "found" ? <AdminGiftSummaryView gift={result.gift} /> : null}
+      {result.kind === "deleted" ? <AdminGiftTombstoneView tombstone={result.tombstone} /> : null}
       {result.kind === "not-found" ? (
         <p className="font-semibold text-stone-700" role="status">
           {ADMIN_LOOKUP_NOT_FOUND}

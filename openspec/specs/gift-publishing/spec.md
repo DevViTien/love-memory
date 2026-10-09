@@ -411,11 +411,14 @@ panel SHALL show:
 - the status `Có thay đổi chưa cập nhật. Người nhận vẫn đang xem bản đã gửi trước đó.` while the
   gift has unpublished changes, and otherwise `Người nhận đang xem bản mới nhất.`. The status SHALL
   follow each successful save and each successful update without a page reload;
-- the note `Ai có đường dẫn này đều mở được món quà. Chỉ chia sẻ với người nhận.`
+- the note `Ai có đường dẫn này đều mở được món quà. Chỉ chia sẻ với người nhận.`;
+- the owner controls `Tạm dừng chia sẻ` and `Xoá món quà` of `gift-lifecycle` "Owner controls in the
+  Studio".
 
-The page SHALL autosave the working copy as for a draft (`studio-autosave`). For a gift in any
-status other than `draft` or `published`, or for an unauthorized request, the page SHALL render the
-not-found page.
+The page SHALL autosave the working copy as for a draft (`studio-autosave`). For a `paused` gift the
+page SHALL show the paused panel of `gift-lifecycle` instead of the published panel and the editor.
+For a gift in any other status other than `draft` or `published`, or for an unauthorized request,
+the page SHALL render the not-found page.
 
 #### Scenario: Owner reopens a published gift
 
@@ -449,6 +452,12 @@ not-found page.
 - **WHEN** the owner opens that gift after `2026-10-22T10:00:00Z`
 - **THEN** the panel shows `Món quà đã hết hạn lúc 17:00 22/10/2026. Người nhận không còn mở
 được.`, and the editor stays editable
+
+#### Scenario: Paused gift in the Studio
+
+- **WHEN** the owner opens `/studio/{publicId}` of a paused gift
+- **THEN** the page shows `Đã tạm dừng chia sẻ` with `Tiếp tục chia sẻ` and `Xoá món quà`, and no
+  editor
 
 ### Requirement: Editing a published gift
 

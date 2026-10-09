@@ -4,6 +4,7 @@ import { type GiftPublicationSummary } from "@love-memory/contracts";
 import { Button } from "@love-memory/ui";
 import { useState, useSyncExternalStore } from "react";
 
+import { PauseGiftButton } from "./gift-lifecycle-controls";
 import { formatExpiry } from "./plan-format";
 import { useNow } from "./use-now";
 
@@ -34,10 +35,13 @@ export function publishedPlanLine(planName: string, expiresAt: string, now: numb
 export function PublishedPanel({
   hasUnpublishedChanges,
   planName,
+  publicId,
   publication,
 }: Readonly<{
   hasUnpublishedChanges: boolean;
   planName: string;
+  /** Enables `Tạm dừng chia sẻ` (`gift-lifecycle`). */
+  publicId?: string;
   publication: GiftPublicationSummary;
 }>) {
   const origin = useSyncExternalStore(
@@ -118,6 +122,7 @@ export function PublishedPanel({
       <p className="text-sm leading-6 text-stone-700">
         Ai có đường dẫn này đều mở được món quà. Chỉ chia sẻ với người nhận.
       </p>
+      {publicId ? <PauseGiftButton publicId={publicId} /> : null}
     </section>
   );
 }

@@ -28,13 +28,27 @@ export type AdminGiftSummary = Readonly<{
   updatedAt: Date;
 }>;
 
+/** What remains of a purged gift (`gift-lifecycle`): ids and times only. */
+export type AdminGiftTombstone = Readonly<{
+  createdAt: Date;
+  deletedAt: Date;
+  deletionRequestedAt: Date;
+  id: string;
+  ownerId: string | null;
+  publicId: string;
+  publishedAt: Date | null;
+}>;
+
 export interface AdminGiftLookupRepository {
   /** An exact match on the internal id, `publicId` or `shareId`; never on content. */
   findSummary(query: string): Promise<AdminGiftSummary | null>;
+  /** A purged gift's tombstone, by its internal id or `publicId`. */
+  findTombstone(query: string): Promise<AdminGiftTombstone | null>;
 }
 
 export type GiftLookupResult =
   | Readonly<{ gift: AdminGiftSummary; kind: "found" }>
+  | Readonly<{ kind: "deleted"; tombstone: AdminGiftTombstone }>
   | Readonly<{ kind: "empty" }>
   | Readonly<{ kind: "not-found" }>;
 
@@ -52,18 +66,21 @@ export function createGiftLookupService({
     const query = input.query.trim();
     if (!query) return { kind: "empty" };
 
-    const gift =
-      query.length <= GIFT_LOOKUP_MAX_LENGTH ? await repository.findSummary(query) : null;
+    const searchable = query.length <= GIFT_LOOKUP_MAX_LENGTH;
+    const gift = searchable ? await repository.findSummary(query) : null;
+    const tombstone = searchable && !gift ? await repository.findTombstone(query) : null;
+    const matchedId = gift?.id ?? tombstone?.id ?? null;
     await audit.record(
       {
         action: "admin.gift.looked_up",
         actor: { id: input.session.user.id, kind: "admin" },
-        metadata: { matched: gift !== null },
-        target: gift ? { id: gift.id, kind: "gift" } : null,
+        metadata: { matched: matchedId !== null },
+        target: matchedId ? { id: matchedId, kind: "gift" } : null,
       },
       input.requestId,
     );
-    return gift ? { gift, kind: "found" } : { kind: "not-found" };
+    if (gift) return { gift, kind: "found" };
+    return tombstone ? { kind: "deleted", tombstone } : { kind: "not-found" };
   }
 
   return { lookup } as const;

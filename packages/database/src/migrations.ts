@@ -11,7 +11,7 @@ import {
 import { COLLECTIONS, type CollectionName } from "./collections";
 import { enqueueJob } from "./job-outbox";
 
-export const DATABASE_SCHEMA_VERSION = 13;
+export const DATABASE_SCHEMA_VERSION = 14;
 
 type DatabaseMigrationDocument = Readonly<{
   _id: string;
@@ -118,6 +118,7 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
               "analytics-event-ip",
               "gift-claim",
               "gift-create",
+              "gift-lifecycle",
               "gift-preview",
               "gift-publish",
               "gift-update",
@@ -559,6 +560,8 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
       },
       // Time-bounded counts per funnel step: the only query shape left for ad-hoc analysis.
       { key: { name: 1, occurredAt: 1 }, options: { name: "analytics_events_name_occurred" } },
+      // Deleting a gift deletes its events (`gift-lifecycle`) without scanning the collection.
+      { key: { giftRef: 1 }, options: { name: "analytics_events_gift_ref" } },
     ],
     name: COLLECTIONS.analyticsEvents,
     validator: {
@@ -663,6 +666,42 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
           target: { bsonType: ["object", "null"] },
         },
         required: ["_id", "at", "actor", "action", "target", "requestId", "metadata", "expiresAt"],
+      },
+    },
+  },
+  {
+    indexes: [
+      { key: { publicId: 1 }, options: { name: "gift_tombstones_public_id" } },
+      {
+        key: { expiresAt: 1 },
+        options: { expireAfterSeconds: 0, name: "gift_tombstones_expiry_ttl" },
+      },
+    ],
+    name: COLLECTIONS.giftTombstones,
+    validator: {
+      $jsonSchema: {
+        additionalProperties: true,
+        bsonType: "object",
+        properties: {
+          _id: { bsonType: "string", minLength: 1 },
+          createdAt: { bsonType: "date" },
+          deletedAt: { bsonType: "date" },
+          deletionRequestedAt: { bsonType: "date" },
+          expiresAt: { bsonType: "date" },
+          ownerId: { bsonType: ["string", "null"] },
+          publicId: { bsonType: "string" },
+          publishedAt: { bsonType: ["date", "null"] },
+        },
+        required: [
+          "_id",
+          "publicId",
+          "ownerId",
+          "createdAt",
+          "publishedAt",
+          "deletionRequestedAt",
+          "deletedAt",
+          "expiresAt",
+        ],
       },
     },
   },

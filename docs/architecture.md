@@ -520,6 +520,37 @@ The admin area lets operations look up a gift and read the audit log. Behavior i
 ignores the new collections and `twoFactorEnabled`. Its `db:verify` reports drift, but no data
 repair is needed. Admins step up again after the roll forward.
 
+## Gift lifecycle
+
+Owners pause, resume and delete their gifts (`openspec/specs/gift-lifecycle`).
+
+- **Pause and resume.** `published ⇄ paused`, by conditional writes on the stored status. A resume
+  also needs `expiresAt > now`. Every recipient read already requires `status: "published"`, so a
+  paused gift is invisible without any change to the Viewer. The Studio shows a paused panel
+  instead of the editor (`findPaused`).
+- **Delete.**
+  - **The request.** One transaction moves `draft`, `published` or `paused` to `deleting` and
+    enqueues `gift.delete.v1` (deduplication key `gift.delete.v1:{giftId}`). From then on every read
+    is not-found.
+  - **The job** (`modules/gifts/application/gift-deletion.ts`, 8 attempts):
+    1. deletes every storage object of the gift's photos, and moves them to `deleted`;
+    2. deletes its revisions, publications, preview tokens, idempotency records and other jobs;
+    3. deletes its analytics events by `giftRef` (index `analytics_events_gift_ref`);
+    4. in one transaction: replaces the gift with a tombstone in `giftTombstones` (ids and times, a
+       365-day TTL) and records `gift.deleted`.
+
+    Each step is idempotent. A storage failure retries before the tombstone is written.
+- **Admin lookup** falls back to the tombstone and shows `Đã xoá`.
+
+**Schema version 14 rollout and rollback.** `db:migrate` adds:
+
+- `giftTombstones`;
+- the `analytics_events_gift_ref` index;
+- the `gift-lifecycle` rate-limit scope.
+
+There is no backfill. The previous build never serves `paused` or `deleting` gifts, and runs no
+`gift.delete.v1`. Pending deletions wait for the roll forward.
+
 ## Configuration
 
 Each infrastructure boundary owns and validates its environment variables. Server-only URLs use

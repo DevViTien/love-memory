@@ -79,6 +79,10 @@ export const GiftSchema = z
     expiresAt: z.coerce.date().optional(),
     id: z.uuid(),
     ownership: GiftOwnershipSchema,
+    /** When the owner paused a published gift (`gift-lifecycle`); set only while `paused`. */
+    pausedAt: z.coerce.date().optional(),
+    /** When the owner asked to delete the gift; set from `deleting` on (`gift-lifecycle`). */
+    deletionRequestedAt: z.coerce.date().optional(),
     publicId: PublicGiftIdSchema,
     publishedAt: z.coerce.date().optional(),
     /** The revision of the current publication, the one recipients receive. */
@@ -94,7 +98,9 @@ export const GiftSchema = z
     const hasPublishedAt = gift.publishedAt !== undefined;
     const hasPublishedRevision = gift.publishedRevision !== undefined;
     // Other statuses stay unconstrained until pause, expiry and deletion are specified.
-    if (gift.status === "published" && (!hasShareId || !hasPublishedAt || !hasPublishedRevision)) {
+    // A paused gift is a published one taken offline: it keeps everything a resume needs.
+    const isPublication = gift.status === "published" || gift.status === "paused";
+    if (isPublication && (!hasShareId || !hasPublishedAt || !hasPublishedRevision)) {
       context.addIssue({
         code: "custom",
         message: "A published gift requires a share id, a publication time and revision.",
@@ -116,7 +122,7 @@ export const GiftSchema = z
     }
     const hasEntitlement = gift.entitlement !== undefined;
     const hasExpiresAt = gift.expiresAt !== undefined;
-    if (gift.status === "published" && (!hasEntitlement || !hasExpiresAt)) {
+    if (isPublication && (!hasEntitlement || !hasExpiresAt)) {
       context.addIssue({
         code: "custom",
         message: "A published gift requires an entitlement and an expiry.",

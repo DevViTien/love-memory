@@ -585,7 +585,7 @@ describe("gift application service", () => {
 
   it("answers not-found when reading or saving a gift whose status is not editable (Gift in another status)", async () => {
     await createAnonymousDraft();
-    repository.current = GiftSchema.parse({ ...repository.current, status: "paused" });
+    repository.current = GiftSchema.parse({ ...repository.current, status: "deleting" });
     const accessors = [
       {
         anonymousDraftId: anonymousIdentity.anonymousDraftId,
@@ -1008,7 +1008,7 @@ describe("gift publishing", () => {
     });
 
     it("answers INVALID_STATE for a status that cannot be published (Status that cannot be published)", async () => {
-      gift = GiftSchema.parse({ ...ownedGift(), status: "paused" });
+      gift = GiftSchema.parse({ ...ownedGift(), status: "deleting" });
 
       await expect(publish()).resolves.toEqual({ error: { code: "INVALID_STATE" }, ok: false });
       expect(publishInputs).toHaveLength(0);

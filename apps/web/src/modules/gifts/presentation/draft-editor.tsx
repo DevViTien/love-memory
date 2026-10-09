@@ -282,6 +282,7 @@ export function DraftEditor({
         <div className="mb-8">
           <PublishedPanel
             hasUnpublishedChanges={hasUnpublishedChanges}
+            publicId={gift.publicId}
             planName={planName(planOffers, publication.planId)}
             publication={publication}
           />

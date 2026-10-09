@@ -10,6 +10,7 @@ separate pipeline with its own runbook, the [media pipeline runbook](./media-pip
 | Type                     | Enqueued by                                                         | Budget | What it does                                                                               |
 | ------------------------ | ------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------ |
 | `gift.assets.cleanup.v1` | Each update of a published gift, and the schema version 12 backfill | 5      | Deletes the detached photos of the gift that its current publication no longer references. |
+| `gift.delete.v1`         | An owner deleting a gift (`gift-lifecycle`)                         | 8      | Purges the gift: photo objects, derived records, analytics events; leaves a tombstone.     |
 
 **Payloads.** A payload holds identifiers only (`{ giftId }`). Nothing in a job, a job log or the
 commands below contains gift content, tokens or URLs.
@@ -75,3 +76,14 @@ these causes in order:
      fix the cause, then retry.
 2. Run `pnpm jobs:retry <jobId>` once the cause is fixed. Handlers are idempotent, so a retry never
    repeats a side effect that already happened.
+
+### A dead `gift.delete.v1`
+
+The gift stays `deleting`. Nobody can open it, but its photos and content are not purged yet.
+
+1. Read the `lastErrorCode` with `pnpm jobs:dead`. `STORAGE_DELETE_FAILED` means the object store
+   refused a delete.
+2. Fix the cause, then run `pnpm jobs:retry <jobId>`.
+
+Every step is safe to repeat. The promise to the owner is a purge within 24 hours of the request,
+so treat a dead deletion job as urgent.

@@ -10,6 +10,8 @@ import {
 import { MongoServerError } from "mongodb";
 import { randomUUID } from "node:crypto";
 
+import { type GiftAssetPurgeRepository } from "@/modules/gifts/application/gift-deletion";
+
 import { type DetachedAssetRepository } from "../application/gift-assets-cleanup";
 import { type MarkDeletingResult, type MediaAssetRepository } from "../application/media-service";
 import { type MediaOutboxMonitor } from "../application/media-outbox-health";
@@ -563,6 +565,44 @@ export const mongoDetachedAssetRepository: DetachedAssetRepository = {
     // Still detached and `ready`: never an asset of the working copy or one already taken.
     const result = await database.collection<MediaAssetDocument>(COLLECTIONS.assets).updateOne(
       { _id: assetId, detachedAt: { $ne: null }, giftId, status: "ready" },
+      {
+        $set: {
+          expiresAt: new Date(now.getTime() + 60 * 1000),
+          status: "deleting",
+          updatedAt: now,
+        },
+      },
+    );
+    return result.modifiedCount === 1;
+  },
+};
+
+/** Every photo of a gift being purged (`gift-lifecycle` "Deletion purge job"). */
+export const mongoGiftAssetPurgeRepository: GiftAssetPurgeRepository = {
+  async listForGift(giftId) {
+    const database = await getDatabase();
+    // `assets_gift_field_created` (prefix `giftId`) serves it.
+    const documents = await database
+      .collection<MediaAssetDocument>(COLLECTIONS.assets)
+      .find({ giftId })
+      .toArray();
+    return documents.map(toDomain);
+  },
+
+  async markDeleted(assetId, now) {
+    return mongoMediaAssetRepository.markDeleted(assetId, now);
+  },
+
+  async markGiftAssetDeleting(assetId, giftId, now) {
+    const database = await getDatabase();
+    // Every status a deletion may leave (`media-processing`); the 60-second expiry lets the
+    // expired-asset cleanup finish a removal this job does not.
+    const result = await database.collection<MediaAssetDocument>(COLLECTIONS.assets).updateOne(
+      {
+        _id: assetId,
+        giftId,
+        status: { $in: ["initiated", "uploaded", "processing", "ready", "failed"] },
+      },
       {
         $set: {
           expiresAt: new Date(now.getTime() + 60 * 1000),

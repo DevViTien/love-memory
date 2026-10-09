@@ -5,12 +5,21 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { audioCatalog } from "@/composition/audio";
-import { getGiftTemplateManifest, giftService, planGrantPolicy } from "@/composition/gifts";
+import {
+  getGiftTemplateManifest,
+  giftLifecycleService,
+  giftService,
+  planGrantPolicy,
+} from "@/composition/gifts";
 import { resolveTemplateArtifact } from "@/composition/templates";
 import { listPlanOffers } from "@/modules/gifts/application/plan-offers";
 import { ClaimDraftButton } from "@/modules/gifts/presentation/claim-draft-button";
 import { DraftEditor } from "@/modules/gifts/presentation/draft-editor";
 import { getGiftRequestContextFromHeaders } from "@/modules/gifts/presentation/gift-route-helpers";
+import {
+  DeleteGiftButton,
+  PausedGiftPanel,
+} from "@/modules/gifts/presentation/studio/gift-lifecycle-controls";
 
 type StudioDraftPageProps = Readonly<{
   params: Promise<{ publicId: string }>;
@@ -25,7 +34,20 @@ export default async function StudioDraftPage({ params }: StudioDraftPageProps) 
   const result = await giftService.getStudioGift({ accessors: context.accessors, publicId });
 
   if (!result.ok) {
-    notFound();
+    // A paused gift has no editor: its owner sees the paused panel (`gift-lifecycle`).
+    const paused = await giftLifecycleService.findPaused(publicId, context.accessors);
+    if (!paused) notFound();
+    return (
+      <main>
+        <Container className="max-w-2xl py-10 sm:py-14">
+          <PausedGiftPanel
+            expired={paused.expired}
+            expiresAt={paused.expiresAt}
+            publicId={paused.publicId}
+          />
+        </Container>
+      </main>
+    );
   }
 
   // A draft, or a published gift whose working copy the owner edits under the published panel.
@@ -102,6 +124,9 @@ export default async function StudioDraftPage({ params }: StudioDraftPageProps) 
                     </Link>
                   )
                 ) : null}
+              </div>
+              <div className="mt-4 border-t border-rose-100 pt-4">
+                <DeleteGiftButton publicId={publicId} />
               </div>
             </div>
           </aside>

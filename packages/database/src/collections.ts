@@ -8,6 +8,7 @@ export const COLLECTIONS = {
   authRateLimits: "authRateLimits",
   databaseMigrations: "databaseMigrations",
   giftRevisions: "giftRevisions",
+  giftTombstones: "giftTombstones",
   gifts: "gifts",
   idempotencyKeys: "idempotencyKeys",
   jobOutbox: "jobOutbox",
