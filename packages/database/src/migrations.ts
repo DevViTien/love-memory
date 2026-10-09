@@ -11,7 +11,7 @@ import {
 import { COLLECTIONS, type CollectionName } from "./collections";
 import { enqueueJob } from "./job-outbox";
 
-export const DATABASE_SCHEMA_VERSION = 17;
+export const DATABASE_SCHEMA_VERSION = 18;
 
 type DatabaseMigrationDocument = Readonly<{
   _id: string;
@@ -244,7 +244,7 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
               priceVnd: { bsonType: "int", minimum: 0 },
               retentionDays: { bsonType: "int", minimum: 1 },
               scheduledAccess: { bsonType: "bool" },
-              source: { enum: ["free", "internal", "legacy"] },
+              source: { enum: ["free", "internal", "legacy", "order"] },
               watermark: { bsonType: "bool" },
             },
             required: [
@@ -809,6 +809,10 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
           // A 12-digit integer: the driver stores it as a double.
           orderCode: { bsonType: ["int", "long", "double"], minimum: 1 },
           ownerId: { bsonType: "string", minLength: 1 },
+          // Set by a verified payment and by fulfillment (`billing-checkout`).
+          fulfilledAt: { bsonType: ["date", "null"] },
+          paidAt: { bsonType: ["date", "null"] },
+          paymentReference: { bsonType: ["string", "null"] },
           planId: { enum: ["free", "standard"] },
           planVersion: { bsonType: "int", minimum: 1 },
           provider: { enum: ["payos", "fake"] },
@@ -839,6 +843,44 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
           "expiresAt",
           "createdAt",
           "updatedAt",
+        ],
+      },
+    },
+  },
+  {
+    indexes: [{ key: { orderId: 1, receivedAt: -1 }, options: { name: "payment_attempts_order" } }],
+    name: COLLECTIONS.paymentAttempts,
+    validator: {
+      $jsonSchema: {
+        additionalProperties: true,
+        bsonType: "object",
+        properties: {
+          // `{provider}:{reference}`: one record per verified provider payment, so a duplicate
+          // notification is a duplicate key.
+          _id: { bsonType: "string", minLength: 1 },
+          amountVnd: { bsonType: "int", minimum: 0 },
+          createdAt: { bsonType: "date" },
+          currency: { bsonType: "string", minLength: 1 },
+          orderCode: { bsonType: ["int", "long", "double"] },
+          orderId: { bsonType: ["string", "null"] },
+          outcome: {
+            enum: ["applied", "already_paid", "amount_mismatch", "unknown_order"],
+          },
+          provider: { enum: ["payos", "fake"] },
+          receivedAt: { bsonType: "date" },
+          source: { enum: ["webhook", "reconciliation", "fake"] },
+        },
+        required: [
+          "_id",
+          "provider",
+          "orderCode",
+          "orderId",
+          "amountVnd",
+          "currency",
+          "outcome",
+          "source",
+          "receivedAt",
+          "createdAt",
         ],
       },
     },

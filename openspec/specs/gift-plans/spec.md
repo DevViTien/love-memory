@@ -44,8 +44,9 @@ publication. The entitlement SHALL hold exactly:
 
 - the plan's `planId`, `planVersion`, `priceVnd`, `maxPhotos`, `watermark`, `retentionDays`,
   `passwordAccess` and `scheduledAccess`;
-- the grant `source`: `free` for the Free plan, `internal` for a paid plan granted by the internal
-  paid-plan grant, or `legacy` for a gift backfilled by the schema migration;
+- the grant `source`: `free` for the Free plan, or `order` for a plan paid by an order
+  (`billing-checkout` "Paid order fulfillment"). Entitlements granted earlier keep their source:
+  `internal` (the retired internal paid-plan grant) or `legacy` (the schema migration backfill);
 - `grantedAt`, the time of the first publication.
 
 It SHALL also set the gift's `expiresAt` to `grantedAt` plus `retentionDays` days. Updates of a
@@ -77,6 +78,12 @@ entitlement nor an `expiresAt`.
 - **WHEN** a draft is read through the draft API
 - **THEN** its `publication` is `null`, and nothing in the response describes a plan
 
+#### Scenario: Paid entitlement granted
+
+- **WHEN** a gift's paid `standard` order is fulfilled
+- **THEN** the gift's entitlement holds `planId` `standard`, the order's `planVersion`, and
+  `source` `order`
+
 ### Requirement: Plan availability
 
 The system SHALL make a plan available to an owner for a first publish as follows:
@@ -86,9 +93,9 @@ The system SHALL make a plan available to an owner for a first publish as follow
 - `standard` SHALL be available through checkout while a billing provider is configured
   (`billing-checkout` "Billing provider configuration"): it is published only after a paid order,
   never by the publish endpoint alone;
-- otherwise, `standard` SHALL be available without payment while the internal paid-plan grant is on
-  (see "Internal paid-plan grant");
-- otherwise `standard` is unavailable.
+- otherwise `standard` is unavailable;
+- a plan the gift's owner already paid for (a `paid` order of the gift) SHALL be available for that
+  gift on the order's plan version, without another checkout.
 
 A plan available through checkout SHALL be refused by the publish endpoint with `details.reason`
 `PAYMENT_REQUIRED`, and offered with its price by the Studio. An unavailable plan SHALL be refused
@@ -103,9 +110,10 @@ checks") and shown as unavailable in the Studio (`studio-editor`).
 
 #### Scenario: Standard without the internal grant
 
-- **WHEN** no billing provider is configured, the internal paid-plan grant is off, and an owner
-  publishes on plan `standard`
-- **THEN** the publish is refused with `details.reason` `PLAN_NOT_AVAILABLE`, and nothing is written
+- **WHEN** no billing provider is configured, `INTERNAL_PLAN_GRANT_ENABLED` is still `true` on the
+  deployment, and an owner publishes on plan `standard`
+- **THEN** the publish is refused with `details.reason` `PLAN_NOT_AVAILABLE`, and nothing is written,
+  because no grant without payment exists any more
 
 #### Scenario: Standard through checkout
 
@@ -113,32 +121,6 @@ checks") and shown as unavailable in the Studio (`studio-editor`).
   on plan `standard`
 - **THEN** the publish is refused with `details.reason` `PAYMENT_REQUIRED`, nothing is written, and
   a checkout for `standard` is accepted
-
-### Requirement: Internal paid-plan grant
-
-The internal paid-plan grant SHALL be on only when the server environment variable
-`INTERNAL_PLAN_GRANT_ENABLED` is exactly `true`. It SHALL be off when the variable is absent, and it
-MUST be off whenever `VERCEL_ENV` is `production`, whatever the variable says. Any value other than
-`true` or `false` SHALL be treated as `false` and MUST NOT stop the application. While it is on,
-`standard` SHALL be available to every owner without payment, and the entitlement it grants SHALL
-have `source` `internal`. The grant MUST NOT create or modify any order or payment record.
-
-#### Scenario: Grant on outside Production
-
-- **WHEN** `INTERNAL_PLAN_GRANT_ENABLED` is `true`, `VERCEL_ENV` is `preview`, and an owner first
-  publishes on plan `standard`
-- **THEN** the gift is published with an entitlement of `planId` `standard` and `source` `internal`
-
-#### Scenario: Production never grants it
-
-- **WHEN** `INTERNAL_PLAN_GRANT_ENABLED` is `true` and `VERCEL_ENV` is `production`
-- **THEN** plan `standard` is not available, and a publish on it is refused with `details.reason`
-  `PLAN_NOT_AVAILABLE`
-
-#### Scenario: Malformed value
-
-- **WHEN** `INTERNAL_PLAN_GRANT_ENABLED` is `yes`
-- **THEN** the grant is off and the application keeps serving requests
 
 ### Requirement: Entitlement expiry
 

@@ -11,6 +11,7 @@ import {
   isEditableGiftStatus,
   type MediaAsset,
   type PlanId,
+  planVersionOf,
   publishGiftDraft,
   republishGift,
   updateGiftDraft,
@@ -93,6 +94,8 @@ export type GiftPublishInput = Readonly<{
   gift: Gift;
   idempotency: GiftPublishIdempotency;
   ownerId: string;
+  /** A paid order this first publish fulfills: `paid` → `fulfilled` in the same transaction. */
+  paidOrderId?: string | null;
   precondition: GiftPublishPrecondition;
   publication: GiftPublication;
 }>;
@@ -159,15 +162,18 @@ export interface GiftPublicationRepository {
 
 /**
  * Whether a plan can be granted for a first publish, and how (`gift-plans` "Plan availability"):
- * Free always; Standard through checkout while a billing provider is configured, otherwise through
- * the internal paid-plan grant, otherwise not at all.
+ * Free always; Standard through checkout while a billing provider is configured, otherwise not at
+ * all. A gift's paid order grants its plan whatever this says.
  */
 export type PlanGrant =
   | Readonly<{ kind: "checkout" }>
-  | Readonly<{ kind: "grant"; source: PlanGrantSource }>
+  | Readonly<{ kind: "grant"; source: "free" }>
   | Readonly<{ kind: "unavailable" }>;
 
-export type PlanGrantSource = Extract<EntitlementSource, "free" | "internal">;
+export type PlanGrantSource = Extract<EntitlementSource, "free" | "order">;
+
+/** A `paid` order of the gift that no publication has fulfilled yet (`billing-checkout`). */
+export type PaidOrder = Readonly<{ orderId: string; planId: PlanId; planVersion: number }>;
 
 export interface PlanGrantPolicy {
   /** Synchronous: availability depends only on the plan and configuration today. */
@@ -217,6 +223,8 @@ export type GiftPublishingDependencies = Readonly<{
   artifacts: GiftArtifactResolver;
   assets: Readonly<{ listByGiftId: (giftId: string) => Promise<readonly MediaAsset[]> }>;
   createShareId: () => string;
+  /** The gift's paid, unfulfilled order; absent where payments are not wired. */
+  paidOrders?: Readonly<{ findPaidForGift: (giftId: string) => Promise<PaidOrder | null> }>;
   plans: PlanGrantPolicy;
 }>;
 
@@ -457,6 +465,12 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
     // version of the requested plan for a first publish.
     let photoLimit: Readonly<{ maxPhotos: number | null }>;
     let grantSource: PlanGrantSource = "free";
+    let grantPlan = currentPlan(input.planId);
+    let paidOrderId: string | null = null;
+    // Paid already: the order's exact plan version is granted, never asked for again.
+    const paid = isUpdate
+      ? null
+      : ((await publishing.paidOrders?.findPaidForGift(gift.id)) ?? null);
     if (isUpdate) {
       const { entitlement, expiresAt } = grantedEntitlement(gift);
       if (expiresAt.getTime() <= now.getTime()) return failure({ code: "GIFT_EXPIRED" });
@@ -464,6 +478,13 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
         return failure({ code: "PLAN_CHANGE_UNSUPPORTED" });
       }
       photoLimit = entitlement;
+    } else if (paid && purpose === "checkout") {
+      return failure({ code: "NO_PAYMENT_REQUIRED" });
+    } else if (paid && paid.planId === input.planId) {
+      grantPlan = planVersionOf(paid.planId, paid.planVersion);
+      grantSource = "order";
+      paidOrderId = paid.orderId;
+      photoLimit = grantPlan;
     } else {
       const planGrant = publishing.plans.grantFor(input.planId);
       if (planGrant.kind === "unavailable") return failure({ code: "PLAN_NOT_AVAILABLE" });
@@ -473,8 +494,7 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
       if (purpose === "checkout" && planGrant.kind === "grant") {
         return failure({ code: "NO_PAYMENT_REQUIRED" });
       }
-      photoLimit = currentPlan(input.planId);
-      if (planGrant.kind === "grant") grantSource = planGrant.source;
+      photoLimit = grantPlan;
     }
 
     if (gift.access.mode !== "unlisted") return failure({ code: "ACCESS_POLICY_UNSUPPORTED" });
@@ -516,13 +536,36 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
       checkedAssets,
       content,
       contentIssuesFor,
+      grantPlan,
       grantSource,
       isUpdate,
       manifest,
+      paidOrderId,
     });
   }
 
   return {
+    /**
+     * `billing-checkout` "Paid order fulfillment": publishes the gift's current revision as its
+     * owner, on the paid order's plan version, with the order id as the idempotency key, so a
+     * repeated job replays instead of publishing twice. The publish transaction fulfills the order.
+     */
+    async finalizePaidOrder(
+      order: Readonly<{ giftPublicId: string; id: string; ownerId: string; planId: PlanId }>,
+    ): Promise<GiftServiceResult<GiftPublicationDto>> {
+      const gift = await dependencies.gifts.findAuthorized(order.giftPublicId, [
+        { kind: "user", userId: order.ownerId },
+      ]);
+      if (!gift) return failure({ code: "NOT_FOUND" });
+      return this.publishGift({
+        expectedRevision: gift.revision,
+        idempotencyKey: order.id,
+        planId: order.planId,
+        publicId: order.giftPublicId,
+        userId: order.ownerId,
+      });
+    },
+
     /**
      * `billing-checkout` "Checkout endpoint": the checks of a first publish for a plan that needs a
      * payment. It writes nothing; the order is the caller's.
@@ -760,16 +803,18 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
         checkedAssets,
         content,
         contentIssuesFor,
+        grantPlan,
         grantSource,
         isUpdate,
         manifest,
+        paidOrderId,
       } = checked.data;
 
       const published = isUpdate
         ? republishGift(gift, { expectedRevision: input.expectedRevision, now })
         : publishGiftDraft(gift, {
             expectedRevision: input.expectedRevision,
-            grant: grantEntitlement(currentPlan(input.planId), grantSource, now),
+            grant: grantEntitlement(grantPlan, grantSource, now),
             now,
             shareId: publishing.createShareId(),
           });
@@ -797,6 +842,7 @@ export function createGiftService(dependencies: GiftServiceDependencies) {
         gift: published.data,
         idempotency,
         ownerId: input.userId,
+        paidOrderId,
         precondition: isUpdate
           ? { now, publishedRevision: gift.publishedRevision, status: "published" }
           : { status: "draft" },

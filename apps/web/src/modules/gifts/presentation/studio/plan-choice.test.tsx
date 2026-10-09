@@ -52,14 +52,14 @@ describe("plan options", () => {
   });
 
   it("selects the first enabled plan by default, and the creator's choice while it fits", () => {
-    const options = planOptions(studioPlanOffers("internal"), 3);
+    const options = planOptions(studioPlanOffers("prepaid"), 3);
 
     expect(selectedPlan(options, null)?.planId).toBe("free");
     expect(selectedPlan(options, "standard")?.planId).toBe("standard");
   });
 
   it("moves the selection when the chosen plan no longer fits (Selection follows the photo count)", () => {
-    const offers = studioPlanOffers("internal");
+    const offers = studioPlanOffers("prepaid");
 
     expect(selectedPlan(planOptions(offers, 3), "free")?.planId).toBe("free");
     expect(selectedPlan(planOptions(offers, 4), "free")?.planId).toBe("standard");
@@ -74,7 +74,7 @@ describe("PlanChoice", () => {
       <PlanChoice
         disabled={false}
         onSelect={onSelect}
-        options={planOptions(studioPlanOffers("internal"), 3)}
+        options={planOptions(studioPlanOffers("prepaid"), 3)}
         selectedPlanId="free"
       />,
     );
@@ -83,7 +83,7 @@ describe("PlanChoice", () => {
     expect(
       screen.getByRole<HTMLInputElement>("radio", { name: /^Miễn phí · Miễn phí/ }).checked,
     ).toBe(true);
-    expect(screen.getByText("Cấp nội bộ để thử nghiệm, không thu phí.")).toBeTruthy();
+    expect(screen.getByText("Đã thanh toán. Bấm Xuất bản để hoàn tất.")).toBeTruthy();
 
     await user.click(screen.getByRole("radio", { name: /^Tiêu chuẩn · 49\.000đ/ }));
     expect(onSelect).toHaveBeenCalledWith("standard");
@@ -94,7 +94,7 @@ describe("PlanChoice", () => {
       <PlanChoice
         disabled
         onSelect={() => undefined}
-        options={planOptions(studioPlanOffers("internal"), 3)}
+        options={planOptions(studioPlanOffers("prepaid"), 3)}
         selectedPlanId="free"
       />,
     );

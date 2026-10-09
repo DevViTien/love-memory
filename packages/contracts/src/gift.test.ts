@@ -241,11 +241,11 @@ describe("plan offers", () => {
   const offer = {
     available: true,
     checkout: false,
-    internalGrant: false,
     maxPhotos: 3,
     name: "Miễn phí",
     planId: "free",
     planVersion: 1,
+    prepaid: false,
     priceVnd: 0,
     retentionDays: 14,
     watermark: true,

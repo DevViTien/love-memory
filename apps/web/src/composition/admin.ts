@@ -6,6 +6,8 @@ import { type AdminAccess, resolveAdminAccess } from "@/modules/admin/applicatio
 import { createAdminMfaService } from "@/modules/admin/application/admin-mfa";
 import { createAuditService } from "@/modules/admin/application/audit";
 import { createGiftLookupService } from "@/modules/admin/application/gift-lookup";
+import { createOrderLookupService } from "@/modules/billing/application/order-lookup";
+import { mongoAdminOrderLookup } from "@/modules/billing/infrastructure/mongo-order-repository";
 import { createBetterAuthAdminFactor } from "@/modules/admin/infrastructure/better-auth-admin-factor";
 import { mongoAdminGiftLookup } from "@/modules/admin/infrastructure/mongo-admin-gift-lookup";
 import { mongoAdminMfaLockout } from "@/modules/admin/infrastructure/mongo-admin-mfa-lockout";
@@ -15,6 +17,11 @@ import { type AdminMfaRouteDependencies } from "@/modules/admin/presentation/adm
 import { type TemplateVersionRouteDependencies } from "@/modules/templates/presentation/template-version-route-handler";
 
 export const auditService = createAuditService({ repository: mongoAuditLog });
+
+export const orderLookupService = createOrderLookupService({
+  audit: auditService,
+  repository: mongoAdminOrderLookup,
+});
 
 export const giftLookupService = createGiftLookupService({
   audit: auditService,

@@ -21,6 +21,7 @@ export const AuditActionSchema = z.enum([
   "admin.report.dismissed",
   "admin.gift.content_viewed",
   "gift.taken_down",
+  "admin.order.looked_up",
 ]);
 
 export type AuditAction = z.infer<typeof AuditActionSchema>;

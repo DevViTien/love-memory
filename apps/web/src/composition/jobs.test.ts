@@ -2,6 +2,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/composition/media", () => ({ createStorage: () => ({ deleteObject: vi.fn() }) }));
+vi.mock("@/composition/billing", () => ({
+  checkoutService: { reconcile: vi.fn() },
+  finalizePaidOrder: vi.fn(),
+}));
+vi.mock("@/modules/billing/infrastructure/mongo-order-repository", () => ({
+  mongoOrderRepository: { findById: vi.fn() },
+}));
 vi.mock("@/modules/gifts/infrastructure/mongo-gift-repository", () => ({
   mongoGiftRepository: { findEditableById: vi.fn() },
 }));
@@ -25,7 +32,13 @@ describe("jobs composition", () => {
     const types = createHandlers().map((handler) => handler.type);
 
     expect(types).toEqual([...REGISTERED_JOB_TYPES]);
-    expect(types).toEqual(["gift.assets.cleanup.v1", "gift.delete.v1", "email.send.v1"]);
+    expect(types).toEqual([
+      "gift.assets.cleanup.v1",
+      "gift.delete.v1",
+      "email.send.v1",
+      "publish.finalize.v1",
+      "payment.reconcile.v1",
+    ]);
     expect(types).not.toContain("media.process.v1");
   });
 

@@ -12,10 +12,9 @@ import {
 } from "./support/gift-journey";
 import { assignOwnAuthClientAddress, expect, test } from "./test";
 
-// The Playwright server configures no billing provider, so the Standard journeys keep the internal
-// grant until the webhook change. These checks seed orders directly: the order endpoint and the
-// return and cancel pages (`billing-checkout`) read whatever the database holds, and a page never
-// trusts the provider's query parameters.
+// The paid journey through the fake provider is in `publish.spec.ts`. These checks seed orders
+// directly: the order endpoint and the return and cancel pages (`billing-checkout`) read whatever
+// the database holds, and a page never trusts the provider's query parameters.
 
 type SeededOrder = Readonly<{ orderId: string; status: string }>;
 
@@ -145,7 +144,7 @@ test("the owner follows an order on the return and cancel pages, and nobody else
     ).toBeVisible();
     expect((await stranger.request.get(`/api/orders/${pending.orderId}`)).status()).toBe(404);
 
-    // Without the fake provider configured, its checkout page does not exist.
+    // An unknown fake payment link has no checkout page.
     expect((await page.request.get("/billing/fake-checkout/unknown")).status()).toBe(404);
   } finally {
     await stranger?.context().close();

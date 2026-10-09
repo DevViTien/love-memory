@@ -61,11 +61,16 @@ export const OrderSchema = z
     createdAt: z.coerce.date(),
     currency: z.literal("VND"),
     expiresAt: z.coerce.date(),
+    /** Set when fulfillment published the gift. */
+    fulfilledAt: z.coerce.date().nullable().optional(),
     giftId: z.uuid(),
     giftPublicId: z.string().min(1),
     id: z.uuid(),
     orderCode: OrderCodeSchema,
     ownerId: z.string().min(1),
+    /** Set by the verified payment that made the order `paid`, with its provider reference. */
+    paidAt: z.coerce.date().nullable().optional(),
+    paymentReference: z.string().min(1).nullable().optional(),
     planId: PlanIdSchema,
     planVersion: z.number().int().positive(),
     provider: BillingProviderIdSchema,

@@ -73,7 +73,7 @@ expiry or entitlement answer ever reveals that a gift exists to someone who does
 #### Scenario: Plan refusal hidden from non-owners
 
 - **WHEN** a signed-in user who does not own the gift sends a valid publish request on plan
-  `standard` while the internal paid-plan grant is off
+  `standard` while no billing provider is configured
 - **THEN** the response is `404` with code `NOT_FOUND`, not a plan refusal
 
 #### Scenario: Rights not confirmed
@@ -98,7 +98,9 @@ check fails:
 4. For a `published` gift, the server time SHALL be before the gift's `expiresAt` (`gift-plans`
    "Entitlement expiry"). Otherwise the response SHALL be `409` with code `CONFLICT` and
    `details.reason` `GIFT_EXPIRED`.
-5. The plan. For a `draft`, `planId` SHALL be available to the owner (`gift-plans` "Plan
+5. The plan. For a `draft` whose owner holds a `paid` order of the gift on `planId`, the order's plan
+   version SHALL be granted (`billing-checkout` "Paid order fulfillment"). Otherwise, for a
+   `draft`, `planId` SHALL be available to the owner (`gift-plans` "Plan
    availability"). Otherwise the response SHALL be `409` with code `CONFLICT` and `details.reason`
    `PLAN_NOT_AVAILABLE`. A plan available to the owner only through checkout SHALL answer `409` with
    code `CONFLICT` and `details.reason` `PAYMENT_REQUIRED`. For a `published` gift, `planId` SHALL equal the `planId` of the gift's
@@ -202,7 +204,7 @@ carry content.
 
 #### Scenario: Paid plan not available
 
-- **WHEN** the internal paid-plan grant is off and the owner publishes a complete draft with
+- **WHEN** no billing provider is configured and the owner publishes a complete draft with
   `planId` `standard`
 - **THEN** the response is `409` with code `CONFLICT` and `error.details.reason`
   `PLAN_NOT_AVAILABLE`, and the gift stays a `draft`
@@ -262,6 +264,8 @@ A successful publish SHALL, in one database transaction, do all of the following
   content, the referenced asset ids in content order (`assetIds`), the audio track id or `null`
   (`audioTrackId`), `publishedAt`, and `rightsConfirmedAt` (equal to `publishedAt`);
 - record the idempotency key (see "Idempotent publish");
+- for a first publish granted by a `paid` order, move that order to `fulfilled` with `fulfilledAt`,
+  conditional on it still being `paid`; otherwise nothing is written;
 - for an update, enqueue one `gift.assets.cleanup.v1` job for the gift (`media-upload` "Cleanup of
   detached assets"), with the deduplication key `gift.assets.cleanup.v1:{giftId}:{revision}` of the
   published revision. A first publish enqueues no cleanup job.
@@ -347,6 +351,12 @@ exactly `publicId`, `status` (`published`), `shareId`, `sharePath` (`/g/{shareId
 - **THEN** the same transaction enqueues one `email.send.v1` job of kind `gift_published`, and a
   later update enqueues none
 
+#### Scenario: Publish fulfills the paid order
+
+- **WHEN** the owner of a gift with a `paid` `standard` order publishes it on `standard`
+- **THEN** the gift is published with an entitlement of `source` `order`, and the order is
+  `fulfilled` in the same transaction
+
 ### Requirement: Share id
 
 A gift SHALL get its share id at its first publication: 16 bytes from a cryptographically secure
@@ -412,7 +422,7 @@ and publish nothing. Concurrent requests with the same key SHALL produce at most
 #### Scenario: Retry with another plan after a refusal
 
 - **WHEN** a first publish on `free` fails with `PLAN_PHOTO_LIMIT_EXCEEDED`, and the owner retries
-  with the same key on `standard` while the internal paid-plan grant is on
+  with the same key on `standard`, for which the gift has a `paid` order
 - **THEN** the publish is accepted with `planId` `standard`
 
 #### Scenario: Double click

@@ -37,21 +37,21 @@ type StudioFetchOptions = Readonly<{
 }>;
 
 /**
- * The offers the page renders: Free, and Standard unavailable, granted internally or offered
- * through checkout. The values are those of `gift-plans`.
+ * The offers the page renders: Free, and Standard unavailable, offered through checkout or already
+ * paid for. The values are those of `gift-plans`.
  */
 export function studioPlanOffers(
-  standard: "checkout" | "internal" | "unavailable" = "unavailable",
+  standard: "checkout" | "prepaid" | "unavailable" = "unavailable",
 ): PlanOfferDto[] {
   return [
     {
       available: true,
       checkout: false,
-      internalGrant: false,
       maxPhotos: 3,
       name: "Miễn phí",
       planId: "free",
       planVersion: 1,
+      prepaid: false,
       priceVnd: 0,
       retentionDays: 14,
       watermark: true,
@@ -59,11 +59,11 @@ export function studioPlanOffers(
     {
       available: standard !== "unavailable",
       checkout: standard === "checkout",
-      internalGrant: standard === "internal",
       maxPhotos: null,
       name: "Tiêu chuẩn",
       planId: "standard",
       planVersion: 1,
+      prepaid: standard === "prepaid",
       priceVnd: 49_000,
       retentionDays: 365,
       watermark: false,

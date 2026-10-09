@@ -4,8 +4,12 @@ import { analyticsContextForGift, publishAnalytics } from "@/composition/analyti
 import { audioCatalog } from "@/composition/audio";
 import { resolveTemplateArtifact } from "@/composition/templates";
 import { getBillingEnvironment } from "@/config/billing";
-import { getInternalPlanGrantEnvironment } from "@/config/internal-plan-grant";
+import {
+  findPaidOrderForGift,
+  findPaidOrderForOwnerGift,
+} from "@/modules/billing/infrastructure/mongo-order-repository";
 import { createGiftLifecycleService } from "@/modules/gifts/application/gift-lifecycle";
+import { listPlanOffers } from "@/modules/gifts/application/plan-offers";
 import { createGiftService, type PlanGrantPolicy } from "@/modules/gifts/application/gift-service";
 import { getAuthEnvironment } from "@/modules/auth/infrastructure/auth-environment";
 import { createIdempotentAnonymousDraftIdentity } from "@/modules/gifts/infrastructure/anonymous-draft-identity";
@@ -21,16 +25,13 @@ import { mongoMediaAssetRepository } from "@/modules/media/infrastructure/mongo-
 
 /**
  * `gift-plans` "Plan availability": Free always; Standard through checkout while a billing provider
- * is configured, otherwise through the internal paid-plan grant, otherwise not at all. Read per
- * request, so a corrected environment applies without a rebuild.
+ * is configured, otherwise not at all. Read per request, so a corrected environment applies
+ * without a rebuild.
  */
 export const planGrantPolicy: PlanGrantPolicy = {
   grantFor: (planId) => {
     if (planId === "free") return { kind: "grant", source: "free" };
-    if (getBillingEnvironment().kind !== "off") return { kind: "checkout" };
-    return getInternalPlanGrantEnvironment().enabled
-      ? { kind: "grant", source: "internal" }
-      : { kind: "unavailable" };
+    return getBillingEnvironment().kind !== "off" ? { kind: "checkout" } : { kind: "unavailable" };
   },
 };
 
@@ -57,6 +58,14 @@ export const giftService = createGiftService({
       },
     },
     assets: mongoMediaAssetRepository,
+    paidOrders: {
+      findPaidForGift: async (giftId) => {
+        const order = await findPaidOrderForGift(giftId);
+        return order
+          ? { orderId: order.id, planId: order.planId, planVersion: order.planVersion }
+          : null;
+      },
+    },
     // 16 bytes from the CSPRNG: 22 unpadded base64url characters, derived from nothing else.
     createShareId: () => randomBytes(16).toString("base64url"),
     plans: planGrantPolicy,
@@ -88,3 +97,13 @@ export const giftLifecycleRouteDependencies: GiftLifecycleRouteDependencies = {
     ),
   service: giftLifecycleService,
 };
+
+/** The Studio's plan offers for a gift, with the plan its owner's paid order already covers. */
+export async function getStudioPlanOffers(publicId: string, userId: string | null) {
+  const paid = userId ? await findPaidOrderForOwnerGift(publicId, userId) : null;
+  return listPlanOffers(
+    planGrantPolicy,
+    undefined,
+    paid ? { orderId: paid.id, planId: paid.planId, planVersion: paid.planVersion } : null,
+  );
+}

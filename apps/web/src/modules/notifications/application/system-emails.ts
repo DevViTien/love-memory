@@ -9,6 +9,7 @@ export const SYSTEM_EMAIL_KINDS = [
   "gift_published",
   "photo_processing_failed",
   "gift_taken_down",
+  "payment_received",
 ] as const;
 
 export type SystemEmailKind = (typeof SYSTEM_EMAIL_KINDS)[number];
@@ -58,6 +59,14 @@ const COPY: Readonly<Record<SystemEmailKind, Copy>> = {
       "Người nhận hiện không thể mở món quà. Bạn vẫn có thể xoá món quà từ trang của nó.",
     ],
     subject: "Món quà của bạn đã bị tạm khoá",
+  },
+  payment_received: {
+    action: "Mở trang quản lý món quà",
+    lines: [
+      "Chúng tôi đã nhận thanh toán cho món quà của bạn.",
+      "Món quà sẽ được xuất bản ngay. Nếu nội dung cần sửa thêm, hãy mở trang của món quà để hoàn tất.",
+    ],
+    subject: "Đã nhận thanh toán cho món quà của bạn",
   },
   photo_processing_failed: {
     action: "Mở món quà để thử lại",

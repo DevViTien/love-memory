@@ -14,8 +14,8 @@ The system SHALL send each system email through one generic job `email.send.v1` 
 **The job:**
 
 - **Payload:** `{ kind, giftId, eventKey }` only, where `eventKey` identifies the event: `first`
-  for a first publish, the asset id for a photo failure, and the takedown time (ISO 8601) for a
-  takedown. No address, name or content.
+  for a first publish, the asset id for a photo failure, the takedown time (ISO 8601) for a
+  takedown, and the order id for a payment. No address, name or content.
 - **Deduplication key:** `email.send.v1:{kind}:{giftId}:{eventKey}`.
 - **Budget:** 6 attempts.
 
@@ -50,11 +50,12 @@ provider failure SHALL be retryable. Email addresses, subjects and bodies MUST N
 The system SHALL know these kinds, each with a Vietnamese subject and a short plain-text body plus
 an equivalent minimal HTML body:
 
-| Kind                      | Subject                                 | Body says                                                                                                |
-| ------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `gift_published`          | `Món quà của bạn đã sẵn sàng để gửi`    | The gift is published; manage it, pause it or delete it from its page.                                   |
-| `photo_processing_failed` | `Một ảnh trong món quà chưa xử lý được` | One photo could not be processed; open the gift's page to retry or replace it.                           |
-| `gift_taken_down`         | `Món quà của bạn đã bị tạm khoá`        | The gift is locked after a report about its content; recipients cannot open it; the owner can delete it. |
+| Kind                      | Subject                                  | Body says                                                                                                |
+| ------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `gift_published`          | `Món quà của bạn đã sẵn sàng để gửi`     | The gift is published; manage it, pause it or delete it from its page.                                   |
+| `photo_processing_failed` | `Một ảnh trong món quà chưa xử lý được`  | One photo could not be processed; open the gift's page to retry or replace it.                           |
+| `gift_taken_down`         | `Món quà của bạn đã bị tạm khoá`         | The gift is locked after a report about its content; recipients cannot open it; the owner can delete it. |
+| `payment_received`        | `Đã nhận thanh toán cho món quà của bạn` | The payment was received; the gift is being published, or can be finished from its page.                 |
 
 Every email SHALL link to the gift's Studio page (`{APP_URL}/studio/{publicId}`).
 
@@ -70,6 +71,12 @@ It MUST NOT contain:
 - **WHEN** the `gift_published` email is sent for a gift whose receiver is `Minh Thư`
 - **THEN** it holds the subject `Món quà của bạn đã sẵn sàng để gửi` and the Studio link, and
   neither `Minh Thư` nor the share link
+
+#### Scenario: Payment received email
+
+- **WHEN** a verified payment is applied to an order
+- **THEN** one `payment_received` email job is enqueued in the same transaction, keyed by the order
+  id, and its email holds neither the amount nor the order code
 
 ### Requirement: Email delivery and capture
 

@@ -436,6 +436,7 @@ describe("Mongo gift repository publishing", () => {
     giftPublications: { findOne: vi.fn(), insertOne: vi.fn() },
     idempotencyKeys: { findOne: vi.fn(), insertOne: vi.fn() },
     jobOutbox: { updateOne: vi.fn() },
+    orders: { updateOne: vi.fn() },
   };
   const session = { id: "session-1" };
   // Any session object: the transaction's session, whichever the driver passes.
@@ -552,6 +553,31 @@ describe("Mongo gift repository publishing", () => {
     });
     expect(collections.giftPublications.insertOne).not.toHaveBeenCalled();
     expect(collections.idempotencyKeys.insertOne).not.toHaveBeenCalled();
+  });
+
+  it("fulfills the paid order it publishes, exactly once (Paid order fulfillment)", async () => {
+    const paidOrderId = "5b6a0f3e-8d2c-4b7e-9a1f-2c3d4e5f6a7b";
+    collections.orders.updateOne.mockResolvedValueOnce({ matchedCount: 1 });
+
+    await expect(mongoGiftRepository.publish({ ...input, paidOrderId })).resolves.toMatchObject({
+      status: "published",
+    });
+    expect(collections.orders.updateOne).toHaveBeenCalledWith(
+      { _id: paidOrderId, giftId: published.id, status: "paid" },
+      {
+        $set: {
+          fulfilledAt: publication.publishedAt,
+          status: "fulfilled",
+          updatedAt: publication.publishedAt,
+        },
+      },
+      { session: inSession },
+    );
+
+    collections.orders.updateOne.mockResolvedValueOnce({ matchedCount: 0 });
+    await expect(mongoGiftRepository.publish({ ...input, paidOrderId })).resolves.toEqual({
+      status: "stale",
+    });
   });
 
   it("aborts with stale when the conditional gift write matches nothing", async () => {

@@ -52,9 +52,9 @@ export default defineConfig({
         process.env["BETTER_AUTH_SECRET"] || "playwright-secret-with-at-least-32-characters",
       BETTER_AUTH_URL: process.env["BETTER_AUTH_URL"] || baseURL,
       MONGODB_DATABASE: e2eDatabase,
-      // The internal paid-plan grant: Standard without payment (off by default, forced off in
-      // Production). Free publishing needs no flag.
-      INTERNAL_PLAN_GRANT_ENABLED: "true",
+      // Checkout through the in-memory fake provider (`billing-checkout`): Standard is paid on its
+      // own checkout page. Refused on Vercel; Free publishing needs no provider.
+      BILLING_PROVIDER: "fake",
       MEDIA_WORKER_MODE: "inline",
       // Development/E2E-only filesystem object storage; refused on every Vercel deployment.
       STORAGE_DRIVER: "local",

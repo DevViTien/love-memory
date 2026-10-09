@@ -48,9 +48,10 @@ describe("gift entitlement", () => {
   it("rejects an unknown source or extra keys", () => {
     const { entitlement } = grantEntitlement(currentPlan("free"), "free", now);
 
-    expect(GiftEntitlementSchema.safeParse({ ...entitlement, source: "order" }).success).toBe(
+    expect(GiftEntitlementSchema.safeParse({ ...entitlement, source: "gift-card" }).success).toBe(
       false,
     );
+    expect(GiftEntitlementSchema.safeParse({ ...entitlement, source: "order" }).success).toBe(true);
     expect(GiftEntitlementSchema.safeParse({ ...entitlement, orderId: "x" }).success).toBe(false);
   });
 

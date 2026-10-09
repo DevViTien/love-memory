@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { currentPlan, currentPlans, PLAN_CATALOG, PlanIdSchema, type Plan } from "./plan";
+import {
+  currentPlan,
+  currentPlans,
+  PLAN_CATALOG,
+  PlanIdSchema,
+  type Plan,
+  planVersionOf,
+} from "./plan";
 
 describe("plan catalog", () => {
   it("pins the released Free and Standard versions", () => {
@@ -45,6 +52,14 @@ describe("plan catalog", () => {
       ["free", 2],
       ["standard", 1],
     ]);
+  });
+
+  it("finds the exact version an order names, even after a newer release", () => {
+    const free2: Plan = { ...currentPlan("free"), maxPhotos: 5, planVersion: 2 };
+    const catalog = [free2, ...PLAN_CATALOG];
+    expect(planVersionOf("free", 1, catalog).maxPhotos).toBe(3);
+    expect(planVersionOf("free", 2, catalog)).toBe(free2);
+    expect(() => planVersionOf("standard", 9)).toThrow("No released version 9 of plan standard.");
   });
 
   it("fails loudly for a plan without a released version", () => {

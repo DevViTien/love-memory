@@ -6,7 +6,7 @@ import { formatPhotoLimit, formatPlanPrice, formatRetention, formatWatermark } f
 
 export const PLAN_CHOICE_MESSAGES = {
   checkout: "Thanh toán trực tuyến sau khi xác nhận.",
-  internalGrant: "Cấp nội bộ để thử nghiệm, không thu phí.",
+  prepaid: "Đã thanh toán. Bấm Xuất bản để hoàn tất.",
   notAvailable: "Sắp mở thanh toán.",
   tooManyPhotos: (photoCount: number, maxPhotos: number) =>
     `Món quà đang có ${photoCount} ảnh, gói này cho tối đa ${maxPhotos} ảnh.`,
@@ -93,9 +93,9 @@ export function PlanChoice({
                 {formatRetention(offer.retentionDays)}
                 {disabledReason ? (
                   <span className="mt-1 block font-semibold text-stone-600">{disabledReason}</span>
-                ) : offer.internalGrant ? (
-                  <span className="mt-1 block font-semibold text-amber-800">
-                    {PLAN_CHOICE_MESSAGES.internalGrant}
+                ) : offer.prepaid ? (
+                  <span className="mt-1 block font-semibold text-emerald-800">
+                    {PLAN_CHOICE_MESSAGES.prepaid}
                   </span>
                 ) : offer.checkout ? (
                   <span className="mt-1 block font-semibold text-stone-600">

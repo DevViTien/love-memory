@@ -62,6 +62,17 @@ Until it runs, the new build serves published gifts normally, but an update of a
 (`Cập nhật món quà`) answers `500`: the legacy unique index rejects a second publication with the
 same share id. Recipients keep the first publication.
 
+Schema version `18` (`add-payment-webhook-fulfillment`):
+
+- creates `paymentAttempts`, one record per verified provider payment, with its validator and index;
+- allows the entitlement source `order` in the `gifts` validator, and `paidAt`, `fulfilledAt` and
+  `paymentReference` on `orders`.
+
+Run it before the build that applies payments, then `pnpm jobs:deploy` for `publish.finalize.v1`
+and `payment.reconcile.v1`. Rolling back needs no data repair, but a gift published from an order
+(`source` `order`) fails the previous build's `gifts` validator on its next update. Roll forward
+instead of back once a payment was fulfilled.
+
 Schema version `17` (`add-payos-checkout`):
 
 - creates `orders` with its validator and indexes (one `pending` order per gift, per-owner checkout
@@ -144,22 +155,21 @@ See also the [credential rotation runbook](./credential-rotation.md) and the
 
 Configure shared Preview secrets once and override environment identity per branch:
 
-| Variable                                                 | `dev` Preview branch                                      | `stg` Preview branch                                                        | Production                                           |
-| -------------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------- |
-| `APP_URL`                                                | Development stable URL                                    | Staging stable URL                                                          | Production stable URL                                |
-| `BETTER_AUTH_URL`                                        | Development stable URL                                    | Staging stable URL                                                          | Production stable URL                                |
-| `MONGODB_DATABASE`                                       | `love_memory_development`                                 | `love_memory_staging`                                                       | `love_memory_production`                             |
-| `MONGODB_URI`                                            | Shared Preview secret or dedicated development credential | Shared Preview secret or dedicated staging credential                       | Dedicated Production secret                          |
-| `BETTER_AUTH_SECRET`                                     | Shared Preview secret or a branch-specific secret         | Shared Preview secret or a branch-specific secret                           | Dedicated Production secret                          |
-| `RESEND_API_KEY`                                         | Preview secret                                            | Preview secret                                                              | Production secret                                    |
-| `INTERNAL_PLAN_GRANT_ENABLED`                            | `true`                                                    | `true`                                                                      | Absent (forced off anyway)                           |
-| `BILLING_PROVIDER`                                       | Absent until payOS credentials exist (never `fake`)       | Absent, then `payos` for the smoke test ([payments runbook](./payments.md)) | Absent until the webhook change is verified on `stg` |
-| `PAYOS_CLIENT_ID`, `PAYOS_API_KEY`, `PAYOS_CHECKSUM_KEY` | Only with `BILLING_PROVIDER=payos`                        | Staging payOS channel                                                       | Production payOS channel                             |
-| `ANALYTICS_ENABLED`                                      | `true`                                                    | `true`                                                                      | Absent (off) until the Product Owner turns it on     |
-| `ANALYTICS_GIFT_REF_SECRET`                              | 48 random bytes, base64url; development only              | 48 random bytes, base64url; staging only                                    | Its own 48 random bytes, provisioned now             |
-| `MEDIA_WORKER_MODE`                                      | `trigger`, or `inline` until Trigger.dev is configured    | `trigger`                                                                   | `trigger`                                            |
-| `TRIGGER_SECRET_KEY`                                     | Secret of its Trigger.dev environment (never `tr_dev_…`)  | Secret of its Trigger.dev environment                                       | Trigger.dev Production secret                        |
-| `TRIGGER_PROJECT_REF`                                    | LoveMemory Trigger.dev project ref                        | LoveMemory Trigger.dev project ref                                          | LoveMemory Trigger.dev project ref                   |
+| Variable                                                 | `dev` Preview branch                                      | `stg` Preview branch                                                        | Production                                       |
+| -------------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------ |
+| `APP_URL`                                                | Development stable URL                                    | Staging stable URL                                                          | Production stable URL                            |
+| `BETTER_AUTH_URL`                                        | Development stable URL                                    | Staging stable URL                                                          | Production stable URL                            |
+| `MONGODB_DATABASE`                                       | `love_memory_development`                                 | `love_memory_staging`                                                       | `love_memory_production`                         |
+| `MONGODB_URI`                                            | Shared Preview secret or dedicated development credential | Shared Preview secret or dedicated staging credential                       | Dedicated Production secret                      |
+| `BETTER_AUTH_SECRET`                                     | Shared Preview secret or a branch-specific secret         | Shared Preview secret or a branch-specific secret                           | Dedicated Production secret                      |
+| `RESEND_API_KEY`                                         | Preview secret                                            | Preview secret                                                              | Production secret                                |
+| `BILLING_PROVIDER`                                       | Absent until payOS credentials exist (never `fake`)       | Absent, then `payos` for the smoke test ([payments runbook](./payments.md)) | Absent until the `stg` smoke test passes         |
+| `PAYOS_CLIENT_ID`, `PAYOS_API_KEY`, `PAYOS_CHECKSUM_KEY` | Only with `BILLING_PROVIDER=payos`                        | Staging payOS channel                                                       | Production payOS channel                         |
+| `ANALYTICS_ENABLED`                                      | `true`                                                    | `true`                                                                      | Absent (off) until the Product Owner turns it on |
+| `ANALYTICS_GIFT_REF_SECRET`                              | 48 random bytes, base64url; development only              | 48 random bytes, base64url; staging only                                    | Its own 48 random bytes, provisioned now         |
+| `MEDIA_WORKER_MODE`                                      | `trigger`, or `inline` until Trigger.dev is configured    | `trigger`                                                                   | `trigger`                                        |
+| `TRIGGER_SECRET_KEY`                                     | Secret of its Trigger.dev environment (never `tr_dev_…`)  | Secret of its Trigger.dev environment                                       | Trigger.dev Production secret                    |
+| `TRIGGER_PROJECT_REF`                                    | LoveMemory Trigger.dev project ref                        | LoveMemory Trigger.dev project ref                                          | LoveMemory Trigger.dev project ref               |
 
 The media worker variables and the Trigger.dev task deployment are described in the
 [media pipeline runbook](./media-pipeline.md#worker-mode-per-deployment). If the smoke test finds
@@ -171,11 +181,11 @@ current stage. Technical-spike endpoints stay disabled unless a time-boxed verif
 requires them.
 
 Every owner can publish on the Free plan in every environment, Production included
-([ADR-0011](../adr/0011-versioned-plan-catalog.md)). `INTERNAL_PLAN_GRANT_ENABLED` grants the paid
-Standard plan without payment (entitlement `source` `internal`) until checkout exists. Only the
-exact value `true` enables it, and the application forces it off whenever `VERCEL_ENV` is
-`production`. Never set it in Production. It replaces the Sprint 3 `INTERNAL_PUBLISH_ENABLED`, which
-the application no longer reads: delete that variable from each tier.
+([ADR-0011](../adr/0011-versioned-plan-catalog.md)). The paid Standard plan is offered only through
+checkout, on a tier with `BILLING_PROVIDER` configured ([payments runbook](./payments.md)). The
+application no longer reads `INTERNAL_PLAN_GRANT_ENABLED` or the Sprint 3 `INTERNAL_PUBLISH_ENABLED`:
+delete both from each tier. The billing variables are also needed in the tier's Trigger.dev
+environment, where payment reconciliation and fulfillment run.
 
 `ANALYTICS_ENABLED` turns on first-party funnel analytics ([ADR-0010](../adr/0010-first-party-funnel-analytics.md)).
 Only the exact value `true` enables it, and only with an `ANALYTICS_GIFT_REF_SECRET` of at least 32

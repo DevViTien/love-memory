@@ -66,7 +66,17 @@ export async function cleanupE2eRecord(record: Readonly<E2eRecord>): Promise<voi
           .collection<{ _id: string }>("users")
           .findOne({ email: record.email }, { projection: { _id: 1 } })
       : null;
+    // Orders of the gift (`billing-checkout`), their payment records and their jobs.
+    const orderIds = (
+      await database
+        .collection<{ _id: string }>("orders")
+        .find({ giftPublicId: record.publicId }, { projection: { _id: 1 } })
+        .toArray()
+    ).map((order) => order._id);
     await Promise.all([
+      database.collection("orders").deleteMany({ giftPublicId: record.publicId }),
+      database.collection("paymentAttempts").deleteMany({ orderId: { $in: orderIds } }),
+      database.collection("jobOutbox").deleteMany({ "payload.orderId": { $in: orderIds } }),
       // Funnel events of the gift (the same HMAC the web server computes with the test secret).
       ...(gift
         ? [database.collection("analyticsEvents").deleteMany({ giftRef: giftRefOf(gift._id) })]

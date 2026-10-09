@@ -350,6 +350,7 @@ export const mongoGiftRepository: GiftRepository = {
     gift,
     idempotency,
     ownerId,
+    paidOrderId,
     precondition,
     publication,
   }) {
@@ -434,6 +435,23 @@ export const mongoGiftRepository: GiftRepository = {
             }
           }
 
+          if (paidOrderId) {
+            // The paid order this publish fulfills (`billing-checkout`): exactly once.
+            const fulfilled = await database
+              .collection<{ _id: string }>(COLLECTIONS.orders)
+              .updateOne(
+                { _id: paidOrderId, giftId: gift.id, status: "paid" },
+                {
+                  $set: {
+                    fulfilledAt: publication.publishedAt,
+                    status: "fulfilled",
+                    updatedAt: publication.publishedAt,
+                  },
+                },
+                { session },
+              );
+            if (fulfilled.matchedCount !== 1) throw new PublishAborted("stale");
+          }
           await database
             .collection<GiftPublicationDocument>(COLLECTIONS.giftPublications)
             .insertOne(toPublicationDocument(publication), { session });

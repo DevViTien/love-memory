@@ -10,18 +10,18 @@ const grants = (standard: PlanGrant) => ({
 });
 
 describe("plan offers", () => {
-  it("offers Free and an unavailable Standard without the internal grant (Plans offered)", () => {
+  it("offers Free and an unavailable Standard without a billing provider (Plans offered)", () => {
     const offers = listPlanOffers(grants({ kind: "unavailable" }));
 
     expect(offers).toEqual([
       {
         available: true,
         checkout: false,
-        internalGrant: false,
         maxPhotos: 3,
         name: "Miễn phí",
         planId: "free",
         planVersion: 1,
+        prepaid: false,
         priceVnd: 0,
         retentionDays: 14,
         watermark: true,
@@ -29,11 +29,11 @@ describe("plan offers", () => {
       {
         available: false,
         checkout: false,
-        internalGrant: false,
         maxPhotos: null,
         name: "Tiêu chuẩn",
         planId: "standard",
         planVersion: 1,
+        prepaid: false,
         priceVnd: 49_000,
         retentionDays: 365,
         watermark: false,
@@ -42,20 +42,30 @@ describe("plan offers", () => {
     for (const offer of offers) expect(PlanOfferDtoSchema.parse(offer)).toEqual(offer);
   });
 
-  it("marks Standard as available through the internal grant", () => {
-    const [, standard] = listPlanOffers(grants({ kind: "grant", source: "internal" }));
-
-    expect(standard).toMatchObject({ available: true, internalGrant: true, planId: "standard" });
-  });
-
   it("marks Standard as available through checkout (Standard through checkout)", () => {
     const [, standard] = listPlanOffers(grants({ kind: "checkout" }));
 
     expect(standard).toMatchObject({
       available: true,
       checkout: true,
-      internalGrant: false,
       planId: "standard",
+      prepaid: false,
     });
+  });
+
+  it("offers the plan a paid order bought, without another checkout", () => {
+    const [free, standard] = listPlanOffers(grants({ kind: "unavailable" }), undefined, {
+      orderId: "5b6a0f3e-8d2c-4b7e-9a1f-2c3d4e5f6a7b",
+      planId: "standard",
+      planVersion: 1,
+    });
+
+    expect(standard).toMatchObject({
+      available: true,
+      checkout: false,
+      planVersion: 1,
+      prepaid: true,
+    });
+    expect(free).toMatchObject({ available: true, prepaid: false });
   });
 });

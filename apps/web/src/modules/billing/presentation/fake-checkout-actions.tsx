@@ -2,12 +2,17 @@
 
 import { Button } from "@love-memory/ui";
 import { useState } from "react";
+import { z } from "zod";
 
-export const FAKE_CHECKOUT_FAILED = "Không huỷ được phiên thanh toán thử. Hãy tải lại trang.";
+export const FAKE_CHECKOUT_FAILED =
+  "Không thực hiện được trên cổng thanh toán thử. Hãy tải lại trang.";
+
+const PaidResponseSchema = z.object({ data: z.object({ returnUrl: z.string().min(1) }) });
 
 /**
  * The fake provider's own buttons (`billing-checkout` "Fake billing provider"): development and
- * E2E only. Cancelling marks the link `CANCELLED`, then opens the order's cancel page.
+ * E2E only. Paying records a verified payment, then opens the order's return page; cancelling
+ * marks the link `CANCELLED`, then opens its cancel page.
  */
 export function FakeCheckoutActions({
   cancelUrl,
@@ -23,21 +28,28 @@ export function FakeCheckoutActions({
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
 
-  async function cancel() {
+  async function act(action: "cancel" | "pay") {
     setBusy(true);
     setFailed(false);
     try {
       const response = await (fetchImpl ?? fetch)(
         `/api/billing/fake/${encodeURIComponent(paymentId)}`,
         {
-          body: JSON.stringify({ action: "cancel" }),
+          body: JSON.stringify({ action }),
           headers: { "Content-Type": "application/json" },
           method: "POST",
         },
       );
       if (response.ok) {
-        navigate(cancelUrl);
-        return;
+        if (action === "cancel") {
+          navigate(cancelUrl);
+          return;
+        }
+        const paid = PaidResponseSchema.safeParse(await response.json());
+        if (paid.success) {
+          navigate(paid.data.data.returnUrl);
+          return;
+        }
       }
     } catch {
       // Shown below.
@@ -48,9 +60,14 @@ export function FakeCheckoutActions({
 
   return (
     <div className="space-y-3">
-      <Button disabled={busy} onClick={() => void cancel()} variant="outline">
-        Huỷ thanh toán
-      </Button>
+      <div className="flex flex-wrap gap-3">
+        <Button disabled={busy} onClick={() => void act("pay")}>
+          Thanh toán thử
+        </Button>
+        <Button disabled={busy} onClick={() => void act("cancel")} variant="outline">
+          Huỷ thanh toán
+        </Button>
+      </div>
       {failed ? (
         <p className="text-sm font-semibold text-rose-700" role="alert">
           {FAKE_CHECKOUT_FAILED}

@@ -51,6 +51,7 @@ describe("system emails", () => {
       "Món quà của bạn đã sẵn sàng để gửi",
       "Một ảnh trong món quà chưa xử lý được",
       "Món quà của bạn đã bị tạm khoá",
+      "Đã nhận thanh toán cho món quà của bạn",
     ]);
   });
 
@@ -125,7 +126,7 @@ describe("system emails", () => {
       }).success,
     ).toBe(false);
     expect(
-      handler.payload.safeParse({ eventKey: "first", giftId, kind: "payment_received" }).success,
+      handler.payload.safeParse({ eventKey: "first", giftId, kind: "payment_refunded" }).success,
     ).toBe(false);
   });
 });

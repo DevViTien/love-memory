@@ -1,6 +1,5 @@
 import { type OrderDto } from "@love-memory/contracts";
 import {
-  type BillingProviderId,
   currentPlan,
   type Order,
   ORDER_CHECKOUT_TTL_MILLISECONDS,
@@ -14,6 +13,7 @@ import {
 } from "@/modules/gifts/application/gift-service";
 
 import { type BillingProvider } from "./billing-provider";
+import { type PaymentService } from "./payments";
 
 export type CheckoutServiceError =
   GiftServiceError | Readonly<{ code: "PAYMENT_PROVIDER_UNAVAILABLE" }>;
@@ -61,6 +61,8 @@ export interface OrderRepository {
   findByIdempotencyKey(ownerId: string, key: string): Promise<StoredOrder | null>;
   /** The owner filter is part of the query: another owner's order is never read. */
   findForOwner(orderId: string, ownerId: string): Promise<Order | null>;
+  /** Any order by id: background jobs only, never a request. */
+  findById(orderId: string): Promise<Order | null>;
 }
 
 type Dependencies = Readonly<{
@@ -69,6 +71,8 @@ type Dependencies = Readonly<{
   createOrderCode: () => number;
   gate: CheckoutGate;
   orders: OrderRepository;
+  /** The only path to `paid` (`payments.ts`). */
+  payments: Pick<PaymentService, "recordVerifiedPayment">;
   /** The configured provider, or `null` while checkout is off. */
   provider: () => BillingProvider | null;
   /** Reported and swallowed: a failed cleanup never changes a response. */
@@ -104,10 +108,42 @@ export function createCheckoutService({
   createOrderCode,
   gate,
   orders,
+  payments,
   provider,
   reportFailure,
   urls,
 }: Dependencies) {
+  /**
+   * A `pending` order against the provider's verified status: `PAID` (in full) is recorded as a
+   * verified payment, `CANCELLED` and `EXPIRED` close the order. Throws when the provider cannot
+   * be read; answers the order as stored afterwards.
+   */
+  async function reconcile(order: Order): Promise<Order> {
+    const links = provider();
+    if (order.status !== "pending" || !links || links.id !== order.provider) return order;
+    const payment = await links.getPayment(order.orderCode);
+    if (payment.status === "PAID") {
+      await payments.recordVerifiedPayment({
+        amountVnd: payment.amountPaidVnd,
+        currency: "VND",
+        orderCode: order.orderCode,
+        provider: order.provider,
+        reference: `reconciliation:${order.orderCode}`,
+        source: "reconciliation",
+      });
+      return (await orders.findById(order.id)) ?? order;
+    }
+    if (payment.status === "CANCELLED" || payment.status === "EXPIRED") {
+      const closed = await orders.closePending(
+        order.id,
+        payment.status === "CANCELLED" ? "cancelled" : "expired",
+        clock(),
+      );
+      return closed ?? (await orders.findById(order.id)) ?? order;
+    }
+    return order;
+  }
+
   async function cancelSuperseded(superseded: readonly Order[]) {
     for (const order of superseded) {
       const links = provider();
@@ -223,27 +259,15 @@ export function createCheckoutService({
       const order = await orders.findForOwner(input.orderId, input.userId);
       if (!order) return fail({ code: "NOT_FOUND" });
       if (order.status !== "pending") return ok(toOrderDto(order));
-
-      const links = provider();
-      if (!links || links.id !== (order.provider satisfies BillingProviderId)) {
-        return ok(toOrderDto(order));
-      }
       try {
-        const payment = await links.getPayment(order.orderCode);
-        // `PAID` is left to the verified webhook and reconciliation of fulfillment.
-        if (payment.status === "CANCELLED" || payment.status === "EXPIRED") {
-          const closed = await orders.closePending(
-            order.id,
-            payment.status === "CANCELLED" ? "cancelled" : "expired",
-            clock(),
-          );
-          return ok(toOrderDto(closed ?? order));
-        }
+        return ok(toOrderDto(await reconcile(order)));
       } catch (error) {
         reportFailure("billing.read-payment", error);
+        return ok(toOrderDto(order));
       }
-      return ok(toOrderDto(order));
     },
+
+    reconcile,
   } as const;
 }
 

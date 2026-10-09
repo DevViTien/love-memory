@@ -4,9 +4,12 @@ import { PlanIdSchema, type Plan } from "./plan";
 
 export const DAY_MILLISECONDS = 86_400_000;
 
-export const ENTITLEMENT_SOURCES = ["free", "internal", "legacy"] as const;
+export const ENTITLEMENT_SOURCES = ["free", "internal", "legacy", "order"] as const;
 
-/** How an entitlement was granted; a payment adds `order` with the checkout change. */
+/**
+ * How an entitlement was granted: `free`, a paid `order`, or, for gifts granted before payments,
+ * the retired internal grant (`internal`) and the schema backfill (`legacy`).
+ */
 export const EntitlementSourceSchema = z.enum(ENTITLEMENT_SOURCES);
 
 export type EntitlementSource = z.infer<typeof EntitlementSourceSchema>;

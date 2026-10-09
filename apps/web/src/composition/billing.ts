@@ -7,11 +7,18 @@ import { type BillingEnvironment, getBillingEnvironment } from "@/config/billing
 import { type BillingProvider } from "@/modules/billing/application/billing-provider";
 import { createCheckoutService } from "@/modules/billing/application/checkout-service";
 import {
+  createPaymentService,
+  type FulfillmentResult,
+  PUBLISH_FINALIZE_JOB,
+} from "@/modules/billing/application/payments";
+import {
   cancelFakePaymentLink,
   createFakeProvider,
   fakePaymentLinks,
+  payFakePaymentLink,
 } from "@/modules/billing/infrastructure/fake-provider";
 import { mongoOrderRepository } from "@/modules/billing/infrastructure/mongo-order-repository";
+import { mongoPaymentRepository } from "@/modules/billing/infrastructure/mongo-payment-repository";
 import { createPayosProvider } from "@/modules/billing/infrastructure/payos-provider";
 import { reportOperationalFailure } from "@/observability/operational-errors";
 
@@ -27,14 +34,27 @@ export function billingProviderFor(environment: BillingEnvironment): BillingProv
   }
 }
 
+const reportBillingFailure = (operation: string, error: unknown) =>
+  reportOperationalFailure(operation, error, "billing");
+
+/** The only path to `paid` (ADR-0009): verified webhooks, reconciliation and the fake. */
+export const paymentService = createPaymentService({
+  payments: mongoPaymentRepository,
+  reportFailure: reportBillingFailure,
+  // Loaded on use: `composition/jobs` builds on this module.
+  wakeJobs: async () =>
+    (await import("@/composition/jobs")).jobDispatcher.dispatch(PUBLISH_FINALIZE_JOB),
+});
+
 export const checkoutService = createCheckoutService({
   createId: randomUUID,
   // `randomInt` needs max - min below 2^48; 12-digit codes fit.
   createOrderCode: () => randomInt(ORDER_CODE_MIN, ORDER_CODE_MAX + 1),
   gate: (input) => giftService.checkCheckout(input),
   orders: mongoOrderRepository,
+  payments: paymentService,
   provider: () => billingProviderFor(getBillingEnvironment()),
-  reportFailure: (operation, error) => reportOperationalFailure(operation, error, "billing"),
+  reportFailure: reportBillingFailure,
   urls: () => {
     const environment = getBillingEnvironment();
     const origin = environment.kind === "off" ? "http://localhost" : environment.appUrl;
@@ -50,8 +70,38 @@ export const checkoutService = createCheckoutService({
   },
 });
 
-/** The fake provider's links (development and E2E only), for its checkout page and action. */
+/**
+ * `publish.finalize.v1`: the paid order's gift, published by its owner's authority. A concurrent
+ * change is retried; anything else leaves the order `paid` for the owner to finish in the Studio.
+ */
+export async function finalizePaidOrder(
+  order: Parameters<typeof giftService.finalizePaidOrder>[0],
+): Promise<FulfillmentResult> {
+  const result = await giftService.finalizePaidOrder(order);
+  if (result.ok) return { kind: "published" };
+  if (result.error.code === "REVISION_CONFLICT") return { kind: "retry" };
+  // Fulfilled meanwhile by the owner's own publish, or by a parallel run of this job.
+  const current = await mongoOrderRepository.findById(order.id);
+  if (current?.status === "fulfilled") return { kind: "published" };
+  return { kind: "blocked", reason: result.error.code };
+}
+
+/** The fake provider's links (development and E2E only), for its checkout page and actions. */
 export const fakeCheckout = {
   cancel: (paymentId: string) => cancelFakePaymentLink(paymentId),
   find: (paymentId: string) => fakePaymentLinks().get(paymentId) ?? null,
+  /** The fake's own confirmation: recorded like a verified payment, then its return page. */
+  pay: async (paymentId: string): Promise<string | null> => {
+    const link = payFakePaymentLink(paymentId);
+    if (!link) return null;
+    await paymentService.recordVerifiedPayment({
+      amountVnd: link.amountVnd,
+      currency: "VND",
+      orderCode: link.orderCode,
+      provider: "fake",
+      reference: `fake:${paymentId}`,
+      source: "fake",
+    });
+    return link.returnUrl;
+  },
 } as const;

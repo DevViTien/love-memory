@@ -57,4 +57,25 @@ describe("enqueueJob", () => {
       upsert: true,
     });
   });
+
+  it("makes a job due later when asked", async () => {
+    const updateOne = vi.fn(() => Promise.resolve({ upsertedCount: 1 }));
+    const database = { collection: () => ({ updateOne }) } as unknown as Db;
+    const now = new Date("2026-10-10T10:00:00.000Z");
+    const availableAt = new Date("2026-10-10T10:16:00.000Z");
+
+    await enqueueJob(database, {
+      availableAt,
+      deduplicationKey: "k",
+      now,
+      payload: {},
+      type: "x.v1",
+    });
+
+    expect(updateOne).toHaveBeenCalledWith(
+      expect.anything(),
+      { $setOnInsert: expect.objectContaining({ availableAt, createdAt: now }) as object },
+      { upsert: true },
+    );
+  });
 });

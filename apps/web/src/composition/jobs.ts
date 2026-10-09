@@ -1,5 +1,13 @@
 import { createStorage } from "@/composition/media";
+import { checkoutService, finalizePaidOrder } from "@/composition/billing";
 import { createSystemEmailJobHandler } from "@/composition/notifications";
+import {
+  createPaymentReconcileHandler,
+  createPublishFinalizeHandler,
+  PAYMENT_RECONCILE_JOB,
+  PUBLISH_FINALIZE_JOB,
+} from "@/modules/billing/application/payments";
+import { mongoOrderRepository } from "@/modules/billing/infrastructure/mongo-order-repository";
 import { type AnyJobHandler, type JobType } from "@/modules/jobs/application/job-registry";
 import { assertJobOutboxFlowing } from "@/modules/jobs/application/job-outbox-health";
 import { createJobRunner, type JobRunner } from "@/modules/jobs/application/job-runner";
@@ -35,6 +43,8 @@ export const REGISTERED_JOB_TYPES: readonly JobType[] = [
   GIFT_ASSETS_CLEANUP_JOB,
   GIFT_DELETE_JOB,
   SYSTEM_EMAIL_JOB,
+  PUBLISH_FINALIZE_JOB,
+  PAYMENT_RECONCILE_JOB,
 ];
 
 /** Every registered generic job type (`background-jobs`); `media.process.v1` is not one of them. */
@@ -54,6 +64,14 @@ export function createHandlers(): AnyJobHandler[] {
       storage,
     }),
     createSystemEmailJobHandler(),
+    createPublishFinalizeHandler({
+      finalize: finalizePaidOrder,
+      findOrder: (orderId) => mongoOrderRepository.findById(orderId),
+    }),
+    createPaymentReconcileHandler({
+      findOrder: (orderId) => mongoOrderRepository.findById(orderId),
+      reconcile: (order) => checkoutService.reconcile(order),
+    }),
   ];
 }
 

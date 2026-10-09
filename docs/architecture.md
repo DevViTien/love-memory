@@ -251,9 +251,8 @@ opens it at `/g/{shareId}` without an account. Behavior is specified in
     check reads the snapshot, never the catalog.
   - **Who may grant what.** The port `PlanGrantPolicy` (wired in `composition/gifts.ts`) decides
     which plans can be granted. Free is always granted (`source: "free"`). Standard is granted only
-    by the internal paid-plan grant (`config/internal-plan-grant.ts`,
-    `INTERNAL_PLAN_GRANT_ENABLED`, `source: "internal"`), which is never on in Production. The
-    checkout change adds the paid outcome
+    from a paid order (`source: "order"`, see "Billing and checkout"). Entitlements granted earlier
+    by the retired internal grant keep `source: "internal"`
     ([ADR-0009](./adr/0009-billing-provider-boundary.md)).
   - **The Studio.** The Studio page renders the same policy's offers (`listPlanOffers`) into the
     editor, so the browser never holds plan constants.
@@ -481,8 +480,9 @@ Paid plans are bought through a billing provider (ADR-0009). Behavior is in
 `openspec/specs/billing-checkout`; operations are in the [payments runbook](./runbooks/payments.md).
 
 - **Plan availability.** `planGrantPolicy` (`composition/gifts.ts`) makes Standard a `checkout`
-  plan while `BILLING_PROVIDER` is configured. Otherwise the internal grant applies, until the
-  webhook change removes it. The publish endpoint answers `PAYMENT_REQUIRED` for a checkout plan.
+  plan while `BILLING_PROVIDER` is configured, and unavailable otherwise. The publish endpoint
+  answers `PAYMENT_REQUIRED` for a checkout plan, unless the gift has a `paid` order on it
+  (`publishing.paidOrders`).
 - **Checkout** (`modules/billing/application/checkout-service.ts`):
   1. It runs the gift's first-publish checks (`giftService.checkCheckout`, which shares
      `checkPublishable` with publishing).
@@ -494,8 +494,22 @@ Paid plans are bought through a billing provider (ADR-0009). Behavior is in
   - `createFakeProvider` keeps its links in memory, for development and E2E.
   - `billingProviderFor` picks one per call from the environment.
 - **The browser never decides.** The return and cancel pages poll `GET /api/orders/{orderId}`, which
-  reads only the owner's order. A `pending` order is reconciled with the provider before the
-  answer, to `cancelled` or `expired` only.
+  reads only the owner's order. A `pending` order is reconciled with the provider's verified status
+  before the answer.
+- **Payments** (`modules/billing/application/payments.ts`) are the only path to `paid`.
+  - **Recording.** The webhook (`/api/billing/webhooks/payos`), reconciliation and the fake's pay
+    action all call `recordVerifiedPayment`. `mongoPaymentRepository.apply` records the payment in
+    `paymentAttempts`, whose id `{provider}:{reference}` makes duplicates no-ops, and checks the
+    amount and currency.
+  - **Effect.** It moves the order to `paid` and enqueues `publish.finalize.v1` and the
+    `payment_received` email, all in one transaction.
+- **Fulfillment.** `publish.finalize.v1` calls `giftService.finalizePaidOrder`.
+  - It publishes the current revision as the owner, with the order id as the idempotency key.
+  - The publish transaction moves the order `paid → fulfilled`.
+  - A gift that cannot be published leaves the order `paid`. The owner finishes it in the Studio
+    without paying again.
+- **Support.** `/admin/orders` (`order-lookup.ts`, audited `admin.order.looked_up`) shows orders and
+  their recorded payments.
 
 ## Admin access and audit
 

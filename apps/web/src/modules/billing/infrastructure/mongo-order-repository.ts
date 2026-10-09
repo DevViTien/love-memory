@@ -1,10 +1,15 @@
 import "server-only";
 
-import { COLLECTIONS, getDatabase, getMongoClient } from "@love-memory/database";
+import { COLLECTIONS, enqueueJob, getDatabase, getMongoClient } from "@love-memory/database";
 import { type Order, OrderSchema } from "@love-memory/domain";
 import { MongoServerError } from "mongodb";
 
 import { type OrderRepository, type StoredOrder } from "../application/checkout-service";
+import { type AdminOrderLookupRepository } from "../application/order-lookup";
+import {
+  PAYMENT_RECONCILE_DELAY_MILLISECONDS,
+  PAYMENT_RECONCILE_JOB,
+} from "../application/payments";
 
 type OrderDocument = Omit<StoredOrder, "id" | "idempotencyKey"> &
   Readonly<{ _id: string; idempotencyKey?: string | null }>;
@@ -69,6 +74,11 @@ export const mongoOrderRepository: OrderRepository = {
     return document ? toStoredOrder(document) : null;
   },
 
+  async findById(orderId) {
+    const document = await (await orders()).findOne({ _id: orderId });
+    return document ? toOrder(document) : null;
+  },
+
   async findForOwner(orderId, ownerId) {
     const document = await (await orders()).findOne({ _id: orderId, ownerId });
     return document ? toOrder(document) : null;
@@ -101,6 +111,20 @@ export const mongoOrderRepository: OrderRepository = {
             );
           }
           await collection.insertOne({ _id: id, ...fields }, { session });
+          // The provider's verdict once the link has expired, whatever the browser does.
+          await enqueueJob(
+            await getDatabase(),
+            {
+              availableAt: new Date(
+                order.expiresAt.getTime() + PAYMENT_RECONCILE_DELAY_MILLISECONDS,
+              ),
+              deduplicationKey: `${PAYMENT_RECONCILE_JOB}:${id}`,
+              now,
+              payload: { orderId: id },
+              type: PAYMENT_RECONCILE_JOB,
+            },
+            session,
+          );
           superseded = open.map(toOrder);
         }),
       );
@@ -111,5 +135,65 @@ export const mongoOrderRepository: OrderRepository = {
       throw error;
     }
     return { kind: "created", superseded };
+  },
+};
+
+/** The gift's `paid` order not yet fulfilled, oldest payment first (`gift-publishing`). */
+export async function findPaidOrderForGift(giftId: string): Promise<Order | null> {
+  const document = await (
+    await orders()
+  ).findOne({ giftId, status: "paid" }, { sort: { paidAt: 1 } });
+  return document ? toOrder(document) : null;
+}
+
+/** The owner's paid, unfulfilled order of a gift, for the Studio's plan offers. */
+export async function findPaidOrderForOwnerGift(
+  giftPublicId: string,
+  ownerId: string,
+): Promise<Order | null> {
+  const document = await (
+    await orders()
+  ).findOne({ giftPublicId, ownerId, status: "paid" }, { sort: { paidAt: 1 } });
+  return document ? toOrder(document) : null;
+}
+
+type PaymentAttemptDocument = Readonly<{
+  _id: string;
+  amountVnd: number;
+  currency: string;
+  orderId: string | null;
+  outcome: string;
+  provider: string;
+  receivedAt: Date;
+  source: string;
+}>;
+
+/** Support lookup (`billing-checkout` "Admin order lookup"): exact identifiers only. */
+export const mongoAdminOrderLookup: AdminOrderLookupRepository = {
+  async findAttempts(orderIds) {
+    if (orderIds.length === 0) return [];
+    const documents = await (
+      await getDatabase()
+    )
+      .collection<PaymentAttemptDocument>(COLLECTIONS.paymentAttempts)
+      .find({ orderId: { $in: [...orderIds] } }, { sort: { receivedAt: -1 } })
+      .limit(100)
+      .toArray();
+    // The `_id` holds the provider's reference: never shown.
+    return documents.map(({ _id, ...attempt }) => attempt);
+  },
+
+  async findOrders({ text }, limit) {
+    const code = /^\d{12}$/.test(text) ? Number(text) : null;
+    const documents = await (
+      await orders()
+    )
+      .find({
+        $or: [{ _id: text }, { giftPublicId: text }, ...(code ? [{ orderCode: code }] : [])],
+      })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .toArray();
+    return documents.map(toOrder);
   },
 };

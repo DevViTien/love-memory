@@ -23,7 +23,7 @@ import { assignOwnAuthClientAddress, expect, test } from "./test";
 // Edit after publish (`change-gift-publication-revisions`): the owner keeps editing a published
 // gift, recipients keep the current publication until `Cập nhật món quà`, and the share link never
 // changes. Publishes on the Free plan (`add-gift-plans-and-entitlements`); the plan case needs
-// INTERNAL_PLAN_GRANT_ENABLED=true, and every case local object storage on the web server.
+// BILLING_PROVIDER=fake, and every case local object storage on the web server.
 
 test.use({ actionTimeout: 20_000 });
 

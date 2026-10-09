@@ -17,6 +17,7 @@ export default async function AdminLayout({ children }: Readonly<{ children: Rea
         <nav aria-label="Quản trị" className="mb-6 flex gap-4 text-sm font-bold text-stone-700">
           <Link href="/admin">Quản trị</Link>
           <Link href="/admin/reports">Báo cáo</Link>
+          <Link href="/admin/orders">Đơn hàng</Link>
           <Link href="/admin/templates">Mẫu quà</Link>
           <Link href="/admin/audit">Nhật ký</Link>
         </nav>

@@ -11,7 +11,12 @@ vi.mock("@love-memory/database", async (importOriginal) => ({
 }));
 
 import { type StoredOrder } from "../application/checkout-service";
-import { mongoOrderRepository } from "./mongo-order-repository";
+import {
+  findPaidOrderForGift,
+  findPaidOrderForOwnerGift,
+  mongoAdminOrderLookup,
+  mongoOrderRepository,
+} from "./mongo-order-repository";
 
 const now = new Date("2026-10-10T10:00:00.000Z");
 const orderId = "0b3c5a7e-1f1c-4b8e-9a51-6c0f2d7e8a90";
@@ -89,6 +94,18 @@ describe("Mongo order repository", () => {
     expect(collection.insertOne).toHaveBeenCalledWith(document, {
       session: expect.anything() as unknown,
     });
+    // The reconciliation runs two minutes after the link expires, whatever the browser does.
+    expect(collection.updateOne).toHaveBeenCalledWith(
+      { deduplicationKey: `payment.reconcile.v1:${orderId}` },
+      {
+        $setOnInsert: expect.objectContaining({
+          availableAt: new Date("2026-10-10T10:17:00.000Z"),
+          payload: { orderId },
+          type: "payment.reconcile.v1",
+        }) as object,
+      },
+      { session: expect.anything() as unknown, upsert: true },
+    );
   });
 
   it("reports a taken key or a concurrent pending order, and rethrows anything else", async () => {
@@ -178,5 +195,82 @@ describe("Mongo order repository", () => {
     const read = await mongoOrderRepository.findForOwner(orderId, "user-1");
     expect(read).not.toHaveProperty("requestFingerprint");
     expect(read).not.toHaveProperty("idempotencyKey");
+  });
+
+  it("reads any order by id, and a gift's paid order oldest payment first", async () => {
+    collection.findOne
+      .mockResolvedValueOnce(document)
+      .mockResolvedValueOnce({ ...document, paidAt: now, status: "paid" })
+      .mockResolvedValueOnce(null);
+    await expect(mongoOrderRepository.findById(orderId)).resolves.toMatchObject({ id: orderId });
+    await expect(findPaidOrderForGift(giftId)).resolves.toMatchObject({ status: "paid" });
+    expect(collection.findOne).toHaveBeenLastCalledWith(
+      { giftId, status: "paid" },
+      { sort: { paidAt: 1 } },
+    );
+    await expect(findPaidOrderForOwnerGift("pub-1", "user-1")).resolves.toBeNull();
+    expect(collection.findOne).toHaveBeenLastCalledWith(
+      { giftPublicId: "pub-1", ownerId: "user-1", status: "paid" },
+      { sort: { paidAt: 1 } },
+    );
+  });
+
+  it("looks orders up by exact id, order code or gift, and hides payment references", async () => {
+    const cursor = {
+      limit: vi.fn(() => cursor),
+      sort: vi.fn(() => cursor),
+      toArray: vi.fn(() => Promise.resolve([document])),
+    };
+    collection.find.mockReturnValueOnce(cursor);
+    await expect(mongoAdminOrderLookup.findOrders({ text: "123456789012" }, 20)).resolves.toEqual([
+      expect.objectContaining({ id: orderId }),
+    ]);
+    expect(collection.find).toHaveBeenLastCalledWith({
+      $or: [
+        { _id: "123456789012" },
+        { giftPublicId: "123456789012" },
+        { orderCode: 123_456_789_012 },
+      ],
+    });
+    expect(cursor.sort).toHaveBeenCalledWith({ createdAt: -1 });
+    expect(cursor.limit).toHaveBeenCalledWith(20);
+
+    collection.find.mockReturnValueOnce({ ...cursor, toArray: () => Promise.resolve([]) });
+    await mongoAdminOrderLookup.findOrders({ text: "pub-1" }, 20);
+    expect(collection.find).toHaveBeenLastCalledWith({
+      $or: [{ _id: "pub-1" }, { giftPublicId: "pub-1" }],
+    });
+
+    const attempts = {
+      limit: vi.fn(() => attempts),
+      toArray: vi.fn(() =>
+        Promise.resolve([
+          {
+            _id: "payos:TF1",
+            amountVnd: 49_000,
+            currency: "VND",
+            orderId,
+            outcome: "applied",
+            provider: "payos",
+            receivedAt: now,
+            source: "webhook",
+          },
+        ]),
+      ),
+    };
+    collection.find.mockReturnValueOnce(attempts);
+    const found = await mongoAdminOrderLookup.findAttempts([orderId]);
+    expect(found).toEqual([
+      {
+        amountVnd: 49_000,
+        currency: "VND",
+        orderId,
+        outcome: "applied",
+        provider: "payos",
+        receivedAt: now,
+        source: "webhook",
+      },
+    ]);
+    await expect(mongoAdminOrderLookup.findAttempts([])).resolves.toEqual([]);
   });
 });

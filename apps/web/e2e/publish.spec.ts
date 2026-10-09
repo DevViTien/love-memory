@@ -27,14 +27,15 @@ import {
   studioStep,
   TYPICAL_MEMORY_BOX,
   waitForHydration,
+  withE2eDatabase,
 } from "./support/gift-journey";
 import { assignOwnAuthClientAddress, expect, test } from "./test";
 import { captureViewerScreenshot, pressTemplateNext } from "./viewer-harness";
 
 // Requires the earlier Sprint 3 changes: memory-box@1.1.0, the step-based Studio, local object
 // storage (STORAGE_DRIVER=local on the Playwright web server) and the preview. The web server also
-// sets INTERNAL_PLAN_GRANT_ENABLED=true (Standard for the 8-photo journey,
-// `add-gift-plans-and-entitlements`) and ANALYTICS_ENABLED=true (`add-funnel-analytics`), so this
+// sets BILLING_PROVIDER=fake (the 8-photo journey pays for Standard through checkout,
+// `add-payment-webhook-fulfillment`) and ANALYTICS_ENABLED=true (`add-funnel-analytics`), so this
 // journey is also the Gate M2 funnel, snapshot and edge-case evidence.
 
 const VIEWER_TITLE = "LoveMemory template viewer";
@@ -348,8 +349,7 @@ async function runPublishJourney(page: Page, testInfo: TestInfo, journey: Journe
   }
   const assetIds = await listDraftAssetIds(page, publicId);
   expect(assetIds).toHaveLength(content.photos.length);
-  // Free fits three photos; more need Standard, granted internally on the E2E web server
-  // (INTERNAL_PLAN_GRANT_ENABLED=true) until checkout exists.
+  // Free fits three photos; more need Standard, paid through the fake provider's checkout.
   const onFree = content.photos.length <= 3;
   const planName = onFree ? "Miễn phí" : "Tiêu chuẩn";
 
@@ -407,11 +407,12 @@ async function runPublishJourney(page: Page, testInfo: TestInfo, journey: Journe
       ),
     ).toBeVisible();
     await expect(standardPlan).toBeChecked();
-    await expect(publishRegion.getByText("Cấp nội bộ để thử nghiệm, không thu phí.")).toBeVisible();
+    await expect(publishRegion.getByText("Thanh toán trực tuyến sau khi xác nhận.")).toBeVisible();
   }
   const publishRequest = page.waitForRequest(
     (request) =>
-      request.url().endsWith(`/api/gifts/${publicId}/publish`) && request.method() === "POST",
+      request.url().endsWith(`/api/gifts/${publicId}/${onFree ? "publish" : "checkout"}`) &&
+      request.method() === "POST",
   );
   await waitForHydration(publishButton);
   await publishButton.click();
@@ -419,10 +420,33 @@ async function runPublishJourney(page: Page, testInfo: TestInfo, journey: Journe
   await expect(publishRegion.getByRole("heading", { name: "Xuất bản món quà này?" })).toBeFocused();
   await expect(publishRegion.getByText(`Gói đã chọn: ${planName}.`)).toBeVisible();
   // The upload-rights confirmation (`privacy-notice`) unlocks the confirm button.
-  await expect(publishRegion.getByRole("button", { name: "Xác nhận xuất bản" })).toBeDisabled();
+  const confirm = publishRegion.getByRole("button", {
+    name: onFree ? "Xác nhận xuất bản" : "Thanh toán 49.000đ",
+  });
+  await expect(confirm).toBeDisabled();
+  if (!onFree) {
+    await expect(
+      publishRegion.getByText(
+        "Số tiền: 49.000đ. Món quà được xuất bản sau khi thanh toán được xác nhận.",
+      ),
+    ).toBeVisible();
+  }
   await publishRegion.getByRole("checkbox").check();
-  await publishRegion.getByRole("button", { name: "Xác nhận xuất bản" }).click();
+  await confirm.click();
   const request = await publishRequest;
+  if (!onFree) {
+    // The fake provider's page, then its return page: the verified payment publishes the gift,
+    // and the page only reports what the server says.
+    await expect(page).toHaveURL(/\/billing\/fake-checkout\/[a-f0-9]{32}$/);
+    await expect(page.getByRole("heading", { name: "49.000đ" })).toBeVisible();
+    const pay = page.getByRole("button", { name: "Thanh toán thử" });
+    await waitForHydration(pay);
+    await pay.click();
+    await expect(page).toHaveURL(/\/checkout\/return\?order=[0-9a-f-]{36}$/);
+    await expect(page.getByRole("heading", { name: "Món quà đã được xuất bản" })).toBeVisible();
+    await page.getByRole("link", { name: "Về trang món quà" }).click();
+    await expect(page).toHaveURL(new RegExp(`/studio/${publicId}`));
+  }
   const idempotencyKey = request.headers()["idempotency-key"] ?? "";
   const requestBody = request.postData() ?? "";
   expect(idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
@@ -472,26 +496,37 @@ async function runPublishJourney(page: Page, testInfo: TestInfo, journey: Journe
   const creatorSessions = new Set(creator.events.map((event) => event.body["sessionId"]));
   expect(creatorSessions.size).toBe(1);
 
-  // 6. The same key and body replay the publication; another body conflicts.
+  // 6. The same key and body replay the publication; another body conflicts. A paid checkout's
+  // key no longer opens anything: its order is fulfilled.
   const headers = { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey };
-  const path = `/api/gifts/${publicId}/publish`;
+  const path = `/api/gifts/${publicId}/${onFree ? "publish" : "checkout"}`;
   const replay = await ownerFetch(page, { body: requestBody, headers, method: "POST", path });
-  expect(replay.status).toBe(201);
-  expect(
-    (replay.body as { data: { publication: { shareId: string } } }).data.publication.shareId,
-  ).toBe(shareId);
   const expectedRevision = (JSON.parse(requestBody) as { expectedRevision: number })
     .expectedRevision;
-  const conflicting = await ownerFetch(page, {
-    body: JSON.stringify({
-      ...(JSON.parse(requestBody) as object),
-      expectedRevision: expectedRevision + 1,
-    }),
-    headers,
-    method: "POST",
-    path,
-  });
-  expect(conflicting.status).toBe(409);
+  if (onFree) {
+    expect(replay.status).toBe(201);
+    expect(
+      (replay.body as { data: { publication: { shareId: string } } }).data.publication.shareId,
+    ).toBe(shareId);
+    const conflicting = await ownerFetch(page, {
+      body: JSON.stringify({
+        ...(JSON.parse(requestBody) as object),
+        expectedRevision: expectedRevision + 1,
+      }),
+      headers,
+      method: "POST",
+      path,
+    });
+    expect(conflicting.status).toBe(409);
+  } else {
+    expect(replay.status).toBe(409);
+    const order = await withE2eDatabase((database) =>
+      database
+        .collection<{ status: string }>("orders")
+        .findOne({ giftPublicId: publicId }, { projection: { _id: 0, status: 1 } }),
+    );
+    expect(order).toEqual({ status: "fulfilled" });
+  }
   // The server records `gift_published` after the response, once, without a browser session.
   const afterPublish = await readAnalyticsEvents(giftRef, (events) =>
     events.some((event) => event.name === "gift_published"),

@@ -9,10 +9,9 @@ import {
   getGiftTemplateManifest,
   giftLifecycleService,
   giftService,
-  planGrantPolicy,
+  getStudioPlanOffers,
 } from "@/composition/gifts";
 import { resolveTemplateArtifact } from "@/composition/templates";
-import { listPlanOffers } from "@/modules/gifts/application/plan-offers";
 import { ClaimDraftButton } from "@/modules/gifts/presentation/claim-draft-button";
 import { DraftEditor } from "@/modules/gifts/presentation/draft-editor";
 import { getGiftRequestContextFromHeaders } from "@/modules/gifts/presentation/gift-route-helpers";
@@ -90,7 +89,7 @@ export default async function StudioDraftPage({ params }: StudioDraftPageProps) 
                 audioTracks={audioCatalog.listSelectableTracks()}
                 gift={draft}
                 manifest={manifest}
-                planOffers={listPlanOffers(planGrantPolicy)}
+                planOffers={await getStudioPlanOffers(publicId, context.userId)}
                 publishable={publishable}
                 signedIn={context.userId !== null}
               />

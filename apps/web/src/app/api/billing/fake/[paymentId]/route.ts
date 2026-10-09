@@ -4,5 +4,8 @@ import { handleFakeCheckoutAction } from "@/modules/billing/presentation/fake-ch
 type FakeCheckoutRouteContext = Readonly<{ params: Promise<{ paymentId: string }> }>;
 
 export function POST(request: Request, routeContext: FakeCheckoutRouteContext): Promise<Response> {
-  return handleFakeCheckoutAction(request, routeContext, { cancel: fakeCheckout.cancel });
+  return handleFakeCheckoutAction(request, routeContext, {
+    cancel: fakeCheckout.cancel,
+    pay: fakeCheckout.pay,
+  });
 }

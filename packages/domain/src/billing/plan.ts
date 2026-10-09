@@ -68,6 +68,19 @@ export function currentPlan(planId: PlanId, catalog: readonly Plan[] = PLAN_CATA
   return current;
 }
 
+/** One released version of a plan, as an order snapshot names it. */
+export function planVersionOf(
+  planId: PlanId,
+  planVersion: number,
+  catalog: readonly Plan[] = PLAN_CATALOG,
+): Plan {
+  const plan = catalog.find(
+    (entry) => entry.planId === planId && entry.planVersion === planVersion,
+  );
+  if (!plan) throw new Error(`No released version ${planVersion} of plan ${planId}.`);
+  return plan;
+}
+
 /** The current version of every plan, in catalog order. */
 export function currentPlans(catalog: readonly Plan[] = PLAN_CATALOG): readonly Plan[] {
   return PLAN_IDS.map((planId) => currentPlan(planId, catalog));

@@ -722,6 +722,7 @@ describe("gift publishing", () => {
   const ownerId = "owner-1";
   const publicId = "p1u2b3l4i5s6h7e8";
   const key = "9c1b2f0e-6a7d-4c90-8d7a-4a559c1b2f0e";
+  const paidOrderId = "5b6a0f3e-8d2c-4b7e-9a1f-2c3d4e5f6a7b";
   const shareId = "Ab0_-cdefghijklmnopqrs";
   const contentHash = "f".repeat(64);
   const now = new Date("2026-10-01T08:00:00.000Z");
@@ -733,6 +734,7 @@ describe("gift publishing", () => {
   let assets: MediaAsset[];
   let publications: GiftPublication[];
   let keys: Map<string, StoredKey>;
+  /** A paid, unfulfilled `standard` order of the gift exists (`billing-checkout`). */
   let standardAvailable: boolean;
   let standardCheckout: boolean;
   let editable: boolean;
@@ -896,9 +898,15 @@ describe("gift publishing", () => {
               ? { kind: "grant", source: "free" }
               : standardCheckout
                 ? { kind: "checkout" }
-                : standardAvailable
-                  ? { kind: "grant", source: "internal" }
-                  : { kind: "unavailable" },
+                : { kind: "unavailable" },
+        },
+        paidOrders: {
+          findPaidForGift: () =>
+            Promise.resolve(
+              standardAvailable
+                ? { orderId: paidOrderId, planId: "standard", planVersion: 1 }
+                : null,
+            ),
         },
       },
       templates: {
@@ -1188,7 +1196,7 @@ describe("gift publishing", () => {
       ).resolves.toEqual({ error: { code: "NO_PAYMENT_REQUIRED" }, ok: false });
     });
 
-    it("grants Standard through the internal grant (Grant on outside Production)", async () => {
+    it("grants Standard from the gift's paid order and fulfills it (Paid order fulfillment)", async () => {
       standardAvailable = true;
 
       await expect(publish({ planId: "standard" })).resolves.toMatchObject({
@@ -1199,12 +1207,39 @@ describe("gift publishing", () => {
         maxPhotos: null,
         planId: "standard",
         priceVnd: 49_000,
-        source: "internal",
+        source: "order",
         watermark: false,
       });
+      expect(publishInputs[0]?.paidOrderId).toBe(paidOrderId);
     });
 
-    it("publishes on Free whatever the internal grant says (Free in Production)", async () => {
+    it("finalizes a paid order at the gift's current revision, keyed by the order", async () => {
+      standardAvailable = true;
+
+      await expect(
+        service.finalizePaidOrder({
+          giftPublicId: publicId,
+          id: paidOrderId,
+          ownerId,
+          planId: "standard",
+        }),
+      ).resolves.toMatchObject({ data: { planId: "standard", revision: 7 }, ok: true });
+      expect(publishInputs[0]).toMatchObject({
+        expectedRevision: 7,
+        idempotency: expect.objectContaining({ key: paidOrderId }) as object,
+        paidOrderId,
+      });
+      await expect(
+        service.finalizePaidOrder({
+          giftPublicId: publicId,
+          id: paidOrderId,
+          ownerId: "someone-else",
+          planId: "standard",
+        }),
+      ).resolves.toEqual({ error: { code: "NOT_FOUND" }, ok: false });
+    });
+
+    it("publishes on Free without any payment (Free in Production)", async () => {
       standardAvailable = false;
 
       await expect(publish({ planId: "free" })).resolves.toMatchObject({
@@ -1621,7 +1656,7 @@ describe("gift publishing", () => {
         ok: false,
       });
       expect(retried).toMatchObject({ data: { planId: "standard" }, ok: true });
-      expect(gift.entitlement).toMatchObject({ planId: "standard", source: "internal" });
+      expect(gift.entitlement).toMatchObject({ planId: "standard", source: "order" });
     });
 
     it("accepts the same key after a failed attempt (Retry after a validation failure)", async () => {

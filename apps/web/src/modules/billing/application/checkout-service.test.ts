@@ -2,6 +2,7 @@ import { type Order } from "@love-memory/domain";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { type BillingProvider, BillingProviderError } from "./billing-provider";
+import { type PaymentService } from "./payments";
 import {
   type CheckoutGate,
   createCheckoutService,
@@ -57,6 +58,7 @@ describe("checkout service", () => {
     findByIdempotencyKey: vi.fn<OrderRepository["findByIdempotencyKey"]>(),
     findForOwner: vi.fn<OrderRepository["findForOwner"]>(),
     markFailed: vi.fn<OrderRepository["markFailed"]>(),
+    findById: vi.fn<OrderRepository["findById"]>(),
     openCheckout: vi.fn<OrderRepository["openCheckout"]>(),
   };
   const provider = {
@@ -66,6 +68,7 @@ describe("checkout service", () => {
     id: "fake" as const,
   };
   const reportFailure = vi.fn();
+  const recordVerifiedPayment = vi.fn<PaymentService["recordVerifiedPayment"]>();
   let configured: BillingProvider | null;
   const service = createCheckoutService({
     clock: () => now,
@@ -73,6 +76,7 @@ describe("checkout service", () => {
     createOrderCode: () => 123_456_789_012,
     gate,
     orders,
+    payments: { recordVerifiedPayment },
     provider: () => configured,
     reportFailure,
     urls: () => ({
@@ -294,12 +298,35 @@ describe("checkout service", () => {
       }
     });
 
-    it("leaves a paid or unreadable payment pending (Paid at the provider)", async () => {
-      orders.findForOwner.mockResolvedValue(storedOrder());
+    it("records a payment the provider reports as paid (Paid at the provider)", async () => {
+      orders.findForOwner.mockResolvedValueOnce(storedOrder());
       provider.getPayment.mockResolvedValueOnce({
         amountPaidVnd: 49_000,
         amountVnd: 49_000,
         status: "PAID",
+      });
+      recordVerifiedPayment.mockResolvedValueOnce("applied");
+      orders.findById.mockResolvedValueOnce(storedOrder({ status: "paid" }));
+
+      await expect(service.getOrder({ orderId, userId: "user-1" })).resolves.toMatchObject({
+        data: { checkoutUrl: null, status: "paid" },
+      });
+      expect(recordVerifiedPayment).toHaveBeenCalledWith({
+        amountVnd: 49_000,
+        currency: "VND",
+        orderCode: 123_456_789_012,
+        provider: "fake",
+        reference: "reconciliation:123456789012",
+        source: "reconciliation",
+      });
+    });
+
+    it("leaves a pending or unreadable payment pending", async () => {
+      orders.findForOwner.mockResolvedValue(storedOrder());
+      provider.getPayment.mockResolvedValueOnce({
+        amountPaidVnd: 0,
+        amountVnd: 49_000,
+        status: "PENDING",
       });
       await expect(service.getOrder({ orderId, userId: "user-1" })).resolves.toMatchObject({
         data: { checkoutUrl: "https://pay.example/1", status: "pending" },

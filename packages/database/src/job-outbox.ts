@@ -21,6 +21,8 @@ export type JobOutboxDocument = Readonly<{
 }>;
 
 export type EnqueueJobInput = Readonly<{
+  /** When the job becomes due; `now` by default. */
+  availableAt?: Date;
   deduplicationKey: string;
   now: Date;
   payload: Readonly<Record<string, string>>;
@@ -43,7 +45,7 @@ export async function enqueueJob(
       $setOnInsert: {
         _id: randomUUID(),
         attempts: 0,
-        availableAt: input.now,
+        availableAt: input.availableAt ?? input.now,
         createdAt: input.now,
         lastErrorCode: null,
         payload: input.payload,

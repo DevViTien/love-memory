@@ -45,6 +45,18 @@ export function cancelFakePaymentLink(paymentId: string, store = fakePaymentLink
   return true;
 }
 
+/** `PENDING` → `PAID`; the link, or `null` for an unknown or no longer pending one. */
+export function payFakePaymentLink(
+  paymentId: string,
+  store = fakePaymentLinks(),
+): FakePaymentLink | null {
+  const link = store.get(paymentId);
+  if (!link || link.status !== "PENDING") return null;
+  const paid = { ...link, status: "PAID" as const };
+  store.set(paymentId, paid);
+  return paid;
+}
+
 export function createFakeProvider(
   appUrl: () => URL,
   store: FakeStore = fakePaymentLinks(),

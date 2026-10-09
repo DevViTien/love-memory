@@ -181,7 +181,7 @@ An option SHALL be disabled, with one explanation, in the first of these cases t
 - the plan is not available to the owner (`gift-plans` "Plan availability"): `Sắp mở thanh toán.`;
 - the content's photo count exceeds the plan's `maxPhotos`: `Món quà đang có {photoCount} ảnh, gói này cho tối đa {maxPhotos} ảnh.`
 
-A paid plan made available by the internal paid-plan grant SHALL show the note `Cấp nội bộ để thử nghiệm, không thu phí.`. A plan available through checkout (`gift-plans` "Plan availability") SHALL show the note `Thanh toán trực tuyến sau khi xác nhận.`. The first enabled option SHALL be selected by default and the selection SHALL follow the creator's choice. When the selected option becomes disabled (for example after a photo is added), the selection SHALL move to the first enabled option, or to none.
+A plan the gift's paid order already covers SHALL show the note `Đã thanh toán. Bấm Xuất bản để hoàn tất.` and publish without another checkout. A plan available through checkout (`gift-plans` "Plan availability") SHALL show the note `Thanh toán trực tuyến sau khi xác nhận.`. The first enabled option SHALL be selected by default and the selection SHALL follow the creator's choice. When the selected option becomes disabled (for example after a photo is added), the selection SHALL move to the first enabled option, or to none.
 
 The `Xuất bản` button SHALL be disabled, with one explanation, in the first of these cases that applies:
 
@@ -231,7 +231,7 @@ While the action runs, both confirmation actions SHALL be disabled, `Xác nhận
 
 #### Scenario: Action not yet available
 
-- **WHEN** every template step is `Đã xong`, the draft holds 5 photos, no billing provider is configured, the internal paid-plan grant of `gift-plans` is off, and the owner opens `Xuất bản`
+- **WHEN** every template step is `Đã xong`, the draft holds 5 photos, no billing provider is configured, and the owner opens `Xuất bản`
 - **THEN** the summary shows `Tất cả các bước đã sẵn sàng.`, `Miễn phí` is disabled with `Món quà đang có 5 ảnh, gói này cho tối đa 3 ảnh.`, `Tiêu chuẩn` is disabled with `Sắp mở thanh toán.`, and the `Xuất bản` button is disabled with `Chọn một gói để xuất bản.`
 
 #### Scenario: Preview after a pending change
@@ -286,7 +286,7 @@ While the action runs, both confirmation actions SHALL be disabled, `Xác nhận
 
 #### Scenario: Publishing not enabled
 
-- **WHEN** the owner opens step `Xuất bản` of a complete 3-photo draft while no billing provider is configured and the internal paid-plan grant is off
+- **WHEN** the owner opens step `Xuất bản` of a complete 3-photo draft while no billing provider is configured
 - **THEN** `Miễn phí` is selected, `Tiêu chuẩn` is disabled with `Sắp mở thanh toán.`, and the `Xuất bản` button is enabled
 
 #### Scenario: Incomplete steps block publishing
@@ -366,12 +366,17 @@ While the action runs, both confirmation actions SHALL be disabled, `Xác nhận
 
 #### Scenario: Standard through the internal grant
 
-- **WHEN** no billing provider is configured, the internal paid-plan grant is on, and the owner of a complete 8-photo draft opens `Xuất bản`
-- **THEN** `Miễn phí` is disabled with `Món quà đang có 8 ảnh, gói này cho tối đa 3 ảnh.`, `Tiêu chuẩn` is selected with `49.000đ` and `Cấp nội bộ để thử nghiệm, không thu phí.`, and confirming sends `planId` `standard`
+- **WHEN** no billing provider is configured, `INTERNAL_PLAN_GRANT_ENABLED` is still `true` on the deployment, and the owner of a complete 8-photo draft opens `Xuất bản`
+- **THEN** `Tiêu chuẩn` is disabled with `Sắp mở thanh toán.`, because no grant without payment exists any more
+
+#### Scenario: Standard already paid
+
+- **WHEN** the gift has a `paid` `standard` order and its owner, with a complete 8-photo draft, opens `Xuất bản`
+- **THEN** `Miễn phí` is disabled with `Món quà đang có 8 ảnh, gói này cho tối đa 3 ảnh.`, `Tiêu chuẩn` is selected with `49.000đ` and `Đã thanh toán. Bấm Xuất bản để hoàn tất.`, and confirming sends `POST /api/gifts/{publicId}/publish` with `planId` `standard`
 
 #### Scenario: Selection follows the photo count
 
-- **WHEN** `Miễn phí` is selected for a 3-photo draft, the internal paid-plan grant is on, and the creator adds a fourth photo
+- **WHEN** `Miễn phí` is selected for a 3-photo draft, a billing provider is configured, and the creator adds a fourth photo
 - **THEN** `Miễn phí` becomes disabled and `Tiêu chuẩn` becomes selected
 
 #### Scenario: Photo limit refused by the server

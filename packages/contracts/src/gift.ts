@@ -48,18 +48,18 @@ export const GiftPublicationSummarySchema = z
 
 /**
  * A plan as the Studio offers it for a first publish, rendered into the page by the server so the
- * browser never holds a plan constant. `internalGrant`: available through the internal grant;
- * `checkout`: available only after a payment (`billing-checkout`).
+ * browser never holds a plan constant. `checkout`: available only after a payment;
+ * `prepaid`: the gift's paid order already covers it (`billing-checkout`).
  */
 export const PlanOfferDtoSchema = z
   .object({
     available: z.boolean(),
     checkout: z.boolean(),
-    internalGrant: z.boolean(),
     maxPhotos: z.number().int().positive().nullable(),
     name: z.string().min(1),
     planId: PlanIdSchema,
     planVersion: z.number().int().positive(),
+    prepaid: z.boolean(),
     priceVnd: z.number().int().nonnegative(),
     retentionDays: z.number().int().positive(),
     watermark: z.boolean(),

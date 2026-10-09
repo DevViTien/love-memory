@@ -193,7 +193,7 @@ describe("Xuất bản step: availability", () => {
 
   it("describes each plan from the server's values", async () => {
     stubStudioFetch({ assets: readyAssets });
-    await openReadyPublishStep({ ...owner, planOffers: studioPlanOffers("internal") });
+    await openReadyPublishStep({ ...owner, planOffers: studioPlanOffers("prepaid") });
 
     expect(
       publishStep().getByText(
@@ -207,10 +207,10 @@ describe("Xuất bản step: availability", () => {
         { exact: false },
       ),
     ).toBeTruthy();
-    expect(publishStep().getByText("Cấp nội bộ để thử nghiệm, không thu phí.")).toBeTruthy();
+    expect(publishStep().getByText("Đã thanh toán. Bấm Xuất bản để hoàn tất.")).toBeTruthy();
   });
 
-  it("offers Standard through the internal grant for 8 photos (Standard through the internal grant)", async () => {
+  it("offers the paid Standard plan for 8 photos (Paid order fulfillment)", async () => {
     const photos = studioPhotos(8);
     const fetchMock = stubStudioFetch({ assets: photos.assets, publish: () => published(0) });
     const user = userEvent.setup();
@@ -218,7 +218,7 @@ describe("Xuất bản step: availability", () => {
     renderEditor({
       ...owner,
       content: { ...completeContent, memories: photos.memories },
-      planOffers: studioPlanOffers("internal"),
+      planOffers: studioPlanOffers("prepaid"),
     });
     await screen.findAllByText("8/8 ảnh");
 
@@ -324,7 +324,7 @@ describe("Xuất bản step: availability", () => {
   it("lets the creator choose Standard and sends it", async () => {
     const fetchMock = stubStudioFetch({ assets: readyAssets, publish: () => published(0) });
     const user = userEvent.setup();
-    await openReadyPublishStep({ ...owner, planOffers: studioPlanOffers("internal") });
+    await openReadyPublishStep({ ...owner, planOffers: studioPlanOffers("prepaid") });
 
     expect(planRadio(/^Miễn phí/).checked).toBe(true);
     await user.click(planRadio(/^Tiêu chuẩn/));

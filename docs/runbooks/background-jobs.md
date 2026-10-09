@@ -7,11 +7,13 @@ separate pipeline with its own runbook, the [media pipeline runbook](./media-pip
 
 ## Job types
 
-| Type                     | Enqueued by                                                          | Budget | What it does                                                                               |
-| ------------------------ | -------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------ |
-| `gift.assets.cleanup.v1` | Each update of a published gift, and the schema version 12 backfill  | 5      | Deletes the detached photos of the gift that its current publication no longer references. |
-| `gift.delete.v1`         | An owner deleting a gift (`gift-lifecycle`)                          | 8      | Purges the gift: photo objects, derived records, analytics events; leaves a tombstone.     |
-| `email.send.v1`          | A first publish, a final photo failure, a takedown (`system-emails`) | 6      | Emails the gift's current owner, with a Studio link and no gift content.                   |
+| Type                     | Enqueued by                                                                     | Budget | What it does                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------ |
+| `gift.assets.cleanup.v1` | Each update of a published gift, and the schema version 12 backfill             | 5      | Deletes the detached photos of the gift that its current publication no longer references. |
+| `gift.delete.v1`         | An owner deleting a gift (`gift-lifecycle`)                                     | 8      | Purges the gift: photo objects, derived records, analytics events; leaves a tombstone.     |
+| `email.send.v1`          | A first publish, a final photo failure, a takedown, a payment (`system-emails`) | 6      | Emails the gift's current owner, with a Studio link and no gift content.                   |
+| `publish.finalize.v1`    | A verified payment (`billing-checkout`)                                         | 6      | Publishes the paid order's gift and marks the order `fulfilled`.                           |
+| `payment.reconcile.v1`   | Each checkout, due 2 minutes after its link expires                             | 6      | Reads the provider's verified status: applies a payment, or closes the order.              |
 
 **Payloads.** A payload holds identifiers only (`{ giftId }`, plus `kind` and `eventKey` for
 emails). Nothing in a job, a job log or the commands below contains gift content, addresses,
