@@ -40,6 +40,33 @@ Kết quả qua các mốc:
 
 Mốc quan trọng nhất là **M2 — vertical slice**. Nếu chưa làm được một gift thật chạy trọn vẹn, không nên đồng thời mở rộng thêm template hoặc tính năng.
 
+### 1.1. Điều chỉnh hướng sản phẩm (13/10/2026)
+
+Sản phẩm được định nghĩa lại theo mô hình **catalog animation cấu hình được**:
+
+1. **Admin tạo template.** Một template là một trang HTML animation hoàn chỉnh (như bộ mẫu
+   `animation-gift`), kèm danh sách trường cấu hình ánh xạ vào đối tượng `CONFIG` của trang.
+2. **Người dùng** đăng nhập (magic link hiện tại), chọn template, nhập cấu hình (chữ, danh sách
+   lời nhắn, ngày, tên, ảnh, nhạc có bản quyền) trong Studio.
+3. **Đầu ra** là trang HTML riêng của món quà (`/g/{shareId}`) và QR để mở trang đó.
+
+Hệ quả cho kế hoạch:
+
+- **Template là dữ liệu, không phải code trong repo.** Loại template mới `html` được lưu trong
+  MongoDB và Blob, có phiên bản bất biến, chạy trong iframe sandbox hiện có. Loại `sdk` cũ
+  (`memory-box`) vẫn chạy cho quà đã tạo nhưng không được đầu tư thêm.
+- **Đợt đầu nhập template bằng lệnh** `pnpm template:import`. Giao diện admin để tạo và sửa template
+  là hạng mục phát triển sau (§17.4).
+- **Template 2 và 3 của Sprint 4 (§13.4, §13.5) được thay** bằng 6 mẫu `animation-gift`: Thư tay,
+  Đồng ý làm vợ anh nhé, Trái tim yêu thương, Kỷ niệm của chúng mình, Trái tim kỉ niệm, Lời nhắn
+  ma trận.
+- **QR (§13.3) được đưa lên trước** vì là đầu ra chính.
+- **Không đổi:** đăng nhập, Studio, upload ảnh riêng tư, publish, entitlement và thanh toán
+  (Free/Standard áp dụng cho mọi template), admin, gỡ quà, xoá dữ liệu.
+
+Quyết định chi tiết và thứ tự change nằm trong
+[docs/sprints/template-pivot-plan.md](./docs/sprints/template-pivot-plan.md).
+
 ---
 
 ## 2. Các giả định dùng để lập kế hoạch
@@ -846,6 +873,9 @@ Hai nhánh có thể chạy song song.
 - Bot/social preview classification tối thiểu.
 - Không đếm preview crawler là opened.
 
+> **Thay thế (13/10/2026):** §13.4 và §13.5 được thay bằng 6 mẫu `animation-gift` ở dạng template
+> `html` (xem §1.1). QR ở §13.3 được làm trước, trong đợt điều chỉnh hướng.
+
 ### 13.4. Template 2 — Dòng thời gian
 
 - 4–7 milestone.
@@ -1279,6 +1309,13 @@ Email không chứa full private gift content.
 **P2**
 
 - Submission/review/royalty marketplace.
+
+Bổ sung sau điều chỉnh hướng (13/10/2026):
+
+- P0: template `html` lưu trong DB/Blob, ánh xạ trường vào `CONFIG`, lệnh nhập template.
+- P0: 6 mẫu `animation-gift`, QR ba kiểu.
+- P1: giao diện admin tạo template: tải HTML và tài nguyên, sửa schema, xem trước, xuất bản.
+- P2: trình dựng schema trực quan, sửa code trên web, thống kê theo template.
 
 ### 17.5. Gift management
 

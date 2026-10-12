@@ -13,8 +13,9 @@ English.
 - Stack: TypeScript strict · pnpm 10 + Turborepo · Next.js 16 App Router · React 19 · Tailwind 4 ·
   MongoDB (official driver, Zod at boundaries) · Better Auth magic link + Resend · private Vercel
   Blob · Sharp · Trigger.dev · Vitest · Playwright · Vercel.
-- Status: Sprints 0–2 shipped (foundation, auth + gift drafts, media pipeline + Viewer runtime).
-  Next: Sprint 3 vertical slice, Gate M2 in [plan.md](./plan.md).
+- Status: Sprints 0–3, 5 and 6 shipped; Sprint 4 is partly built. Since 2026-10-13 the product is a
+  catalog of admin-managed HTML animation templates that users configure and share by link and QR
+  ([plan.md §1.1](./plan.md), [template pivot plan](./docs/sprints/template-pivot-plan.md)).
 
 ## Sources of truth
 
