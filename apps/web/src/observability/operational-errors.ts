@@ -33,6 +33,17 @@ export function reportJobFailure(
   });
 }
 
+/**
+ * A stored template version whose manifest this build cannot read (for example an `html` version
+ * after a rollback): the version id only, never the manifest.
+ */
+export function reportUnreadableTemplateManifest(
+  versionId: string,
+  sink: ErrorLogSink = console,
+): void {
+  sink.error("Template version skipped: unreadable manifest", { templateVersion: versionId });
+}
+
 export function reportReadinessFailure(
   error: unknown,
   requestId: string,

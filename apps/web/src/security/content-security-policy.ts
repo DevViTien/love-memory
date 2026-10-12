@@ -9,7 +9,50 @@ export type ContentSecurityPolicyOptions = Readonly<{
   localStorageOrigin?: string | undefined;
   mode: ContentSecurityPolicyMode;
   nonce?: string;
+  /**
+   * Template mode: adds `sandbox allow-scripts`, so a template artifact runs in an opaque origin
+   * even when it is opened as a top-level page (`/template-artifacts/...`).
+   */
+  sandbox?: boolean;
+  /**
+   * Template mode: the request origin; fonts and images may come from its `/template-artifacts/`
+   * path (an html template's own files). Without it, fonts are denied.
+   */
+  templateOrigin?: string | undefined;
 }>;
+
+/** The path of every template artifact file. */
+export const TEMPLATE_ARTIFACTS_PATH = "/template-artifacts/";
+
+/**
+ * The origin that serves template artifact files: the configured `APP_URL`, or the request's own
+ * origin when none is configured (the `Host` the browser used, not the server's bind address, when
+ * it is a well-formed host).
+ */
+export function templateArtifactOrigin(
+  appUrl: URL | undefined,
+  request: Readonly<{ headers: Headers; url: string }>,
+): string {
+  if (appUrl) return appUrl.origin;
+  const url = new URL(request.url);
+  const host = request.headers.get("host");
+  // Only a plain host name, IPv4 or bracketed IPv6 literal with an optional port: a `Host` header
+  // with spaces, `;` or other policy syntax must never reach the CSP.
+  if (!host || !SAFE_HOST.test(host) || !/[A-Za-z0-9]/.test(host)) return url.origin;
+  try {
+    // The regex admits values no URL parser accepts (`a:99999`, `[:]`): fall back, never throw.
+    return new URL(`${url.protocol}//${host}`).origin;
+  } catch {
+    return url.origin;
+  }
+}
+
+const SAFE_HOST = /^(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?$/;
+
+/** Whether a path is a content-addressed template artifact (sandboxed template CSP). */
+export function isTemplateArtifactPath(pathname: string): boolean {
+  return pathname.startsWith(TEMPLATE_ARTIFACTS_PATH);
+}
 
 const VERCEL_BLOB_CONTROL_ORIGIN = "https://blob.vercel-storage.com";
 const VERCEL_BLOB_OIDC_CONTROL_PATH = "https://vercel.com/api/blob/";
@@ -50,6 +93,8 @@ export function createContentSecurityPolicy({
   localStorageOrigin,
   mode,
   nonce,
+  sandbox = false,
+  templateOrigin,
 }: ContentSecurityPolicyOptions): string {
   if (mode === "nonce" && !nonce) {
     throw new Error("Nonce CSP mode requires a nonce.");
@@ -60,16 +105,21 @@ export function createContentSecurityPolicy({
     const localObjectSource = localStorageOrigin
       ? `${localStorageOrigin}${LOCAL_OBJECT_ROUTE_PATH}`
       : undefined;
+    // An html template's own bundled fonts and images, never another route of the application.
+    const artifactSource = templateOrigin
+      ? `${new URL(templateOrigin).origin}${TEMPLATE_ARTIFACTS_PATH}`
+      : undefined;
     return [
       "default-src 'none'",
       "base-uri 'none'",
       "connect-src 'none'",
-      "font-src 'none'",
+      `font-src ${artifactSource ?? "'none'"}`,
       "form-action 'none'",
       "frame-ancestors 'self'",
-      `img-src data: ${uniqueSources([VERCEL_PRIVATE_BLOB_ORIGIN, assetOrigin, localObjectSource])}`,
+      `img-src ${uniqueSources(["data:", artifactSource, VERCEL_PRIVATE_BLOB_ORIGIN, assetOrigin, localObjectSource])}`,
       "media-src 'none'",
       "object-src 'none'",
+      ...(sandbox ? ["sandbox allow-scripts"] : []),
       "script-src 'self'",
       "style-src 'unsafe-inline'",
       "worker-src 'none'",

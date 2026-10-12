@@ -1,5 +1,8 @@
 # Template workspace
 
+These are the `sdk` templates, built in the repository. New templates are `html` templates,
+imported as data: see [templates-html/README.md](../templates-html/README.md).
+
 Each template is an independent workspace under `templates/<template-id>` and must provide:
 
 ```text

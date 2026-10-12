@@ -5,9 +5,20 @@ import {
   reportJobFailure,
   reportOperationalFailure,
   reportReadinessFailure,
+  reportUnreadableTemplateManifest,
 } from "./operational-errors";
 
 describe("operational error reporting", () => {
+  it("names only the template version of an unreadable manifest", () => {
+    const sink = { error: vi.fn() };
+
+    reportUnreadableTemplateManifest("love-days@1.0.0", sink);
+
+    expect(sink.error).toHaveBeenCalledWith("Template version skipped: unreadable manifest", {
+      templateVersion: "love-days@1.0.0",
+    });
+  });
+
   it("does not log database error messages or secrets", () => {
     const sink = { error: vi.fn() };
 

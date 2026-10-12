@@ -91,10 +91,14 @@ type Props = Readonly<{
   inputId?: string | undefined;
   /** Id of an error message outside the field; marks the picker invalid and describes it. */
   errorMessageId?: string | undefined;
+  /** Id of the field's help text outside the field; describes the picker. */
+  helpTextId?: string | undefined;
   label: string;
   maxItems: number;
   minItems: number;
   onChange: (fieldId: string, value: ImageFieldValue) => void;
+  /** One photo (an `image` field): the summary reads `Một ảnh` instead of a range. */
+  single?: boolean | undefined;
 }>;
 
 type CropCandidate = Readonly<{ file: File; objectUrl: string }>;
@@ -317,10 +321,12 @@ export function MediaImageListField({
   initialCaptions,
   inputId,
   errorMessageId,
+  helpTextId,
   label,
   maxItems,
   minItems,
   onChange,
+  single = false,
 }: Props) {
   const [items, setItems] = useState<readonly UploadItem[]>([]);
   const [message, setMessage] = useState<string | null>(null);
@@ -881,7 +887,8 @@ export function MediaImageListField({
         {label}
       </legend>
       <p className="text-sm text-stone-600">
-        {minItems}–{maxItems} ảnh · JPEG, PNG hoặc WebP · tối đa 10 MB mỗi ảnh.
+        {single ? "Một ảnh" : `${minItems}–${maxItems} ảnh`} · JPEG, PNG hoặc WebP · tối đa 10 MB
+        mỗi ảnh.
       </p>
       <p className="mt-1 text-sm font-semibold text-stone-700">
         <span>
@@ -895,7 +902,9 @@ export function MediaImageListField({
         Chọn ảnh
         <input
           accept={acceptedTypes.join(",")}
-          aria-describedby={errorMessageId}
+          aria-describedby={
+            [helpTextId, errorMessageId].filter((id) => id !== undefined).join(" ") || undefined
+          }
           aria-invalid={errorMessageId === undefined ? undefined : true}
           className="sr-only"
           disabled={pickerDisabled}

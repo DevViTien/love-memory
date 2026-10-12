@@ -36,15 +36,20 @@ pnpm db:verify-gifts
 published templates with their validated preview fixtures: `memory-box` at `1.1.0` (the committed
 release in `templates/memory-box/releases/1.1.0/`), `our-timeline` and `midnight-wish` at `1.0.0`.
 It keeps `memory-box@1.0.0` stored unchanged with status `retired`, so existing drafts pinned to it
-stay editable while new drafts use `1.1.0`. Run it with migration credentials; the web runtime
-credential only needs application read/write permissions.
+stay editable while new drafts use `1.1.0`. It then imports the bundled html templates of
+`templates-html/` (`love-days` at `1.0.0`) into object storage and `templateVersions`, so it needs
+the storage configuration too (`STORAGE_DRIVER=local` with `APP_URL` and
+`LOCAL_OBJECT_STORAGE_SECRET` locally, Blob on a deployed tier). Run it with migration credentials;
+the web runtime credential only needs application read/write permissions.
 
 Stored template releases are immutable. When a stored `templateVersions` manifest differs in content
 (key order is ignored) from the seed, `db:seed` fails with
 `Template release <id>@<version> is immutable and differs from the seed` and writes nothing for that
 template. On a shared, staging or production database this is an incident: ship a new template
 version instead. On a local development database only (for example one seeded from an uncommitted
-experiment), delete that single `templateVersions` document and run `db:seed` again.
+experiment), delete that single `templateVersions` document and run `db:seed` again. The same
+applies to an html template whose folder or bootstrap changed under a stored version: the import
+fails with `... is already stored with other content`; give the change a new version.
 
 `db:verify-gifts` creates a uniquely named temporary draft, verifies owner isolation, optimistic
 concurrency and claim behavior against real MongoDB, then removes the draft and its revisions in a

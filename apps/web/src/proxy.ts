@@ -8,12 +8,14 @@ import { getTechnicalSpikeEnvironment, isTechnicalSpikePagePath } from "@/config
 import {
   createContentSecurityPolicy,
   getContentSecurityPolicyMode,
+  isTemplateArtifactPath,
+  templateArtifactOrigin,
 } from "@/security/content-security-policy";
 
 export function proxy(request: NextRequest) {
   const mode = getContentSecurityPolicyMode(request.nextUrl.pathname);
   const nonce = mode === "nonce" ? Buffer.from(randomUUID()).toString("base64") : undefined;
-  const { assetOrigin } = getWebEnvironment();
+  const { appUrl, assetOrigin } = getWebEnvironment();
   const localStorageOrigin = getLocalObjectStorageOrigin(process.env);
   const contentSecurityPolicy = createContentSecurityPolicy({
     ...(assetOrigin ? { assetOrigin } : {}),
@@ -21,6 +23,9 @@ export function proxy(request: NextRequest) {
     ...(localStorageOrigin ? { localStorageOrigin } : {}),
     mode,
     ...(nonce ? { nonce } : {}),
+    // The same template policy as the artifact route sets on its responses.
+    sandbox: isTemplateArtifactPath(request.nextUrl.pathname),
+    templateOrigin: templateArtifactOrigin(appUrl, request),
   });
 
   if (

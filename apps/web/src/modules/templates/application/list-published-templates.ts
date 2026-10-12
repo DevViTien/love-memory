@@ -9,8 +9,10 @@ export async function listPublishedTemplates(
   isAvailable: TemplateAvailability,
 ): Promise<readonly TemplateSummary[]> {
   const templates = await catalog.listPublished();
-  return templates.map((template) => ({
-    ...template,
-    available: isAvailable(template.id, template.version),
-  }));
+  return Promise.all(
+    templates.map(async (template) => ({
+      ...template,
+      available: await isAvailable(template.id, template.version),
+    })),
+  );
 }

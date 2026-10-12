@@ -87,9 +87,12 @@ The system SHALL return an authorized gift through `GET /api/gifts/{publicId}` w
 - `shortText` and `longText` values are trimmed and must be 1 to `maxLength` characters.
 - `date` values must be ISO calendar dates.
 - `theme` values must be one of the field's declared options.
+- `textList` values must be arrays of at most `maxItems` strings, each trimmed and then 1 to `itemMaxLength` characters; as for image lists, a draft is allowed to hold fewer than `minItems` lines.
+- `passcode` values must be exactly `length` ASCII digits, and `color` values `#rrggbb` hexadecimal colors, stored in lowercase.
 - `audio` values must be the `id` of a track in the licensed audio catalog whose `status` is `active`. An unknown id or the id of a `withdrawn` track is rejected, including when the draft already stored it.
 - `imageList` values must be arrays of unique UUIDs with at most `maxItems` entries. A draft is allowed to hold fewer than `minItems` entries, so that images can be saved one at a time; `minItems` is enforced only by full payload validation as specified in `template-manifest-contract`. Each referenced asset must exist, belong to this gift and field, have a status of `initiated`, `uploaded`, `processing`, `ready`, or `failed`, and not be detached from the working copy (`media-upload` "Asset deletion").
 - `captionedImageList` values must be arrays of at most `maxItems` items of the form `{ assetId, caption? }` with unique `assetId` UUIDs; as for `imageList`, a draft is allowed to hold fewer than `minItems` items. Captions are trimmed and must then be 1 to `captionMaxLength` characters. Each referenced asset must satisfy the same existence, ownership, field, status and detachment rules as for `imageList`.
+- `image` values must be one UUID whose asset satisfies the same existence, ownership, field, status and detachment rules as for `imageList`.
 
 Invalid content SHALL be rejected with `400`, code `VALIDATION_ERROR`, and per-field `fieldErrors`, and the stored draft SHALL stay unchanged. Each `fieldErrors` key SHALL start with the id of the field it concerns, optionally followed by `.`-separated item indexes and keys (for example `memories.0.caption`); an error that concerns no single field, such as an undeclared key, SHALL use the key `content`. If the bound template version is no longer editable, the system SHALL respond `409` with code `CONFLICT`. Content that passes validation SHALL be stored in its normalized form, for example with text and captions trimmed.
 
@@ -147,6 +150,17 @@ Invalid content SHALL be rejected with `400`, code `VALIDATION_ERROR`, and per-f
 
 - **WHEN** a draft is bound to a template version whose status is `retired`
 - **THEN** content saves are still validated against that version and can succeed
+
+#### Scenario: Single photo not owned by this gift field
+
+- **WHEN** an `image` value references an asset uploaded for another field of the gift
+- **THEN** the response is `400` with code `VALIDATION_ERROR` and a `fieldErrors` entry for that
+  field, and the draft's revision is unchanged
+
+#### Scenario: Html template values stored normalized
+
+- **WHEN** a save sets a `textList` field to `["  Một "]` and a `color` field to `#FFAA00`
+- **THEN** the response is `200` and the draft stores `["Một"]` and `#ffaa00`
 
 ### Requirement: Revision numbers and optimistic concurrency
 

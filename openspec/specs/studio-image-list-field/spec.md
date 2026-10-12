@@ -8,7 +8,7 @@ Defines how the Studio draft editor lets a creator fill an `imageList` template 
 
 ### Requirement: Field rendering from the template manifest
 
-The draft editor SHALL render one image list field for each `imageList` or `captionedImageList` field of the draft's template version, using that field's `label`, `aspectRatio`, `minItems` and `maxItems`, and seeding it with the asset IDs currently stored in the draft content for that field (for a `captionedImageList` field, the `assetId` of each stored item). The field SHALL show the allowed item range, the accepted formats (JPEG, PNG, WebP) and the 10 MiB per-image limit. It SHALL show how many images it holds against `maxItems` as `{n}/{maxItems} ảnh`, and, while it holds fewer than `minItems` images, how many more are needed as `Cần thêm {k} ảnh`. Every change to the ordered asset list SHALL be reported to the editor as the field's new content value; an empty list SHALL remove the field from the draft content. Changes SHALL be persisted by the Studio autosave specified in `studio-autosave`, without a separate save action, including while the field holds fewer than `minItems` images. The field SHALL keep its uploads running while the creator moves to another Studio step.
+The draft editor SHALL render one image list field for each `imageList` or `captionedImageList` field of the draft's template version, using that field's `label`, `aspectRatio`, `minItems` and `maxItems`, and seeding it with the asset IDs currently stored in the draft content for that field (for a `captionedImageList` field, the `assetId` of each stored item). The field SHALL show the allowed item range, the accepted formats (JPEG, PNG, WebP) and the 10 MiB per-image limit. It SHALL show how many images it holds against `maxItems` as `{n}/{maxItems} ảnh`, and, while it holds fewer than `minItems` images, how many more are needed as `Cần thêm {k} ảnh`. Every change to the ordered asset list SHALL be reported to the editor as the field's new content value; an empty list SHALL remove the field from the draft content. Changes SHALL be persisted by the Studio autosave specified in `studio-autosave`, without a separate save action, including while the field holds fewer than `minItems` images. The field SHALL keep its uploads running while the creator moves to another Studio step. An `image` field SHALL be rendered as the same field limited to one image: `maxItems` 1, `minItems` 1 when the field is required and 0 otherwise, the field's `aspectRatio` or `1:1`, the summary `Một ảnh` instead of the item range, seeded with the stored asset id, and reporting that single asset id as its value; removing the photo removes the field from the draft content.
 
 #### Scenario: Field seeded from saved content
 
@@ -39,6 +39,12 @@ The draft editor SHALL render one image list field for each `imageList` or `capt
 
 - **WHEN** an upload is at 40% and the creator moves to another Studio step
 - **THEN** the upload is not aborted, and the image appears in the field when the creator returns
+
+#### Scenario: Single photo field
+
+- **WHEN** the editor opens a draft whose `image` field stores one asset id
+- **THEN** the field shows `Một ảnh`, `1/1 ảnh` and that photo, and its picker is disabled until
+  the photo is removed
 
 ### Requirement: Multi-image picking with client-side validation
 

@@ -9,3 +9,4 @@ templates/*/releases/**
 .claude/commands/opsx
 .claude/skills/openspec-*
 .claude/worktrees
+templates-html/*/index.html

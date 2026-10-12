@@ -2,9 +2,8 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 
 import { getAdminAccess } from "@/composition/admin";
-import { templateVersionControls } from "@/composition/templates";
+import { findTemplateArtifact, templateVersionControls } from "@/composition/templates";
 import { requireAdminPage } from "@/modules/admin/presentation/admin-guard";
-import { getTemplateArtifact } from "@/modules/templates/infrastructure/template-artifact-registry";
 import { AdminTemplateVersionsTable } from "@/modules/templates/presentation/admin-template-versions-table";
 
 export const metadata: Metadata = {
@@ -25,11 +24,13 @@ export default async function AdminTemplatesPage() {
         được, cho tới khi khôi phục. Phiên bản đã ngừng phát hành không quay lại danh mục.
       </p>
       <AdminTemplateVersionsTable
-        versions={versions.map((version) => ({
-          ...version,
-          // The registry, not the kill: a killed version keeps its artifact for a restore.
-          hasArtifact: getTemplateArtifact(version.templateId, version.version) !== null,
-        }))}
+        versions={await Promise.all(
+          versions.map(async (version) => ({
+            ...version,
+            // The artifact, not the kill: a killed version keeps its artifact for a restore.
+            hasArtifact: (await findTemplateArtifact(version.templateId, version.version)) !== null,
+          })),
+        )}
       />
     </section>
   );

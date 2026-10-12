@@ -34,6 +34,7 @@
     "openspec": "pnpm dlx @fission-ai/openspec@1.13.2",
     "spec:check": "pnpm openspec validate --all --strict --no-interactive && pnpm openspec validate --archived --no-interactive && node --import tsx scripts/check-openspec.ts",
     "start": "pnpm --filter @love-memory/web start",
+    "template:import": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local --conditions=react-server --import tsx scripts/template-import.ts",
     "test": "pnpm build:templates && vitest run",
     "test:coverage": "pnpm build:templates && vitest run --coverage",
     "test:e2e": "node --env-file-if-exists=.env --env-file-if-exists=apps/web/.env.local node_modules/@playwright/test/cli.js test --project=chromium --project=mobile-chromium --grep-invert @perf",

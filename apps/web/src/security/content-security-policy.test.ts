@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import {
   createContentSecurityPolicy,
   getContentSecurityPolicyMode,
+  isTemplateArtifactPath,
+  templateArtifactOrigin,
 } from "./content-security-policy";
 
 describe("content security policy", () => {
@@ -52,6 +54,70 @@ describe("content security policy", () => {
     expect(policy).toContain("script-src 'self'");
     expect(policy).not.toContain("script-src 'unsafe-inline'");
     expect(policy).not.toContain("strict-dynamic");
+  });
+
+  describe("template artifacts (Template's own fonts and images)", () => {
+    it("scopes fonts and images to the artifact path and sandboxes the document", () => {
+      const policy = createContentSecurityPolicy({
+        isDevelopment: false,
+        mode: "template",
+        sandbox: true,
+        templateOrigin: "https://love.example/template-artifacts/x/1.0.0/h/index.html",
+      });
+
+      expect(policy).toBe(
+        "default-src 'none'; base-uri 'none'; connect-src 'none'; font-src https://love.example/template-artifacts/; form-action 'none'; frame-ancestors 'self'; img-src data: https://love.example/template-artifacts/ https://*.private.blob.vercel-storage.com; media-src 'none'; object-src 'none'; sandbox allow-scripts; script-src 'self'; style-src 'unsafe-inline'; worker-src 'none'",
+      );
+      expect(policy).not.toContain("'self' data:");
+    });
+
+    it("takes the artifact origin from APP_URL, else from the Host the browser used", () => {
+      const request = {
+        headers: new Headers({ host: "127.0.0.1:3100" }),
+        url: "http://localhost:3100/template-artifacts/x",
+      };
+
+      expect(templateArtifactOrigin(new URL("https://love.example/app"), request)).toBe(
+        "https://love.example",
+      );
+      expect(templateArtifactOrigin(undefined, request)).toBe("http://127.0.0.1:3100");
+      expect(templateArtifactOrigin(undefined, { headers: new Headers(), url: request.url })).toBe(
+        "http://localhost:3100",
+      );
+      expect(
+        templateArtifactOrigin(undefined, {
+          headers: new Headers({ host: "[::1]:3100" }),
+          url: request.url,
+        }),
+      ).toBe("http://[::1]:3100");
+    });
+
+    it.each([
+      "x;foo",
+      "a b",
+      "evil.example; script-src *",
+      "x/y",
+      "x:999999",
+      "[::1",
+      "a:99999",
+      "[:]",
+      "[1.2.3.4]",
+      "..",
+      "-",
+    ])("ignores the malformed Host %j and uses the request URL's origin", (host) => {
+      expect(
+        templateArtifactOrigin(undefined, {
+          headers: new Headers({ host }),
+          url: "http://localhost:3100/template-artifacts/x",
+        }),
+      ).toBe("http://localhost:3100");
+    });
+
+    it("recognizes artifact paths only", () => {
+      expect(isTemplateArtifactPath("/template-artifacts/love-days/1.0.0/h/index.html")).toBe(true);
+      expect(isTemplateArtifactPath("/template-spikes/memory-box")).toBe(false);
+      expect(isTemplateArtifactPath("/templates/love-days")).toBe(false);
+    });
   });
 
   describe("local object storage origin", () => {

@@ -27,8 +27,8 @@ The system SHALL record each audited event as one document in `auditLog`, holdin
 The actions are `admin.role.granted`, `admin.role.revoked`, `admin.mfa.enrolled`, `admin.mfa.reset`,
 `admin.mfa.verified`, `admin.mfa.failed`, `admin.gift.looked_up`, `admin.template.retired`,
 `admin.template.killed`, `admin.template.restored`, `gift.deleted`, `admin.gift.taken_down`,
-`admin.gift.restored`, `admin.report.dismissed`, `admin.gift.content_viewed`, `gift.taken_down` and
-`admin.order.looked_up`. Later capabilities add their own actions to
+`admin.gift.restored`, `admin.report.dismissed`, `admin.gift.content_viewed`, `gift.taken_down`,
+`admin.order.looked_up` and `admin.template.imported`. Later capabilities add their own actions to
 this list.
 
 **Contents.** A record MUST NOT contain gift content, captions, passwords, TOTP or backup codes,
@@ -61,6 +61,13 @@ event writes them; no endpoint accepts a record from a client.
 - **WHEN** an admin kills `memory-box` `1.1.0` with the reason `broken`
 - **THEN** a record holds `admin.template.killed`, the admin as actor, the target
   `{ kind: "template-version", id: "memory-box@1.1.0" }` and the metadata `{ reason: "broken" }`
+
+#### Scenario: Template import recorded
+
+- **WHEN** an operator imports `love-days` `1.0.0` with `pnpm template:import`
+- **THEN** a record holds `admin.template.imported`, the actor `{ kind: "operator", id: <name> }`,
+  the target `{ kind: "template-version", id: "love-days@1.0.0" }` and the metadata
+  `artifactHash`, `files` and `published`
 
 ### Requirement: Audit page
 

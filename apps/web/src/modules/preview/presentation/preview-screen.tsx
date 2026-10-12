@@ -42,6 +42,7 @@ const TEMPLATE_FAILURES: readonly ViewerFallbackReason[] = [
   "ERROR",
   "INIT_TIMEOUT",
   "LOAD_TIMEOUT",
+  "NAVIGATED",
 ];
 
 const RELOADING_TEXT = "Đang tải lại bản xem trước…";

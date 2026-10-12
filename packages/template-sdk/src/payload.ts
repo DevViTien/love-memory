@@ -10,8 +10,8 @@ export type ImageFieldReferences = Readonly<{ assetIds: readonly string[]; field
 type FieldSchemaMode = "draft" | "full";
 
 /**
- * A draft may hold fewer images than `minItems` so that images can be saved one at a time;
- * every other rule applies in both modes.
+ * A draft may hold fewer list items than `minItems` so that images and texts can be saved one at a
+ * time; every other rule applies in both modes.
  */
 function createFieldValueSchema(field: TemplateField, mode: FieldSchemaMode): z.ZodType {
   switch (field.type) {
@@ -44,6 +44,22 @@ function createFieldValueSchema(field: TemplateField, mode: FieldSchemaMode): z.
         .refine((items) => new Set(items.map((item) => item.assetId)).size === items.length, {
           message: "Image asset references must be unique.",
         });
+    case "textList":
+      return z
+        .array(z.string().trim().min(1).max(field.itemMaxLength))
+        .min(mode === "full" ? field.minItems : 0)
+        .max(field.maxItems);
+    case "image":
+      return z.uuid();
+    case "passcode":
+      return z.string().regex(new RegExp(`^[0-9]{${field.length}}$`), {
+        message: `Expected exactly ${field.length} digits.`,
+      });
+    case "color":
+      return z
+        .string()
+        .regex(/^#[0-9a-fA-F]{6}$/, { message: "Expected a #rrggbb color." })
+        .transform((value) => value.toLowerCase());
     case "theme":
       return z.string().refine((value) => field.options.includes(value), {
         message: "Theme is not declared by this template version.",
@@ -97,6 +113,11 @@ export function listImageFieldReferences(
   return manifest.fields.flatMap((field): ImageFieldReferences[] => {
     if (!isImageField(field)) return [];
     const value = content[field.id];
+    if (field.type === "image") {
+      return typeof value === "string" && value !== ""
+        ? [{ assetIds: [value], fieldId: field.id }]
+        : [];
+    }
     if (!Array.isArray(value) || value.length === 0) return [];
 
     // Stored content is untrusted input: a malformed item is skipped, never dereferenced, so it

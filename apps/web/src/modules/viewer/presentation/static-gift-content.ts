@@ -31,11 +31,18 @@ function imageItems(
   value: unknown,
   assets: ViewerPayload["assets"],
 ): StaticImageItem[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry: unknown, index): StaticImageItem[] => {
+  const entries: readonly unknown[] =
+    field.type === "image"
+      ? value === undefined
+        ? []
+        : [value]
+      : Array.isArray(value)
+        ? value
+        : [];
+  return entries.flatMap((entry: unknown, index): StaticImageItem[] => {
     let assetId: string | null = null;
     let caption: string | null = null;
-    if (field.type === "imageList") {
+    if (field.type === "imageList" || field.type === "image") {
       assetId = nonEmpty(entry);
     } else if (typeof entry === "object" && entry !== null) {
       const item = entry as Readonly<Record<string, unknown>>;
@@ -58,7 +65,8 @@ function imageItems(
 
 /**
  * The static rendering of a gift: every field with a value, in declaration order, without labels.
- * `theme` and `audio` are not content to read, and wrong-typed values are skipped.
+ * A text list is one paragraph per line. `theme`, `audio`, `passcode` and `color` are not content
+ * to read, and wrong-typed values are skipped.
  */
 export function toStaticGiftBlocks(
   fields: readonly ViewerField[],
@@ -79,6 +87,13 @@ export function toStaticGiftBlocks(
         const text = typeof value === "string" ? formatCalendarDate(value) : null;
         return text ? [{ fieldId: field.id, kind: "text", multiline: false, text }] : [];
       }
+      case "textList": {
+        const items = Array.isArray(value) ? value.flatMap((item) => nonEmpty(item) ?? []) : [];
+        return items.length > 0
+          ? [{ fieldId: field.id, kind: "text", multiline: true, text: items.join("\n") }]
+          : [];
+      }
+      case "image":
       case "imageList":
       case "captionedImageList": {
         const items = imageItems(field, value, assets);
@@ -86,6 +101,8 @@ export function toStaticGiftBlocks(
       }
       case "theme":
       case "audio":
+      case "passcode":
+      case "color":
         return [];
     }
   });

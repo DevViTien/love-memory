@@ -50,7 +50,9 @@ Business state and invariants such as gift transitions. It cannot import React, 
 
 ### template-sdk
 
-The stable boundary between Studio, Viewer and template artifacts. A published artifact is immutable.
+The stable boundary between Studio, Viewer and template artifacts: the manifest (kinds, fields,
+configuration paths, steps, budgets), the payload schemas and the message protocol. A published
+artifact is immutable.
 
 ### database
 
@@ -85,6 +87,54 @@ admin area (`/admin`), which also sends `Referrer-Policy: no-referrer`, `X-Robot
 `Cache-Control: private, no-store`. A route must
 never use nonce CSP unless its layout explicitly opts into dynamic rendering. Production Playwright
 tests verify both modes.
+
+## Templates
+
+A template is either of two kinds (`template-manifest-contract`,
+[template pivot plan](./sprints/template-pivot-plan.md)):
+
+- **`sdk`** (`memory-box`): a workspace under `templates/`, built and released as committed files,
+  served from the registry in `modules/templates/infrastructure/template-artifact-registry.ts`.
+  No new `sdk` template is planned.
+- **`html`**: a folder under `templates-html/` (or anywhere an operator keeps one) with
+  `index.html`, `template.json` and `assets/`. It is data: `pnpm template:import` (or `db:seed`
+  for the bundled folders) checks it, stores its files in object storage under
+  `private/templates/{id}/{version}/{artifactContentHash}/` and its version in `templateVersions`
+  (`kind: "html"`, `defaults`, `files`, `artifactContentHash`), and records
+  `admin.template.imported`. A version is immutable: another folder under the same version is
+  refused. The authoring format is in [templates-html/README.md](../templates-html/README.md).
+
+Every consumer reaches an artifact through `resolveTemplateArtifact` (`composition/templates.ts`),
+which returns a `TemplateArtifactHandle` (`contentHash`, `readFile`) for either kind and applies the
+kill switch. `/template-artifacts/{id}/{version}/{hash}/{...path}` serves the files of both kinds
+with the same caching, `ETag` and template CSP; html files come from storage and are served only
+while their bytes match the recorded SHA-256.
+
+**The importer** (`modules/templates/application/html-template-*.ts`) parses `index.html` with
+`parse5`. It refuses inline handlers, `javascript:` and external URLs (attributes, CSS, scripts),
+navigating links, `<link>`, `<iframe>`, `<object>`, `<embed>`, `<form>`, `<base>` and
+`<meta http-equiv>`, checks every field path against the `#gift-config` defaults, limits sizes and
+measures the budgets. Inline scripts become `script-{n}.js` files behind inert placeholders.
+
+**The runtime** of an html template is the bootstrap `love-gift.js`
+(`infrastructure/love-gift-bootstrap.js`, copied into every artifact with the version's field
+mapping):
+
+- **`INIT`.** It merges the gift's values into the defaults at each field's `path` (photos become
+  the signed `INIT` `assets` URLs) and answers `READY`.
+- **The API.** It exposes `window.LoveGift`: `config()`, `reducedMotion()`, `complete()` and
+  `scene(id)`.
+- **`PLAY`.** It runs the template scripts in order only on the first `PLAY`, the recipient's
+  `Mở quà`. Later `PAUSE` and `PLAY` arrive as `lovegift:*` window events. A failing script posts
+  `ERROR`.
+
+The host, the protocol, the sandbox and the music (played by the host after the opening gesture)
+are the same as for `sdk` templates. The template CSP allows fonts and images only from
+`/template-artifacts/`, so html templates bundle their fonts and sample photos. Network, media,
+forms and workers stay denied, and artifact responses add `sandbox allow-scripts`. The gift viewer
+treats a second load of the frame as a navigation (`NAVIGATED`): it posts nothing more and shows
+the static rendering. The importer's checks are a lint and a defence in depth. The trust boundary
+is the sandbox, the CSP, these host checks and the operator's review of imported HTML.
 
 ## Studio editor
 

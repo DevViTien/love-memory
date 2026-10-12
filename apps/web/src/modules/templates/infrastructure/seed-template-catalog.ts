@@ -1,12 +1,12 @@
 import { MEMORY_BOX_RELEASES } from "@love-memory/template-memory-box";
 import {
-  isImageField,
   parseTemplateManifest,
   parseTemplatePayload,
   type TemplateManifest,
 } from "@love-memory/template-sdk";
 
-import { type StoredTemplateSummary, type TemplateCatalog } from "../domain/template-summary";
+import { summarizeTemplateManifest } from "../application/summarize-template";
+import { type TemplateCatalog } from "../domain/template-summary";
 import { canonicalJson, type SeedTemplateRelease } from "./template-release-seed";
 
 /**
@@ -232,23 +232,7 @@ export const seedTemplateVersionManifests: readonly TemplateManifest[] = Object.
   ),
 );
 
-const templates = Object.freeze(
-  seedTemplateCurrentManifests.map<StoredTemplateSummary>((manifest) => {
-    const imageField = manifest.fields.find(isImageField);
-
-    return {
-      description: manifest.meta.description,
-      estimatedDurationSec: manifest.meta.estimatedDurationSec,
-      id: manifest.id,
-      ...(imageField
-        ? { imageRequirement: { maxItems: imageField.maxItems, minItems: imageField.minItems } }
-        : {}),
-      moods: manifest.meta.moods,
-      name: manifest.meta.name,
-      version: manifest.version,
-    };
-  }),
-);
+const templates = Object.freeze(seedTemplateCurrentManifests.map(summarizeTemplateManifest));
 
 export const seedTemplateCatalog: TemplateCatalog = {
   findPublishedById(id) {

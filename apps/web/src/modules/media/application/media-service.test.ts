@@ -42,6 +42,7 @@ const manifest = parseTemplateManifest({
       type: "captionedImageList",
     },
     { id: "headline", label: "Headline", maxLength: 20, type: "shortText" },
+    { id: "cover", label: "Cover", type: "image" },
   ],
   id: "memory-box",
   meta: {
@@ -235,6 +236,23 @@ describe("media service", () => {
         sizeBytes: 3,
       }),
     ).resolves.toEqual({ error: { code: "INVALID_FIELD" }, ok: false });
+  });
+
+  it("binds an upload to a single image field with a quota of one photo", async () => {
+    await expect(
+      service().initializeUpload({
+        accessors: [],
+        contentType: "image/jpeg",
+        fieldId: "cover",
+        giftPublicId: gift.publicId,
+        sizeBytes: 3,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(current).toMatchObject({ fieldId: "cover" });
+    expect(vi.mocked(repository.createWithinQuota).mock.calls[0]?.slice(1)).toEqual([
+      MEDIA_ASSET_LIMITS.maximumAssetsPerGift,
+      1,
+    ]);
   });
 
   it("verifies object metadata before atomically enqueueing processing", async () => {

@@ -117,7 +117,8 @@ transformation MUST NOT insert URLs, remove values or fill in defaults.
 
 The `assets` map SHALL contain an entry for an asset id when all of these hold:
 
-- the asset id is referenced by an `imageList` or `captionedImageList` field of the payload;
+- the asset id is referenced by an image field (`imageList`, `captionedImageList` or `image`) of
+  the payload;
 - the asset belongs to the same gift;
 - the asset was uploaded for that same field;
 - the asset's status is `ready`.
@@ -159,6 +160,11 @@ template shows its text card.
 - **WHEN** the payload references no asset
 - **THEN** `assets` is `{}` and `assetsExpireAt` is `null`
 
+#### Scenario: Single photo field
+
+- **WHEN** a `love-days` gift's `photo` field references a `ready` asset uploaded for `photo`
+- **THEN** `assets` maps that id to a signed URL, and `payload.photo` keeps the asset id
+
 ### Requirement: Audio URL resolution
 
 The `audioUrl` SHALL be the catalog URL (`/audio-library/{fileName}`) of the track named by the
@@ -192,7 +198,9 @@ The `fields` list SHALL describe every manifest field in declaration order. Each
 - `label`;
 - `type`;
 - `required`;
-- `minItems` and `maxItems`, for image fields only.
+- `minItems` and `maxItems`, for list fields (`imageList`, `captionedImageList` and `textList`)
+  and `image` fields only; an `image` field has `maxItems` `1` and `minItems` `1` when it is
+  required, `0` otherwise.
 
 These are enough for a host to render the content statically and to label issues. `fields` MUST
 NOT contain gift content.
@@ -203,6 +211,13 @@ NOT contain gift content.
 - **THEN** `fields` lists `receiver-name`, `anniversary-date`, `opening-message`, `memories`,
   `final-letter`, `theme` and `audio` in that order, and `memories` has `minItems` `3` and
   `maxItems` `8`
+
+#### Scenario: Html template fields
+
+- **WHEN** the transformation runs for a manifest with a `textList` field (`minItems` 2, `maxItems`
+  4), a required `image` field, a `passcode` field and a `color` field
+- **THEN** the `textList` entry has `minItems` `2` and `maxItems` `4`, the `image` entry has
+  `minItems` `1` and `maxItems` `1`, and the `passcode` and `color` entries have neither
 
 ### Requirement: Content issues
 
@@ -217,7 +232,7 @@ Each issue has `code`, `fieldId` and, for a problem with one item of a list fiel
   item's `itemIndex`, taken from the second segment of the failing path. It is also used for an
   `audio` value that is not a selectable track;
 - `ASSET_UNAVAILABLE`, with `itemIndex`, for each image item whose asset id has no entry in
-  `assets`.
+  `assets`; the photo of an `image` field is item `0`.
 
 Each (`code`, `fieldId`, `itemIndex`) SHALL appear at most once. Issues SHALL be ordered by field
 declaration order, then by `itemIndex`. Content that passes full validation, with every referenced
@@ -244,3 +259,10 @@ asset available, SHALL produce an empty list.
 
 - **WHEN** the content passes full payload validation and every referenced asset is `ready`
 - **THEN** `issues` is empty
+
+#### Scenario: Html template content issues
+
+- **WHEN** a `textList` field with `minItems` 2 holds one line, a `passcode` field of `length` 4
+  holds `12`, and an optional `image` field references an asset that is not `ready`
+- **THEN** `issues` contains `CONTENT_TOO_FEW` for the `textList` field, `CONTENT_INVALID` for the
+  `passcode` field, and `ASSET_UNAVAILABLE` for the `image` field with `itemIndex` `0`

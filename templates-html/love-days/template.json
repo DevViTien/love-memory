@@ -1,0 +1,95 @@
+{
+  "kind": "html",
+  "id": "love-days",
+  "version": "1.0.0",
+  "status": "published",
+  "meta": {
+    "name": "Trái tim yêu thương",
+    "description": "Đếm từng ngày bên nhau. Chạm cho trái tim đầy để mở tấm ảnh và lời nhắn dành cho người thương.",
+    "estimatedDurationSec": 45,
+    "moods": ["romantic", "playful"],
+    "occasions": ["anniversary", "valentine", "confession"]
+  },
+  "capabilities": ["dom", "svg"],
+  "budgets": { "initialJsKbGzip": 12, "initialMediaKb": 120, "maxTextureMb": 8 },
+  "fields": [
+    {
+      "id": "start-date",
+      "label": "Ngày bắt đầu yêu",
+      "type": "date",
+      "path": "startDate",
+      "required": true
+    },
+    {
+      "id": "person1-name",
+      "label": "Tên người thứ nhất",
+      "type": "shortText",
+      "maxLength": 30,
+      "path": "person1.name",
+      "required": true
+    },
+    {
+      "id": "person1-avatar",
+      "label": "Ảnh đại diện người thứ nhất",
+      "helpText": "Không có ảnh thì hiện chữ cái đầu của tên.",
+      "type": "image",
+      "aspectRatio": "1:1",
+      "path": "person1.avatar"
+    },
+    {
+      "id": "person2-name",
+      "label": "Tên người thứ hai",
+      "type": "shortText",
+      "maxLength": 30,
+      "path": "person2.name",
+      "required": true
+    },
+    {
+      "id": "person2-avatar",
+      "label": "Ảnh đại diện người thứ hai",
+      "helpText": "Không có ảnh thì hiện chữ cái đầu của tên.",
+      "type": "image",
+      "aspectRatio": "1:1",
+      "path": "person2.avatar"
+    },
+    {
+      "id": "photo",
+      "label": "Ảnh khi trái tim đầy",
+      "type": "image",
+      "aspectRatio": "25:26",
+      "path": "photo",
+      "required": true
+    },
+    {
+      "id": "hint",
+      "label": "Lời gợi ý chạm tim",
+      "helpText": "Để trống sẽ dùng: Chạm vào trái tim nhé ♡",
+      "type": "shortText",
+      "maxLength": 40,
+      "path": "hint"
+    },
+    {
+      "id": "popup-caption",
+      "label": "Lời nhắn dưới ảnh",
+      "helpText": "Để trống sẽ dùng: Cảm ơn vì em đã đến 🤍",
+      "type": "shortText",
+      "maxLength": 120,
+      "path": "popupCaption"
+    },
+    {
+      "id": "audio",
+      "label": "Nhạc nền",
+      "type": "audio",
+      "source": "licensedLibrary"
+    }
+  ],
+  "steps": [
+    {
+      "id": "couple",
+      "label": "Hai người",
+      "fieldIds": ["start-date", "person1-name", "person1-avatar", "person2-name", "person2-avatar"]
+    },
+    { "id": "surprise", "label": "Bất ngờ", "fieldIds": ["photo", "hint", "popup-caption"] },
+    { "id": "music", "label": "Nhạc", "fieldIds": ["audio"] }
+  ]
+}

@@ -54,6 +54,11 @@ jobs:
       MONGODB_DATABASE: love_memory_e2e
       MONGODB_URI: mongodb://127.0.0.1:27017/?replicaSet=rs0&directConnection=true
       RESEND_API_KEY: re_playwright_not_used
+      # `db:seed` imports the bundled html templates into object storage: the local driver, as on
+      # the Playwright web server (`playwright.config.ts`).
+      APP_URL: http://127.0.0.1:3100
+      LOCAL_OBJECT_STORAGE_SECRET: playwright-local-object-storage-secret-0001
+      STORAGE_DRIVER: local
     services:
       mongodb:
         image: mongo:8.0

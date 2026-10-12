@@ -45,11 +45,16 @@ SHALL be ordered by `sortOrder` ascending, then by template id ascending.
 The system SHALL build each catalog entry from the stored manifest of the selected version, after
 re-validating it against the template manifest schema. A summary MUST expose only `id`, `version`,
 `name`, `description`, `estimatedDurationSec`, `moods`, `available`, and, when the manifest
-declares an `imageList` or `captionedImageList` field, an `imageRequirement` with the first such
-field's `minItems` and `maxItems` in declaration order. `available` SHALL be `true` only when a
-template artifact is registered for that exact `id` and `version` (`template-artifact-delivery`), so
+declares an image field (`imageList`, `captionedImageList` or `image`), an `imageRequirement` whose
+`minItems` and `maxItems` add up the ranges of every image field: a list field's `minItems` and
+`maxItems`, and for an `image` field `1` and `1` when it is required, `0` and `1` otherwise. `available` SHALL be `true` only when a
+template artifact is registered for that exact `id` and `version` (`template-artifact-delivery`),
+either as an `sdk` release or as an imported `html` version, so
 a gift created from it can be previewed with the template and published; otherwise it is `false`.
-Stored manifests that fail validation MUST NOT be rendered as catalog entries.
+Stored manifests that fail validation MUST NOT be rendered as catalog entries. Such a version
+SHALL be left out of the catalog and of the template detail, and reported to the operational log by
+its `<templateId>@<version>` only, without failing the other entries (for example an `html` version
+read by a build that predates the kind).
 
 #### Scenario: Template with an image field
 
@@ -81,7 +86,21 @@ Stored manifests that fail validation MUST NOT be rendered as catalog entries.
 #### Scenario: Invalid stored manifest
 
 - **WHEN** the stored manifest of a selected version fails schema validation
-- **THEN** the request fails and the route error state is shown instead of a partial entry
+- **THEN** that entry is left out, the other entries are listed, and the log names only its
+  `<templateId>@<version>`
+
+#### Scenario: Template with single photo fields
+
+- **WHEN** the current version is `love-days` `1.0.0`, with two optional `image` fields and one
+  required `image` field
+- **THEN** its summary includes `imageRequirement` `{ minItems: 1, maxItems: 3 }`, and its card
+  shows `1–3 ảnh`
+
+#### Scenario: Imported html version
+
+- **WHEN** the current version is `love-days` `1.0.0`, imported by `db:seed`
+- **THEN** its summary has `available` `true`, and `/studio/new?template=love-days` offers to
+  create a draft
 
 ### Requirement: Template detail page
 
@@ -192,7 +211,10 @@ templates in this `sortOrder`:
 
 The `memory-box` `1.1.0` manifest and preview fixture MUST be the ones of the committed release
 `templates/memory-box/releases/1.1.0/`. The seed SHALL also keep the earlier release `memory-box` `1.0.0`, with its
-original manifest and preview fixture, as a version with status `retired`.
+original manifest and preview fixture, as a version with status `retired`. After them, the seed
+SHALL import every bundled `html` template folder under `templates-html/`, in folder name order
+and published (`template-artifact-delivery` "HTML template import command"), today `love-days`
+(`Trái tim yêu thương`) at version `1.0.0`.
 
 Seeding MUST:
 
@@ -210,7 +232,7 @@ Seeding MUST:
 
 - **WHEN** `db:seed` runs against an empty database
 - **THEN** the catalog lists `memory-box` at version `1.1.0`, then `our-timeline` and
-  `midnight-wish` each at version `1.0.0`, in that order
+  `midnight-wish` each at version `1.0.0`, then `love-days` at version `1.0.0`, in that order
 - **AND** `memory-box` `1.0.0` is stored with status `retired`
 
 #### Scenario: Upgrading a database seeded with 1.0.0
@@ -243,6 +265,12 @@ Seeding MUST:
 - **WHEN** an admin retired `our-timeline` `1.0.0` and `db:seed` runs again
 - **THEN** `our-timeline` `1.0.0` stays `retired`, and every other seeded version gets its seeded
   status
+
+#### Scenario: Bundled html template seeded
+
+- **WHEN** `db:seed` runs twice against an empty database with object storage configured
+- **THEN** `love-days@1.0.0` is stored once with `kind` `html`, its files are in object storage,
+  and the second run reports it `unchanged`
 
 ### Requirement: Retired versions remain resolvable for existing gifts
 

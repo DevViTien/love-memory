@@ -60,6 +60,32 @@ describe("Mongo template catalog", () => {
     });
   });
 
+  it("skips and reports a version whose manifest this build cannot read (Invalid stored manifest)", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const unreadable = documents[1];
+    if (!unreadable) throw new Error("Missing fixture");
+    const original = unreadable.manifest;
+    Object.assign(unreadable, { manifest: { ...original, kind: "future" } });
+    try {
+      const listed = await mongoTemplateCatalog.listPublished();
+      expect(listed.map((summary) => summary.id)).toEqual(
+        documents
+          .filter((document) => document !== unreadable)
+          .map((document) => document.templateId),
+      );
+      await expect(
+        mongoTemplateCatalog.findPublishedById(unreadable.templateId),
+      ).resolves.toBeUndefined();
+      expect(error).toHaveBeenCalledWith("Template version skipped: unreadable manifest", {
+        templateVersion: `${unreadable.templateId}@${unreadable.version}`,
+      });
+      expect(JSON.stringify(error.mock.calls)).not.toContain(original.meta.name);
+    } finally {
+      Object.assign(unreadable, { manifest: original });
+      error.mockRestore();
+    }
+  });
+
   it("returns undefined for an unavailable template", async () => {
     await expect(mongoTemplateCatalog.findPublishedById("missing")).resolves.toBeUndefined();
   });

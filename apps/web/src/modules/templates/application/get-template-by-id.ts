@@ -11,6 +11,6 @@ export async function getTemplateById(
 ): Promise<TemplateSummary | undefined> {
   const template = await catalog.findPublishedById(id);
   return template
-    ? { ...template, available: isAvailable(template.id, template.version) }
+    ? { ...template, available: await isAvailable(template.id, template.version) }
     : undefined;
 }

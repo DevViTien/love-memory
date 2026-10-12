@@ -21,8 +21,9 @@ const catalog: TemplateCatalog = {
   listPublished: () => Promise.resolve([memoryBox, timeline]),
 };
 
-/** Only `memory-box@1.1.0` has a registered artifact. */
-const isAvailable = (id: string, version: string) => id === "memory-box" && version === "1.1.0";
+/** Only `memory-box@1.1.0` has an artifact. */
+const isAvailable = (id: string, version: string) =>
+  Promise.resolve(id === "memory-box" && version === "1.1.0");
 
 describe("template catalog application services", () => {
   it("lists templates with their availability", async () => {

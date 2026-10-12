@@ -6,7 +6,11 @@ import {
   type MediaAssetDerivative,
 } from "@love-memory/domain";
 import { ObjectNotFoundError, type ObjectStorage } from "@love-memory/storage";
-import { isImageField, type TemplateManifest } from "@love-memory/template-sdk";
+import {
+  imageFieldItemRange,
+  isImageField,
+  type TemplateManifest,
+} from "@love-memory/template-sdk";
 
 import { type GiftAccessor } from "@/modules/gifts/application/gift-service";
 
@@ -318,7 +322,7 @@ export function createMediaService({
       const reserved = await assets.createWithinQuota(
         asset,
         MEDIA_ASSET_LIMITS.maximumAssetsPerGift,
-        field.maxItems,
+        imageFieldItemRange(field).maxItems,
       );
       if (!reserved) return failure({ code: "QUOTA_EXCEEDED" });
       let upload: Awaited<ReturnType<ObjectStorage["createUpload"]>>;

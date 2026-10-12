@@ -11,7 +11,7 @@ import {
 import { COLLECTIONS, type CollectionName } from "./collections";
 import { enqueueJob } from "./job-outbox";
 
-export const DATABASE_SCHEMA_VERSION = 18;
+export const DATABASE_SCHEMA_VERSION = 19;
 
 type DatabaseMigrationDocument = Readonly<{
   _id: string;
@@ -40,6 +40,9 @@ type ExistingIndex = Readonly<{
   sparse?: boolean;
   unique?: boolean;
 }>;
+
+/** A lowercase hexadecimal SHA-256. */
+const SHA256_HEX_PATTERN = "^[a-f0-9]{64}$";
 
 /** A share id: 16 random bytes as unpadded base64url. */
 const SHARE_ID_PATTERN = "^[A-Za-z0-9_-]{22}$";
@@ -171,9 +174,39 @@ export const CORE_COLLECTION_DEFINITIONS: readonly CollectionDefinition[] = [
     validator: {
       $jsonSchema: {
         additionalProperties: true,
+        // An `html` version (schema version 19) stores its defaults and artifact files; an `sdk`
+        // version, with or without `kind`, is served from the repository.
+        anyOf: [
+          { not: { required: ["kind"] } },
+          { properties: { kind: { enum: ["sdk"] } } },
+          {
+            properties: { kind: { enum: ["html"] } },
+            required: ["artifactContentHash", "defaults", "files", "importedAt"],
+          },
+        ],
         bsonType: "object",
         properties: {
           _id: { bsonType: "string" },
+          artifactContentHash: { bsonType: "string", pattern: SHA256_HEX_PATTERN },
+          defaults: { bsonType: "object" },
+          files: {
+            bsonType: "array",
+            items: {
+              additionalProperties: false,
+              bsonType: "object",
+              properties: {
+                contentType: { bsonType: "string", minLength: 1 },
+                name: { bsonType: "string", minLength: 1 },
+                sha256: { bsonType: "string", pattern: SHA256_HEX_PATTERN },
+                sizeBytes: { bsonType: ["int", "long"], minimum: 0 },
+                storageKey: { bsonType: "string", minLength: 1 },
+              },
+              required: ["name", "contentType", "sha256", "sizeBytes", "storageKey"],
+            },
+            minItems: 1,
+          },
+          importedAt: { bsonType: "date" },
+          kind: { enum: ["sdk", "html"] },
           manifest: { bsonType: "object" },
           status: { enum: ["draft", "published", "retired"] },
           templateId: { bsonType: "string" },

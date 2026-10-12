@@ -1,7 +1,19 @@
+import { createHash } from "node:crypto";
+
+import { ObjectNotFoundError } from "@love-memory/storage";
+
 import { getTemplateArtifact } from "@/modules/templates/infrastructure/template-artifact-registry";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const kills = vi.hoisted(() => ({ isKilled: vi.fn((_id: string, _version: string) => false) }));
+const html = vi.hoisted(() => ({ findArtifact: vi.fn() }));
+const storage = vi.hoisted(() => ({ getObject: vi.fn() }));
+
+vi.mock("@/modules/templates/infrastructure/mongo-html-template-repository", () => ({
+  mongoHtmlTemplateRepository: { findArtifact: html.findArtifact },
+}));
+
+vi.mock("@/composition/storage", () => ({ createStorage: () => storage }));
 
 vi.mock("@/modules/templates/infrastructure/mongo-template-version-state", () => ({
   mongoTemplateVersionState: {
@@ -11,6 +23,31 @@ vi.mock("@/modules/templates/infrastructure/mongo-template-version-state", () =>
 
 import { GET } from "./route";
 
+const font = new Uint8Array([0x77, 0x4f, 0x46, 0x32, 1, 2, 3]);
+const fontSha256 = createHash("sha256").update(font).digest("hex");
+const htmlHash = "b".repeat(64);
+const loveDays = {
+  artifactContentHash: htmlHash,
+  files: [
+    {
+      contentType: "font/woff2",
+      name: "assets/fonts/hand.woff2",
+      sha256: fontSha256,
+      sizeBytes: font.byteLength,
+      storageKey: `private/templates/love-days/1.0.0/${htmlHash}/assets/fonts/hand.woff2`,
+    },
+  ],
+};
+
+beforeEach(() => {
+  html.findArtifact.mockReset();
+  html.findArtifact.mockImplementation((id: string) =>
+    Promise.resolve(id === "love-days" ? loveDays : null),
+  );
+  storage.getObject.mockReset();
+  storage.getObject.mockResolvedValue(font);
+});
+
 const hash = getTemplateArtifact("memory-box-spike", "0.1.0")!.contentHash;
 
 describe("content-addressed template artifact route", () => {
@@ -18,7 +55,7 @@ describe("content-addressed template artifact route", () => {
     const context = (fileName: string) => ({
       params: Promise.resolve({
         contentHash: hash,
-        fileName,
+        filePath: fileName.split("/"),
         templateId: "memory-box-spike",
         version: "0.1.0",
       }),
@@ -39,7 +76,7 @@ describe("content-addressed template artifact route", () => {
       GET(new Request("https://example.test"), {
         params: Promise.resolve({
           contentHash: artifact.contentHash,
-          fileName: "index.html",
+          filePath: ["index.html"],
           templateId: "memory-box",
           version: "1.1.0",
         }),
@@ -60,7 +97,7 @@ describe("content-addressed template artifact route", () => {
       GET(new Request("https://example.test"), {
         params: Promise.resolve({
           contentHash: artifact.contentHash,
-          fileName,
+          filePath: fileName.split("/"),
           templateId: "memory-box",
           version: "1.1.0",
         }),
@@ -83,7 +120,7 @@ describe("content-addressed template artifact route", () => {
       GET(new Request("https://example.test"), {
         params: Promise.resolve({
           contentHash: hash,
-          fileName: "index.html",
+          filePath: ["index.html"],
           templateId: "memory-box-spike",
           version: "0.1.0",
         }),
@@ -104,7 +141,9 @@ describe("content-addressed template artifact route", () => {
       expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
       expect(response.headers.get("etag")).toMatch(/^"[a-f0-9]{64}"$/);
       expect(response.headers.get("access-control-allow-origin")).toBe("*");
-      expect(response.headers.get("content-security-policy")).not.toContain("127.0.0.1");
+      expect(response.headers.get("content-security-policy")).not.toContain(
+        "/api/local-object-storage/",
+      );
     });
 
     it("is not cached in local storage mode (Local storage mode is not cached)", async () => {
@@ -118,7 +157,7 @@ describe("content-addressed template artifact route", () => {
     it("may show locally stored images (Artifact may show locally stored images)", async () => {
       const policy = (await request()).headers.get("content-security-policy") ?? "";
       expect(policy).toContain(
-        "img-src data: https://*.private.blob.vercel-storage.com http://127.0.0.1:3100/api/local-object-storage/;",
+        "img-src data: http://127.0.0.1:3100/template-artifacts/ https://*.private.blob.vercel-storage.com http://127.0.0.1:3100/api/local-object-storage/;",
       );
       expect(policy).toContain("connect-src 'none'");
     });
@@ -127,7 +166,9 @@ describe("content-addressed template artifact route", () => {
       vi.stubEnv("VERCEL_ENV", "production");
       const response = await request();
       expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
-      expect(response.headers.get("content-security-policy")).not.toContain("127.0.0.1");
+      expect(response.headers.get("content-security-policy")).not.toContain(
+        "/api/local-object-storage/",
+      );
     });
   });
 
@@ -135,19 +176,19 @@ describe("content-addressed template artifact route", () => {
     for (const params of [
       {
         contentHash: "0".repeat(64),
-        fileName: "index.html",
+        filePath: ["index.html"],
         templateId: "memory-box-spike",
         version: "0.1.0",
       },
       {
         contentHash: hash,
-        fileName: "private.txt",
+        filePath: ["private.txt"],
         templateId: "memory-box-spike",
         version: "0.1.0",
       },
       {
         contentHash: hash,
-        fileName: "index.html",
+        filePath: ["index.html"],
         templateId: "memory-box-spike",
         version: "9.9.9",
       },
@@ -157,5 +198,64 @@ describe("content-addressed template artifact route", () => {
       });
       expect(response.status).toBe(404);
     }
+  });
+
+  describe("html template versions (HTML artifact files from storage)", () => {
+    const request = (filePath: string[], contentHash = htmlHash) =>
+      GET(new Request("https://example.test"), {
+        params: Promise.resolve({
+          contentHash,
+          filePath,
+          templateId: "love-days",
+          version: "1.0.0",
+        }),
+      });
+
+    it("serves a stored file under assets/ with its content type and the template headers", async () => {
+      const response = await request(["assets", "fonts", "hand.woff2"]);
+
+      expect(response.status).toBe(200);
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(font);
+      expect(response.headers.get("content-type")).toBe("font/woff2");
+      expect(response.headers.get("etag")).toBe(`"${fontSha256}"`);
+      expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      const policy = response.headers.get("content-security-policy") ?? "";
+      expect(policy).toContain("font-src https://example.test/template-artifacts/;");
+      expect(policy).toContain("sandbox allow-scripts");
+      expect(storage.getObject).toHaveBeenCalledWith(
+        loveDays.files[0]?.storageKey,
+        2 * 1024 * 1024,
+      );
+    });
+
+    it("answers 404 for a stale hash, an unknown file or bytes that no longer match", async () => {
+      expect((await request(["assets", "fonts", "hand.woff2"], "0".repeat(64))).status).toBe(404);
+      expect((await request(["assets", "missing.png"])).status).toBe(404);
+      storage.getObject.mockResolvedValueOnce(new Uint8Array([1]));
+      const tampered = await request(["assets", "fonts", "hand.woff2"]);
+      expect(tampered.status).toBe(404);
+      expect(await tampered.text()).toBe("");
+      storage.getObject.mockRejectedValueOnce(new ObjectNotFoundError("missing"));
+      const missing = await request(["assets", "fonts", "hand.woff2"]);
+      expect(missing.status).toBe(404);
+      expect(await missing.text()).toBe("");
+    });
+
+    it("answers 404 for an unsafe path without reading anything", async () => {
+      for (const filePath of [
+        [],
+        ["..", "secret"],
+        ["assets", ".."],
+        ["assets", "a%2Fb"],
+        ["assets", "a\b"],
+        [".hidden"],
+        ["a", "b", "c", "d", "e", "f", "g"],
+      ]) {
+        expect((await request(filePath)).status).toBe(404);
+      }
+      expect(html.findArtifact).not.toHaveBeenCalled();
+    });
   });
 });

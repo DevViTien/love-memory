@@ -209,9 +209,12 @@ any of these cases:
 - the payload's `artifactUrl` is `null`;
 - the template sends a valid `ERROR` event of either code, before or after opening;
 - no `READY` arrives within 20 `INIT` attempts after the iframe's latest `load` event;
-- the iframe fires no `load` event within 15 seconds of receiving its artifact URL.
+- the iframe fires no `load` event within 15 seconds of receiving its artifact URL;
+- the iframe fires a second `load` event for its artifact URL, because the document navigated its
+  own frame (reason `NAVIGATED`).
 
-On switching, the gift viewer SHALL send `DESTROY`, remove the iframe and stop listening to it. It
+On switching, the gift viewer SHALL send `DESTROY` (except to a navigated frame, which gets no
+message at all), remove the iframe and stop listening to it. It
 SHALL keep any audio that is already playing. The switch is final for that mount.
 
 The static rendering SHALL show every field of `fields` that has a value, in declaration order,
@@ -219,11 +222,12 @@ without labels or animation:
 
 - `shortText` and `longText` values as text, keeping line breaks;
 - `date` values as `DD/MM/YYYY`;
-- each image item as its image, from the `assets` URL with no referrer, followed by its caption.
+- `textList` values as one paragraph with one non-blank line per item;
+- each image item, including the photo of an `image` field, as its image, from the `assets` URL with no referrer, followed by its caption.
   When the image has no URL or fails to load, the caption is shown instead, or `Ảnh {n}` when
   there is no caption.
 
-`theme` and `audio` values SHALL NOT be rendered as text. All values MUST be rendered as text, never
+`theme`, `audio`, `passcode` and `color` values SHALL NOT be rendered as text. All values MUST be rendered as text, never
 as HTML. If the fallback happens before opening, the envelope SHALL stay until the person chooses
 `Mở quà`.
 
@@ -264,6 +268,19 @@ caption.
 - **WHEN** the static rendering shows a `receiver-name` of `<img src=x onerror=alert(1)>`
 - **THEN** that string appears as text and no element is created from it
 
+#### Scenario: Frame navigated away
+
+- **WHEN** the iframe fires a second `load` for the artifact URL, because the document navigated
+  its own frame
+- **THEN** the gift viewer sends that window nothing more, not even `DESTROY`, and shows the
+  static rendering with the reason `NAVIGATED`
+
+#### Scenario: Html template fallback
+
+- **WHEN** a `love-days`-style gift with a `textList` value `["Một", "Hai"]`, an `image` photo, a
+  `passcode` and a `color` falls back to the static rendering
+- **THEN** the lines `Một` and `Hai` and the photo are shown, and the passcode and color are not
+
 ### Requirement: Template issue collection
 
 The gift viewer SHALL accept `ISSUE` events only under the trusted-event rules of
@@ -289,8 +306,8 @@ The gift viewer SHALL report its lifecycle to its host page through one notifica
 - `opened`, when the person chooses `Mở quà` and the content is available;
 - `scene`, with the `sceneId`, for each valid `SCENE` event;
 - `completed`, for the first `COMPLETE` of a play-through;
-- `fallback`, with the reason (`ERROR`, `INIT_TIMEOUT`, `LOAD_TIMEOUT` or `NO_ARTIFACT`), when it
-  switches to the static rendering.
+- `fallback`, with the reason (`ERROR`, `INIT_TIMEOUT`, `LOAD_TIMEOUT`, `NAVIGATED` or
+  `NO_ARTIFACT`), when it switches to the static rendering.
 
 Notifications MUST NOT carry gift content. The gift viewer itself MUST NOT send them anywhere; the
 host page decides. An unmounted gift viewer MUST NOT notify, including a `NO_ARTIFACT` fallback
@@ -309,6 +326,11 @@ as analytics of gift opening.
 - **WHEN** the template sends `ERROR` after opening
 - **THEN** the host page is notified `fallback` with reason `ERROR`, and no notification contains
   gift text
+
+#### Scenario: Navigation notification
+
+- **WHEN** the template's frame navigates to another document
+- **THEN** the host page is notified `fallback` with reason `NAVIGATED`, once
 
 ### Requirement: Runtime outcome notification
 

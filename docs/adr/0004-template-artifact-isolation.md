@@ -24,6 +24,18 @@ through a schema-validated message protocol and an allowlisted asset resolver.
   artifact any more: viewers show the static rendering, publishing is refused, and the artifact
   route answers `404`. A restore brings the same immutable artifact back. Gifts never move to
   another version.
+- **HTML templates** (`add-html-template-kind`, 2026-10-13). A second kind, `html`, is imported as
+  data instead of built in the repository. Its artifact is content-addressed over all of its files
+  and stored in object storage; the importer refuses external URLs, inline handlers and navigation,
+  and moves inline scripts into files run by the `LoveGift` bootstrap. The isolation stays the
+  same iframe sandbox and protocol. The template CSP allows fonts and images only from
+  `/template-artifacts/`, and artifact responses carry `sandbox allow-scripts`, so a directly
+  opened artifact also runs in an opaque origin. The gift viewer treats a second load of the frame
+  as a navigation: it never posts to that window again and shows the static rendering. The
+  importer's checks are a lint and a defence in depth, not the trust boundary. The boundary is the
+  sandbox, the CSP, the host's checks and the operator's review of imported HTML. The manifest
+  validation and budgets of CI apply to `sdk` workspaces; `html` versions are checked by the
+  importer.
 
 ## Revisit when
 

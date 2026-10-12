@@ -25,6 +25,7 @@
     "better-auth": "catalog:",
     "mongodb": "catalog:",
     "next": "catalog:",
+    "parse5": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
     "resend": "catalog:",

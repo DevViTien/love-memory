@@ -202,6 +202,11 @@ export function createGiftViewerController(options: GiftViewerControllerOptions)
   const refreshTriggers = new Set<string>();
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   let settled = false;
+  /**
+   * The artifact window has loaded once. A later `load` with the same `src` means the document
+   * navigated its own frame: that window is never sent anything again.
+   */
+  let attached = false;
 
   function update(patch: Partial<GiftViewerState>) {
     state = { ...state, ...patch };
@@ -308,7 +313,9 @@ export function createGiftViewerController(options: GiftViewerControllerOptions)
     if (disposed || state.runtime === "fallback") return;
     stopHandshake();
     stopLoadTimer();
-    bridge?.destroy();
+    // A navigated frame holds another document: it gets no `DESTROY` either.
+    if (reason === "NAVIGATED") bridge?.disconnect();
+    else bridge?.destroy();
     bridge = null;
     const opening = state.phase === "opening";
     update({ fallbackReason: reason, frameSrc: null, frameVisible: false, runtime: "fallback" });
@@ -440,7 +447,7 @@ export function createGiftViewerController(options: GiftViewerControllerOptions)
     },
 
     /**
-     * The iframe's `load` event: a new handshake with a new budget of 20 attempts. `src` is the
+     * The iframe's first `load` event of the artifact: the handshake, with a budget of 20 attempts. `src` is the
      * iframe's current `src` attribute; a load of anything else (the initial `about:blank`) is
      * ignored, so it neither stops the load timeout nor starts a handshake.
      */
@@ -449,6 +456,13 @@ export function createGiftViewerController(options: GiftViewerControllerOptions)
       if (src !== state.frameSrc) return;
       const viewer = state.viewer;
       if (!viewer) return;
+      if (attached) {
+        // The artifact loads once. Another load means the frame navigated to another document,
+        // which must never receive the payload or the signed asset URLs.
+        switchToFallback("NAVIGATED");
+        return;
+      }
+      attached = true;
       stopLoadTimer();
       stopHandshake();
       bridge?.disconnect();

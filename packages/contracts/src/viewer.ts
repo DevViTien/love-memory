@@ -5,10 +5,14 @@ import { createApiSuccessSchema } from "./api";
 export const ViewerFieldTypeSchema = z.enum([
   "audio",
   "captionedImageList",
+  "color",
   "date",
+  "image",
   "imageList",
   "longText",
+  "passcode",
   "shortText",
+  "textList",
   "theme",
 ]);
 

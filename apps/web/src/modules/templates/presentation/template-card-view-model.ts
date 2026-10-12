@@ -1,6 +1,10 @@
 import { type TemplateSummary } from "../domain/template-summary";
 
 const visualByTemplateId: Readonly<Record<string, Readonly<{ gradient: string; icon: string }>>> = {
+  "love-days": {
+    gradient: "from-rose-100 via-pink-100 to-rose-200",
+    icon: "💞",
+  },
   "memory-box": {
     gradient: "from-rose-200 via-orange-100 to-amber-100",
     icon: "🎁",

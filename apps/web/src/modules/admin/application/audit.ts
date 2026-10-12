@@ -15,6 +15,7 @@ export const AuditActionSchema = z.enum([
   "admin.template.retired",
   "admin.template.killed",
   "admin.template.restored",
+  "admin.template.imported",
   "gift.deleted",
   "admin.gift.taken_down",
   "admin.gift.restored",

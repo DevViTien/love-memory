@@ -122,6 +122,8 @@ export default defineConfig([
   },
   globalIgnores([
     "**/.next/**",
+    // Local object storage (`db:seed` and E2E) holds imported html template scripts.
+    "**/.tmp/**",
     "**/.turbo/**",
     "**/coverage/**",
     "**/dist/**",

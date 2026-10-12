@@ -1,10 +1,7 @@
 import {
   createLocalObjectStorage,
-  createVercelBlobObjectStorage,
   getStorageConfiguration,
-  getStorageEnvironment,
   type LocalObjectStorage,
-  type ObjectStorage,
 } from "@love-memory/storage";
 
 import {
@@ -24,19 +21,13 @@ import { getGiftTemplateManifest } from "@/composition/gifts";
 import { wakeSystemEmailJobs } from "@/composition/notifications";
 import { reportOperationalFailure } from "@/observability/operational-errors";
 
+import { createStorage } from "./storage";
+
 let mediaSpikeService: MediaSpikeService | undefined;
 let mediaService: MediaService | undefined;
 let mediaWorker: MediaWorker | undefined;
 
-// Throws on a storage configuration error. Callers assign the result only after it succeeds, so a
-// failed construction is never cached and a corrected environment recovers after a restart.
-// Exported for the viewer payload, which signs derivative URLs with the same driver.
-export function createStorage(): ObjectStorage {
-  const configuration = getStorageConfiguration();
-  return configuration.driver === "local"
-    ? createLocalObjectStorage(configuration)
-    : createVercelBlobObjectStorage({ credentials: getStorageEnvironment });
-}
+export { createStorage };
 
 /** The local object store for the signed same-origin routes, or `null` unless local mode is active. */
 export function getLocalObjectStorageRoute(): LocalObjectStorage | null {

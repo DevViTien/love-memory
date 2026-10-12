@@ -803,15 +803,41 @@ describe("gift viewer controller", () => {
       expect(harness.events).toEqual([]);
     });
 
-    it("starts a new budget on every iframe load", () => {
+    it("treats a second load of the artifact frame as a navigation (Frame navigated away)", () => {
       const harness = createHarness();
       harness.load();
-      vi.advanceTimersByTime(15 * 250);
-      harness.attach();
-      vi.advanceTimersByTime(15 * 250);
+      vi.advanceTimersByTime(3 * 250);
+      expect(harness.sent).toEqual(["INIT", "INIT", "INIT", "INIT"]);
 
-      expect(harness.state().runtime).toBe("loading");
+      // The template navigated its own frame; the new document loads with the same `src`.
+      harness.attach();
+      vi.advanceTimersByTime(20 * 250);
+      harness.ready();
+
+      expect(harness.sent).toEqual(["INIT", "INIT", "INIT", "INIT"]);
+      expect(harness.bridges).toHaveLength(1);
       expect(harness.bridges[0]?.disconnect).toHaveBeenCalledOnce();
+      expect(harness.state()).toMatchObject({
+        fallbackReason: "NAVIGATED",
+        frameSrc: null,
+        runtime: "fallback",
+      });
+      expect(harness.events).toEqual([{ reason: "NAVIGATED", type: "fallback" }]);
+    });
+
+    it("never sends anything to a frame that navigated after READY", () => {
+      const harness = createHarness();
+      harness.load();
+      harness.ready();
+      harness.controller.open();
+      expect(harness.sent).toEqual(["INIT", "PLAY"]);
+
+      harness.attach();
+      harness.controller.setHidden(true);
+      harness.controller.updateViewer(viewerPayload());
+
+      expect(harness.sent).toEqual(["INIT", "PLAY"]);
+      expect(harness.state()).toMatchObject({ fallbackReason: "NAVIGATED", runtime: "fallback" });
     });
   });
 

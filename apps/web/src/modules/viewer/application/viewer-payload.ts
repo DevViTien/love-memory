@@ -47,7 +47,9 @@ export type ViewerSource =
   | Readonly<{ kind: "deferred"; load: () => Promise<ViewerPayload> }>
   | Readonly<{ kind: "ready"; viewer: ViewerPayload }>;
 
-export type ViewerFallbackReason = "ERROR" | "INIT_TIMEOUT" | "LOAD_TIMEOUT" | "NO_ARTIFACT";
+/** `NAVIGATED`: the artifact frame loaded another document after the artifact. */
+export type ViewerFallbackReason =
+  "ERROR" | "INIT_TIMEOUT" | "LOAD_TIMEOUT" | "NAVIGATED" | "NO_ARTIFACT";
 
 /** Lifecycle notifications for the host page. They never carry gift content. */
 export type ViewerLifecycleEvent =

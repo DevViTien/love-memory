@@ -2,8 +2,10 @@ import { type LicensedAudioTrackDto } from "@love-memory/contracts";
 import { type MediaAsset, type MediaAssetDerivative } from "@love-memory/domain";
 import {
   createTemplatePayloadSchema,
+  imageFieldItemRange,
   isImageField,
   listImageFieldReferences,
+  type TemplateField,
   type TemplateManifest,
 } from "@love-memory/template-sdk";
 
@@ -45,6 +47,11 @@ export function selectViewerDerivative(
   return best;
 }
 
+function itemRange(field: TemplateField): Readonly<{ maxItems: number; minItems: number }> | null {
+  if (isImageField(field)) return imageFieldItemRange(field);
+  return field.type === "textList" ? { maxItems: field.maxItems, minItems: field.minItems } : null;
+}
+
 /** What a host needs to render content statically and to label issues; never gift content. */
 export function toViewerFields(manifest: TemplateManifest): ViewerField[] {
   return manifest.fields.map((field) => ({
@@ -52,7 +59,7 @@ export function toViewerFields(manifest: TemplateManifest): ViewerField[] {
     label: field.label,
     required: field.required,
     type: field.type,
-    ...(isImageField(field) ? { maxItems: field.maxItems, minItems: field.minItems } : {}),
+    ...itemRange(field),
   }));
 }
 
@@ -151,8 +158,11 @@ function issueMessage(issue: ViewerIssue, fields: readonly ViewerField[]): strin
     case "CONTENT_MISSING":
       return "This field is required.";
     case "CONTENT_TOO_FEW": {
-      const minItems = fields.find((field) => field.id === issue.fieldId)?.minItems ?? 1;
-      return `Add at least ${minItems} images.`;
+      const field = fields.find((candidate) => candidate.id === issue.fieldId);
+      const minItems = field?.minItems ?? 1;
+      return field?.type === "textList"
+        ? `Add at least ${minItems} items.`
+        : `Add at least ${minItems} images.`;
     }
     case "ASSET_UNAVAILABLE":
       return "This image is not ready.";

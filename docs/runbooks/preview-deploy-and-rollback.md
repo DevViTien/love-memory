@@ -62,6 +62,58 @@ Until it runs, the new build serves published gifts normally, but an update of a
 (`Cập nhật món quà`) answers `500`: the legacy unique index rejects a second publication with the
 same share id. Recipients keep the first publication.
 
+Schema version `19` (`add-html-template-kind`):
+
+- allows `kind`, `defaults`, `files`, `artifactContentHash` and `importedAt` in the
+  `templateVersions` validator, and requires them for `kind: "html"`.
+
+Run `pnpm db:migrate`, then `pnpm db:seed` against the tier with its object storage configured
+(the tier's `BLOB_READ_WRITE_TOKEN`, or OIDC; never `STORAGE_DRIVER=local` on a deployed tier).
+The seed imports the bundled html templates of `templates-html/` (today `love-days`) into Blob and
+`templateVersions`, and prints one `template_import` line each; re-running it reports `unchanged`.
+Until the seed runs, the catalog does not list `love-days`. An operator imports further templates
+with `pnpm template:import <folder> --operator <name> --publish` (see
+[templates-html/README.md](../../templates-html/README.md)).
+
+The template CSP of an artifact names the origin of `APP_URL` for its fonts and images, while
+artifact URLs are relative. Every other URL that serves the tier, such as a production alias or a
+`*.vercel.app` deployment URL, must therefore redirect to `APP_URL`. Otherwise html templates load
+without their bundled fonts and sample photos.
+
+**Rolling back past version 19 breaks html gifts until the roll forward.** The previous build
+parses every manifest strictly:
+
+- its catalog fails on a listed `html` manifest;
+- `findEditableManifest` throws for an html gift, so `/g/{shareId}`, preview and the Studio of
+  every html gift answer `500`.
+
+Builds from this change skip an unreadable catalog entry and log it. Retiring the html templates
+before the rollback keeps the catalog working, but html gifts stay broken until the roll forward.
+Before rolling back, record which html templates are `published`, then retire only those, in
+`mongosh`:
+
+```js
+const htmlIds = db.templateVersions.distinct("templateId", { kind: "html" });
+const retired = db.templates
+  .find({ _id: { $in: htmlIds }, status: "published" }, { _id: 1 })
+  .toArray()
+  .map((template) => template._id);
+printjson(retired); // keep this list for the roll forward
+db.templates.updateMany(
+  { _id: { $in: retired } },
+  { $set: { status: "retired", updatedAt: new Date() } },
+);
+```
+
+After the roll forward, restore exactly those templates:
+
+```js
+db.templates.updateMany(
+  { _id: { $in: retired } }, // the recorded list
+  { $set: { status: "published", updatedAt: new Date() } },
+);
+```
+
 Schema version `18` (`add-payment-webhook-fulfillment`):
 
 - creates `paymentAttempts`, one record per verified provider payment, with its validator and index;

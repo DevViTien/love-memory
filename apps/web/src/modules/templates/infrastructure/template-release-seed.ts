@@ -1,5 +1,7 @@
 import { parseTemplateManifest, parseTemplatePayload } from "@love-memory/template-sdk";
-import { createHash } from "node:crypto";
+import { canonicalJson, manifestContentHash } from "../application/template-manifest-hash";
+
+export { canonicalJson, manifestContentHash };
 
 export type TemplateVersionStatus = "published" | "retired";
 
@@ -16,27 +18,6 @@ export type SeedTemplateRelease = Readonly<{
   /** Array position of the release is the template `sortOrder`. */
   versions: readonly SeedTemplateVersion[];
 }>;
-
-/**
- * Canonical JSON: object keys sorted recursively, no whitespace, array order kept. Used to compare
- * and hash manifests independently of key order or SDK defaults.
- */
-export function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (typeof value === "object" && value !== null) {
-    const record = value as Readonly<Record<string, unknown>>;
-    return `{${Object.keys(record)
-      .filter((key) => record[key] !== undefined)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value) ?? "null";
-}
-
-export function manifestContentHash(manifest: unknown): string {
-  return createHash("sha256").update(canonicalJson(manifest)).digest("hex");
-}
 
 /** The collection methods the seed uses, so tests can pass a fake collection. */
 export type SeedCollection = Readonly<{

@@ -1,10 +1,9 @@
 import { COLLECTIONS, getDatabase } from "@love-memory/database";
-import {
-  isImageField,
-  parseTemplateManifest,
-  type TemplateManifest,
-} from "@love-memory/template-sdk";
+import { TemplateManifestSchema, type TemplateManifest } from "@love-memory/template-sdk";
 
+import { reportUnreadableTemplateManifest } from "@/observability/operational-errors";
+
+import { summarizeTemplateManifest } from "../application/summarize-template";
 import { type StoredTemplateSummary, type TemplateCatalog } from "../domain/template-summary";
 
 type TemplateVersionDocument = Readonly<{
@@ -21,21 +20,16 @@ type TemplateDocument = Readonly<{
   status: "draft" | "published" | "retired";
 }>;
 
-function toSummary(document: TemplateVersionDocument): StoredTemplateSummary {
-  const manifest = parseTemplateManifest(document.manifest);
-  const imageField = manifest.fields.find(isImageField);
-
-  return {
-    description: manifest.meta.description,
-    estimatedDurationSec: manifest.meta.estimatedDurationSec,
-    id: manifest.id,
-    ...(imageField
-      ? { imageRequirement: { maxItems: imageField.maxItems, minItems: imageField.minItems } }
-      : {}),
-    moods: manifest.meta.moods,
-    name: manifest.meta.name,
-    version: manifest.version,
-  };
+/**
+ * The summary of a stored version, or `null` when this build cannot read its manifest: the entry
+ * is left out and reported, so one unreadable version (for example an html template after a
+ * rollback) never fails the whole catalog.
+ */
+function toSummary(document: TemplateVersionDocument): StoredTemplateSummary | null {
+  const parsed = TemplateManifestSchema.safeParse(document.manifest);
+  if (parsed.success) return summarizeTemplateManifest(parsed.data);
+  reportUnreadableTemplateManifest(`${document.templateId}@${document.version}`);
+  return null;
 }
 
 export const mongoTemplateCatalog: TemplateCatalog = {
@@ -52,7 +46,7 @@ export const mongoTemplateCatalog: TemplateCatalog = {
       .collection<TemplateVersionDocument>(COLLECTIONS.templateVersions)
       .findOne({ status: "published", templateId: id, version: template.currentVersion });
 
-    return document ? toSummary(document) : undefined;
+    return (document && toSummary(document)) ?? undefined;
   },
   async listPublished() {
     const database = await getDatabase();
@@ -81,7 +75,8 @@ export const mongoTemplateCatalog: TemplateCatalog = {
 
     return templates.flatMap((template) => {
       const document = currentVersions.get(`${template._id}@${template.currentVersion}`);
-      return document ? [toSummary(document)] : [];
+      const summary = document ? toSummary(document) : null;
+      return summary ? [summary] : [];
     });
   },
 };

@@ -169,7 +169,11 @@ constraints:
 - `templates` requires `_id`, `currentVersion`, `status` (`draft`, `published`, `retired`),
   `createdAt`, `updatedAt`;
 - `templateVersions` requires `_id`, `templateId`, `version`, `status` (`draft`, `published`,
-  `retired`), `manifest` (object), `createdAt`, `updatedAt`;
+  `retired`), `manifest` (object), `createdAt`, `updatedAt`; when present, `kind` MUST be `sdk` or
+  `html`, `artifactContentHash` 64 lowercase hex characters, `defaults` an object, `importedAt` a
+  date, and `files` a non-empty array of objects with exactly `name`, `contentType`, `sha256` (64
+  lowercase hex characters), `sizeBytes` (int >= 0) and `storageKey`; a version with `kind` `html`
+  requires `artifactContentHash`, `defaults`, `files` and `importedAt` (schema version `19`);
 - `gifts` requires `_id`, `publicId`, `ownership`, `content` (object), `revision` (int >= 0),
   `status` (`draft`, `publishing`, `scheduled`, `published`, `paused`, `expired`, `deleting`,
   `deleted`), `createdAt`, `updatedAt`; `ownership` requires `anonymousDraftId`, `claimTokenHash`
@@ -313,6 +317,12 @@ migration run.
 - **WHEN** an `abuseReports` document with the category `rude` is written
 - **THEN** MongoDB rejects the write with a document validation error
 
+#### Scenario: Html template version validated
+
+- **WHEN** a `templateVersions` document with `kind` `html` is written without `files`, or with a
+  file whose `sha256` is not 64 lowercase hex characters
+- **THEN** MongoDB rejects the write, while `sdk` versions without `kind` stay valid
+
 ### Requirement: Named indexes
 
 The system SHALL maintain these named indexes and MUST keep every index name unique:
@@ -420,7 +430,7 @@ second publication of a gift, which keeps its share id.
 The system SHALL provide `db:migrate`, which converges the database to the current schema (creating
 missing collections with validators, updating validators, reconciling indexes) and then upserts the
 ledger document `_id: "core"` in `databaseMigrations` with `version` equal to the current schema
-version `18`, `appliedAt` set to now, and `createdAt` set only on first insert. Before writing the
+version `19`, `appliedAt` set to now, and `createdAt` set only on first insert. Before writing the
 ledger it SHALL run these backfills, in this order:
 
 1. set `publishedRevision` to the gift's `revision` on every `published` gift that has no
@@ -450,7 +460,7 @@ and always close the MongoDB client before exiting. An unrecognized command MUST
 #### Scenario: Re-running migrations is safe
 
 - **WHEN** `db:migrate` is run twice against the same database
-- **THEN** both runs succeed, the schema verifies, and the ledger `version` is `18`
+- **THEN** both runs succeed, the schema verifies, and the ledger `version` is `19`
 
 #### Scenario: Published gifts backfilled
 
@@ -487,12 +497,12 @@ The system SHALL provide `db:verify`, which fails without modifying the database
 collection is missing (`Missing MongoDB collection`), a validator differs from its definition
 (`MongoDB validator mismatch`), a legacy index remains (`Legacy MongoDB index remains`), an expected
 index is missing (`Missing MongoDB index`) or differs in key or options (`MongoDB index mismatch`),
-or the ledger version differs from `18` or is missing (`MongoDB schema version mismatch`).
+or the ledger version differs from `19` or is missing (`MongoDB schema version mismatch`).
 
 #### Scenario: Schema drift detected
 
 - **WHEN** the ledger document records `version` `1`
-- **THEN** `db:verify` fails with `MongoDB schema version mismatch: expected 18, received 1.`
+- **THEN** `db:verify` fails with `MongoDB schema version mismatch: expected 19, received 1.`
 
 #### Scenario: Database not yet migrated to version 7
 
@@ -588,7 +598,14 @@ or the ledger version differs from `18` or is missing (`MongoDB schema version m
 - **WHEN** the ledger document records `version` `17`
 - **THEN** `db:verify` fails without modifying the database, for example with
   `Missing MongoDB collection` for `paymentAttempts`, or `MongoDB validator mismatch` for `gifts`
-- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `18`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `19`
+
+#### Scenario: Database not yet migrated to version 19
+
+- **WHEN** the ledger document records `version` `18`
+- **THEN** `db:verify` fails without modifying the database, for example with
+  `MongoDB validator mismatch` for `templateVersions`
+- **AND** after `db:migrate` runs, `db:verify` succeeds and the ledger records version `19`
 
 ### Requirement: Template catalog seed
 
@@ -602,6 +619,10 @@ timestamps; each `templateVersions` document SHALL be keyed `<templateId>@<versi
 serialized manifest) and timestamps. For documents inserted from now on, `manifest` is the manifest
 as authored, and the serialized form is canonical JSON: object keys sorted recursively, no
 whitespace, array order kept.
+
+Before verifying the schema, `db:seed` SHALL also import the bundled `html` templates of
+`templates-html/` (`love-days` with `sortOrder` `3`, see `template-artifact-delivery` "HTML template
+import command"); this import needs the configured object storage.
 
 A template's preview fixture MUST validate against its manifest before it is written. `createdAt`
 SHALL be preserved on re-seed.
@@ -636,6 +657,12 @@ stay exactly as first stored; re-seeding only updates its `status` and `updatedA
 - **WHEN** `db:seed` finds `memory-box@1.1.0` stored with a manifest whose content differs from the
   seed's
 - **THEN** the command fails naming `memory-box@1.1.0` and that document is unchanged
+
+#### Scenario: Seeding imports the bundled html templates
+
+- **WHEN** `db:seed` runs with object storage configured
+- **THEN** `templateVersions` also contains `love-days@1.0.0` with `kind` `html`, and `templates`
+  contains `love-days` with `sortOrder` `3`
 
 ### Requirement: Gift persistence verification
 

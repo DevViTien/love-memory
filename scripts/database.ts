@@ -6,6 +6,13 @@ import {
   verifyDatabaseSchema,
 } from "../packages/database/src/index";
 
+import { createOperatorHtmlTemplateImporter } from "../apps/web/src/composition/template-import";
+import {
+  listBundledHtmlTemplateFolders,
+  readHtmlTemplateFolder,
+  readLoveGiftBootstrap,
+} from "../apps/web/src/modules/templates/infrastructure/html-template-folder";
+import { seedBundledHtmlTemplates } from "../apps/web/src/modules/templates/infrastructure/seed-html-templates";
 import { seedTemplateReleases } from "../apps/web/src/modules/templates/infrastructure/seed-template-catalog";
 import { seedTemplateRelease } from "../apps/web/src/modules/templates/infrastructure/template-release-seed";
 
@@ -24,6 +31,17 @@ async function seedTemplates(): Promise<void> {
   for (const [sortOrder, release] of seedTemplateReleases.entries()) {
     await seedTemplateRelease(collections, release, sortOrder, now);
   }
+
+  // The bundled html templates (templates-html/), imported published into MongoDB and object
+  // storage like `pnpm template:import`; the storage driver must be configured.
+  const bootstrap = readLoveGiftBootstrap();
+  const summaries = await seedBundledHtmlTemplates(
+    createOperatorHtmlTemplateImporter(),
+    listBundledHtmlTemplateFolders(process.cwd()),
+    (folder) => readHtmlTemplateFolder(folder, bootstrap),
+    seedTemplateReleases.length,
+  );
+  for (const summary of summaries) process.stdout.write(`${JSON.stringify(summary)}\n`);
 }
 
 async function main(): Promise<void> {

@@ -18,6 +18,7 @@ export type InvalidField = Readonly<{ fieldId: string; label: string }>;
 
 export const DRAFT_MESSAGES = {
   generic: "Nội dung này chưa hợp lệ, hãy kiểm tra lại.",
+  invalidColor: "Màu chưa hợp lệ, hãy chọn lại.",
   invalidDate: "Ngày chưa hợp lệ.",
   serverGeneral: "Một số nội dung chưa hợp lệ với mẫu quà này.",
   unavailableTheme: "Giao diện này không còn khả dụng, hãy chọn lại.",
@@ -26,6 +27,14 @@ export const DRAFT_MESSAGES = {
 
 export function tooManyImagesMessage(maxItems: number): string {
   return `Tối đa ${maxItems} ảnh.`;
+}
+
+export function tooManyLinesMessage(maxItems: number): string {
+  return `Tối đa ${maxItems} dòng.`;
+}
+
+export function passcodeMessage(length: number): string {
+  return `Mã cần đúng ${length} chữ số.`;
 }
 
 type ManifestSchemas = Readonly<{
@@ -54,11 +63,18 @@ function findField(manifest: TemplateManifest, fieldId: string): TemplateField |
 
 /**
  * The value to store for an edited field, or `undefined` to remove the field: whitespace-only
- * text, a cleared date, theme or track, and an empty image list are removed.
+ * text, a cleared date, theme, track, photo, passcode or color, and an empty image list are
+ * removed. A text list keeps its non-blank lines and is removed when none is left.
  */
 export function normalizeFieldValue(field: TemplateField, raw: unknown): unknown {
   if (field.type === "imageList" || field.type === "captionedImageList") {
     return Array.isArray(raw) && raw.length > 0 ? raw : undefined;
+  }
+  if (field.type === "textList") {
+    const lines = Array.isArray(raw)
+      ? raw.filter((line): line is string => typeof line === "string" && line.trim() !== "")
+      : [];
+    return lines.length > 0 ? lines : undefined;
   }
   return typeof raw === "string" && raw.trim() !== "" ? raw : undefined;
 }
@@ -96,6 +112,14 @@ function messageFor(field: TemplateField, issue: { code: string; path: readonly 
       return issue.code === "too_big" && issue.path.length === 1
         ? tooManyImagesMessage(field.maxItems)
         : DRAFT_MESSAGES.generic;
+    case "textList":
+      return issue.code === "too_big" && issue.path.length === 1
+        ? tooManyLinesMessage(field.maxItems)
+        : DRAFT_MESSAGES.generic;
+    case "passcode":
+      return passcodeMessage(field.length);
+    case "color":
+      return DRAFT_MESSAGES.invalidColor;
     default:
       return DRAFT_MESSAGES.generic;
   }
