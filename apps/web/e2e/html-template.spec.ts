@@ -1,5 +1,8 @@
 import { type FrameLocator, type Page } from "@playwright/test";
+import jsQR from "jsqr";
+import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import sharp from "sharp";
 
 import { signInThroughMagicLink, uniqueE2eEmail } from "./support/auth";
 import {
@@ -34,6 +37,22 @@ test.afterEach(async () => {
 
 function viewerFrame(page: Page): FrameLocator {
   return page.frameLocator(`iframe[title="${VIEWER_TITLE}"]`);
+}
+
+/** The text of the QR code in a PNG file, decoded in the test process. */
+async function decodeQrPng(
+  path: string,
+): Promise<{ height: number; text: string | undefined; width: number }> {
+  const { data, info } = await sharp(await readFile(path))
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const pixels = new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength);
+  return {
+    height: info.height,
+    text: jsQR(pixels, info.width, info.height)?.data,
+    width: info.width,
+  };
 }
 
 test("creates, previews and publishes a love-days gift that opens with the creator's values", async ({
@@ -118,6 +137,69 @@ test("creates, previews and publishes a love-days gift that opens with the creat
   await expect(page.getByRole("heading", { name: "Đã xuất bản" })).toBeVisible();
   const shareUrl = await page.getByRole("textbox", { name: "Đường dẫn món quà" }).inputValue();
   expect(shareUrl).toMatch(/\/g\/[A-Za-z0-9_-]{22}$/);
+
+  // 4b. `add-gift-qr-codes`: the share URL as a QR code in three styles, downloaded as PNG that
+  // decodes back to the share URL, and as SVG.
+  const qr = page.getByRole("region", { name: "Mã QR" });
+  // The preview becomes the style's PNG as a data: URL, so a long press saves it on a phone,
+  // in-app browsers included.
+  await expect(qr.getByRole("img", { name: "Mã QR mở món quà, kiểu Cơ bản" })).toHaveAttribute(
+    "src",
+    /^data:image\/png;base64,/,
+  );
+  // From here on, generating, switching and downloading make no network request.
+  const qrRequests: string[] = [];
+  const recordRequest = (request: { url: () => string }) => {
+    qrRequests.push(request.url());
+  };
+  page.on("request", recordRequest);
+  await expect(
+    qr.getByText("Trên điện thoại: nhấn giữ ảnh để lưu vào thư viện ảnh."),
+  ).toBeVisible();
+  const studioUrl = page.url();
+  await qr.getByText("Khung trái tim", { exact: true }).click();
+  await expect(qr.getByRole("radio", { name: "Khung trái tim" })).toBeChecked();
+  await expect(
+    qr.getByRole("img", { name: "Mã QR mở món quà, kiểu Khung trái tim" }),
+  ).toHaveAttribute("src", /^data:image\/png;base64,/);
+  const [heartPng] = await Promise.all([
+    page.waitForEvent("download"),
+    qr.getByRole("button", { name: "Tải PNG" }).click(),
+  ]);
+  expect(heartPng.suggestedFilename()).toBe("qua-tang-qr-trai-tim.png");
+  await expect(decodeQrPng(await heartPng.path())).resolves.toEqual({
+    height: 1024,
+    text: shareUrl,
+    width: 1024,
+  });
+  await qr.getByText("Hình nền điện thoại", { exact: true }).click();
+  await expect(
+    qr.getByRole("img", { name: "Mã QR mở món quà, kiểu Hình nền điện thoại" }),
+  ).toBeVisible();
+  const [wallpaperPng] = await Promise.all([
+    page.waitForEvent("download"),
+    qr.getByRole("button", { name: "Tải PNG" }).click(),
+  ]);
+  expect(wallpaperPng.suggestedFilename()).toBe("qua-tang-qr-hinh-nen.png");
+  await expect(decodeQrPng(await wallpaperPng.path())).resolves.toEqual({
+    height: 2340,
+    text: shareUrl,
+    width: 1080,
+  });
+  await qr.getByText("Cơ bản", { exact: true }).click();
+  const [plainSvg] = await Promise.all([
+    page.waitForEvent("download"),
+    qr.getByRole("button", { name: "Tải SVG" }).click(),
+  ]);
+  expect(plainSvg.suggestedFilename()).toBe("qua-tang-qr.svg");
+  const svg = await readFile(await plainSvg.path(), "utf8");
+  expect(svg).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="1024" height="1024"/);
+  expect(svg).not.toContain(shareUrl);
+  // Downloads never navigate the Studio page.
+  expect(page.url()).toBe(studioUrl);
+  expect(page.context().pages()).toHaveLength(1);
+  page.off("request", recordRequest);
+  expect(qrRequests.filter((url) => !/^(data|blob):/.test(url))).toEqual([]);
 
   // 5. A recipient without an account opens the link: the template shows the creator's values.
   const recipient = await browser.newContext();

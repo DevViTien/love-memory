@@ -47,6 +47,21 @@ describe("PublishedPanel", () => {
     expect(document.body.textContent).not.toContain("không thể chỉnh sửa");
   });
 
+  it("shows the QR code of the absolute share URL", () => {
+    render(
+      <PublishedPanel
+        hasUnpublishedChanges={false}
+        planName="Miễn phí"
+        publication={publication}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Mã QR" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Mã QR mở món quà, kiểu Cơ bản" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Tải PNG" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Tải SVG" })).toBeTruthy();
+  });
+
   it("says when recipients still see the earlier publication", () => {
     render(<PublishedPanel hasUnpublishedChanges planName="Miễn phí" publication={publication} />);
 

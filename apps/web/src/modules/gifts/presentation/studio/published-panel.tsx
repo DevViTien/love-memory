@@ -5,6 +5,7 @@ import { Button } from "@love-memory/ui";
 import { useState, useSyncExternalStore } from "react";
 
 import { PauseGiftButton } from "./gift-lifecycle-controls";
+import { GiftQrSection } from "./gift-qr-section";
 import { formatExpiry } from "./plan-format";
 import { useNow } from "./use-now";
 
@@ -28,9 +29,9 @@ export function publishedPlanLine(planName: string, expiresAt: string, now: numb
 }
 
 /**
- * Above the editor of a published gift: the share link, how to pass it on, the plan and its
- * expiry, and whether recipients see the latest saved content. The server render shows the share
- * path; the browser adds its own origin after hydration, so the API never needs `APP_URL`.
+ * Above the editor of a published gift: the share link and its QR code, how to pass it on, the plan
+ * and its expiry, and whether recipients see the latest saved content. The server render shows the
+ * share path; the browser adds its own origin after hydration, so the API never needs `APP_URL`.
  */
 export function PublishedPanel({
   hasUnpublishedChanges,
@@ -122,6 +123,7 @@ export function PublishedPanel({
       <p className="text-sm leading-6 text-stone-700">
         Ai có đường dẫn này đều mở được món quà. Chỉ chia sẻ với người nhận.
       </p>
+      <GiftQrSection shareUrl={shareUrl} />
       {publicId ? <PauseGiftButton publicId={publicId} /> : null}
     </section>
   );

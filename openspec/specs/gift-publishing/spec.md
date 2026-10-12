@@ -451,6 +451,8 @@ panel SHALL show:
   gift has unpublished changes, and otherwise `Người nhận đang xem bản mới nhất.`. The status SHALL
   follow each successful save and each successful update without a page reload;
 - the note `Ai có đường dẫn này đều mở được món quà. Chỉ chia sẻ với người nhận.`;
+- the section `Mã QR` of `gift-qr-codes`, with the share URL as a QR code in three styles and its
+  `Tải PNG` and `Tải SVG` downloads;
 - the owner controls `Tạm dừng chia sẻ` and `Xoá món quà` of `gift-lifecycle` "Owner controls in the
   Studio".
 
@@ -491,6 +493,11 @@ the page SHALL render the not-found page.
 - **WHEN** the owner opens that gift after `2026-10-22T10:00:00Z`
 - **THEN** the panel shows `Món quà đã hết hạn lúc 17:00 22/10/2026. Người nhận không còn mở
 được.`, and the editor stays editable
+
+#### Scenario: QR code in the panel
+
+- **WHEN** the owner opens `/studio/{publicId}` of a published gift
+- **THEN** the panel shows `Mã QR` with a code of the share URL, `Tải PNG` and `Tải SVG`
 
 #### Scenario: Paused gift in the Studio
 
