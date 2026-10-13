@@ -2,7 +2,11 @@ import { parseTemplateManifest } from "@love-memory/template-sdk";
 import { describe, expect, it } from "vitest";
 
 import { compareSemanticVersions } from "./semantic-version-order";
-import { summarizeTemplateManifest } from "./summarize-template";
+import {
+  HTML_TEMPLATE_THUMBNAIL_FILE,
+  summarizeTemplateManifest,
+  templateArtifactFileUrl,
+} from "./summarize-template";
 
 const base = {
   budgets: { initialJsKbGzip: 20, initialMediaKb: 100, maxTextureMb: 8 },
@@ -60,6 +64,45 @@ describe("summarizeTemplateManifest", () => {
     });
 
     expect(summarizeTemplateManifest(manifest)).not.toHaveProperty("imageRequirement");
+  });
+
+  const hash = "a".repeat(64);
+  const nameOnly = [{ id: "name", label: "Tên", maxLength: 20, path: "name", type: "shortText" }];
+
+  it("points an html version with assets/thumbnail.jpg at that artifact file (Catalog thumbnail)", () => {
+    const manifest = parseTemplateManifest({ ...base, fields: nameOnly });
+
+    expect(
+      summarizeTemplateManifest(manifest, {
+        artifactContentHash: hash,
+        fileNames: ["index.html", HTML_TEMPLATE_THUMBNAIL_FILE],
+      }).thumbnailUrl,
+    ).toBe(`/template-artifacts/love-days/1.0.0/${hash}/assets/thumbnail.jpg`);
+  });
+
+  it("has no thumbnail without the file, without an artifact, or for an sdk manifest", () => {
+    const html = parseTemplateManifest({ ...base, fields: nameOnly });
+    const sdk = parseTemplateManifest({
+      ...base,
+      fields: [{ id: "name", label: "Tên", maxLength: 20, type: "shortText" }],
+      id: "memory-box",
+      kind: undefined,
+    });
+    const withThumbnail = { artifactContentHash: hash, fileNames: [HTML_TEMPLATE_THUMBNAIL_FILE] };
+
+    expect(
+      summarizeTemplateManifest(html, { artifactContentHash: hash, fileNames: ["index.html"] }),
+    ).not.toHaveProperty("thumbnailUrl");
+    expect(summarizeTemplateManifest(html)).not.toHaveProperty("thumbnailUrl");
+    expect(summarizeTemplateManifest(sdk, withThumbnail)).not.toHaveProperty("thumbnailUrl");
+  });
+});
+
+describe("templateArtifactFileUrl", () => {
+  it("builds the same-origin URL of an artifact file", () => {
+    expect(templateArtifactFileUrl("memories", "1.0.0", "b".repeat(64), "assets/a.jpg")).toBe(
+      `/template-artifacts/memories/1.0.0/${"b".repeat(64)}/assets/a.jpg`,
+    );
   });
 });
 

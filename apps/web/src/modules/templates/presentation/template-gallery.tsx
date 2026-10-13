@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { type TemplateSummary } from "../domain/template-summary";
 import { COMING_SOON_LABEL, toTemplateCardViewModel } from "./template-card-view-model";
+import { TemplateVisual } from "./template-visual";
 
 type TemplateGalleryProps = Readonly<{
   className?: string;
@@ -17,15 +18,7 @@ export function TemplateGallery({ className, templates }: TemplateGalleryProps) 
           className="group overflow-hidden rounded-[2rem] border border-rose-100 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl hover:shadow-rose-100"
           key={template.id}
         >
-          <div
-            className={
-              "grid aspect-[4/3] place-items-center bg-gradient-to-br text-6xl " + template.gradient
-            }
-          >
-            <span aria-hidden className="transition-transform group-hover:scale-110">
-              {template.icon}
-            </span>
-          </div>
+          <TemplateVisual className="aspect-[4/3]" iconClassName="text-6xl" template={template} />
           <div className="p-6">
             <p className="text-xs font-bold tracking-wider text-rose-700 uppercase">
               {template.moodLabel}

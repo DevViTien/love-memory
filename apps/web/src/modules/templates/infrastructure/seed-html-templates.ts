@@ -8,9 +8,17 @@ import {
 export const SEED_OPERATOR = "db:seed";
 
 /**
+ * The `sortOrder` of the first bundled html template stored for the first time: after the three
+ * positions (`0`–`2`) that the sdk-era seed gave `memory-box`, `our-timeline` and `midnight-wish`,
+ * so fresh and earlier-seeded databases agree.
+ */
+export const BUNDLED_HTML_FIRST_SORT_ORDER = 3;
+
+/**
  * `db:seed` imports every bundled `html` template folder, published, after the seeded `sdk`
- * templates (`firstSortOrder` onwards, in folder name order). The import is idempotent; a folder
- * that changed under a stored version fails the seed.
+ * templates (`firstSortOrder` onwards, in the order of `templates-html/catalog-order.json`, see
+ * `listBundledHtmlTemplateFolders`). A template already stored keeps its `sortOrder`. The import
+ * is idempotent; a folder that changed under a stored version fails the seed.
  */
 export async function seedBundledHtmlTemplates(
   importer: Pick<HtmlTemplateImporter, "importTemplate">,

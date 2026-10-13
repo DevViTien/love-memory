@@ -32,12 +32,16 @@ pnpm db:verify
 pnpm db:verify-gifts
 ```
 
-`db:seed` is idempotent. It applies collection validators and named indexes, then upserts the three
-published templates with their validated preview fixtures: `memory-box` at `1.1.0` (the committed
-release in `templates/memory-box/releases/1.1.0/`), `our-timeline` and `midnight-wish` at `1.0.0`.
-It keeps `memory-box@1.0.0` stored unchanged with status `retired`, so existing drafts pinned to it
-stay editable while new drafts use `1.1.0`. It then imports the bundled html templates of
-`templates-html/` (`love-days` at `1.0.0`) into object storage and `templateVersions`, so it needs
+`db:seed` is idempotent. It applies collection validators and named indexes, then upserts the
+published `memory-box` at `1.1.0` with its validated preview fixture (the committed release in
+`templates/memory-box/releases/1.1.0/`). It keeps `memory-box@1.0.0` stored unchanged with status
+`retired`, so existing drafts pinned to it stay editable while new drafts use `1.1.0`. It no longer
+creates the sdk-era placeholders `our-timeline` and `midnight-wish`; where an earlier seed stored
+them, it retires them (templates and versions, manifests unchanged), so they leave the catalog
+while drafts that pin them stay editable. It then imports the bundled html templates of
+`templates-html/` (`love-days`, `envelope-letter`, `galaxy-text`, `heart-photo`, `matrix-text` and
+`memories`, each at `1.0.0`, in the order of `templates-html/catalog-order.json`) into object
+storage and `templateVersions`, so it needs
 the storage configuration too (`STORAGE_DRIVER=local` with `APP_URL` and
 `LOCAL_OBJECT_STORAGE_SECRET` locally, Blob on a deployed tier). Run it with migration credentials;
 the web runtime credential only needs application read/write permissions.

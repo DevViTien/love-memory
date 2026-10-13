@@ -1,6 +1,8 @@
 import type * as DatabaseModule from "@love-memory/database";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { type TemplateManifest } from "@love-memory/template-sdk";
+
 import { seedTemplateCurrentManifests } from "./seed-template-catalog";
 
 const databaseMocks = vi.hoisted(() => ({ getDatabase: vi.fn() }));
@@ -12,8 +14,35 @@ vi.mock("@love-memory/database", async (importOriginal) => ({
 
 import { mongoTemplateCatalog } from "./mongo-template-catalog";
 
+const htmlManifest = {
+  budgets: { initialJsKbGzip: 20, initialMediaKb: 100, maxTextureMb: 8 },
+  capabilities: ["dom"],
+  engineVersion: "1.0.0",
+  entry: "index.html",
+  fields: [{ id: "name", label: "Tên", maxLength: 20, path: "name", type: "shortText" }],
+  id: "memories",
+  kind: "html",
+  meta: {
+    description: "Sổ kỷ niệm.",
+    estimatedDurationSec: 120,
+    moods: ["romantic"],
+    name: "Kỷ niệm của chúng mình",
+    occasions: ["anniversary"],
+  },
+  previewFixture: "index.html",
+  status: "published",
+  version: "1.0.0",
+} as unknown as TemplateManifest;
+
+/** `memory-box` from the seed, then two html manifests without image fields. */
+const fixtureManifests: readonly TemplateManifest[] = [
+  ...seedTemplateCurrentManifests,
+  { ...htmlManifest, id: "galaxy-text", meta: { ...htmlManifest.meta, name: "Ngân hà" } },
+  htmlManifest,
+];
+
 describe("Mongo template catalog", () => {
-  const documents = seedTemplateCurrentManifests.map((manifest) => ({
+  const documents = fixtureManifests.map((manifest) => ({
     manifest,
     status: "published" as const,
     templateId: manifest.id,
@@ -137,9 +166,13 @@ describe("Mongo template catalog", () => {
     });
   });
 
-  function mockSingleTemplate(manifest: (typeof documents)[number]["manifest"]) {
+  function mockSingleTemplate(
+    manifest: (typeof documents)[number]["manifest"],
+    artifact: Readonly<Record<string, unknown>> = {},
+  ) {
     const template = { _id: manifest.id, currentVersion: manifest.version, sortOrder: 0 };
     const version = {
+      ...artifact,
       manifest,
       status: "published",
       templateId: manifest.id,
@@ -169,9 +202,47 @@ describe("Mongo template catalog", () => {
   it("omits the photo requirement when no image field is declared", async () => {
     mockSingleTemplate(documents[2]!.manifest);
 
-    const summary = await mongoTemplateCatalog.findPublishedById("midnight-wish");
+    const summary = await mongoTemplateCatalog.findPublishedById("memories");
 
-    expect(summary?.id).toBe("midnight-wish");
+    expect(summary?.id).toBe("memories");
     expect(summary).not.toHaveProperty("imageRequirement");
+  });
+
+  const artifactContentHash = "c".repeat(64);
+
+  it("gives an html version its assets/thumbnail.jpg as thumbnailUrl (Catalog thumbnail)", async () => {
+    mockSingleTemplate(htmlManifest, {
+      artifactContentHash,
+      files: [
+        { name: "index.html", storageKey: "private/templates/memories/1.0.0/x/index.html" },
+        { name: "assets/thumbnail.jpg", storageKey: "private/templates/memories/1.0.0/x/t.jpg" },
+      ],
+      kind: "html",
+    });
+
+    const summary = await mongoTemplateCatalog.findPublishedById("memories");
+
+    expect(summary?.thumbnailUrl).toBe(
+      `/template-artifacts/memories/1.0.0/${artifactContentHash}/assets/thumbnail.jpg`,
+    );
+    // Only the file name is read: storage keys never reach a summary.
+    expect(JSON.stringify(summary)).not.toContain("private/templates");
+  });
+
+  it("has no thumbnail for an html version without the file or without artifact fields", async () => {
+    mockSingleTemplate(htmlManifest, {
+      artifactContentHash,
+      // A malformed file entry is skipped.
+      files: [{ name: "index.html" }, { name: 7 }],
+      kind: "html",
+    });
+    await expect(mongoTemplateCatalog.findPublishedById("memories")).resolves.not.toHaveProperty(
+      "thumbnailUrl",
+    );
+
+    mockSingleTemplate(htmlManifest);
+    await expect(mongoTemplateCatalog.findPublishedById("memories")).resolves.not.toHaveProperty(
+      "thumbnailUrl",
+    );
   });
 });

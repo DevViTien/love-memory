@@ -366,7 +366,13 @@ capability:
   and `lovegift:play`; the last one received while the scripts are still loading is dispatched
   once they have started.
 - A script that fails to load or throws while starting, including a `DOMContentLoaded` or `load`
-  listener it added, is answered with `ERROR` code `RUNTIME_ERROR`. Listeners for
+  listener it added, and a promise rejection left unhandled while the scripts start (including by
+  such a late listener or a newly set `window.onload`, which the browser reports a task later), is
+  answered
+  with `ERROR` code `RUNTIME_ERROR`, and nothing else about the error leaves the frame. The
+  scripts load as CORS scripts (`crossorigin="anonymous"`, answered by the artifact route's
+  `Access-Control-Allow-Origin: *`), so that the browser reports their errors and rejections
+  inside the opaque-origin sandbox. Listeners for
   `DOMContentLoaded` or `load` added after those events, and a newly set `window.onload`, are
   called once on the next task.
 - In a frame, the bootstrap never starts by itself: without `INIT` the host's handshake times out
@@ -413,6 +419,12 @@ The bootstrap MUST NOT use `fetch`, `XMLHttpRequest`, WebSockets or storage APIs
 #### Scenario: Template script error
 
 - **WHEN** a template script throws after `PLAY`
+- **THEN** the bootstrap posts `ERROR` with code `RUNTIME_ERROR`
+
+#### Scenario: Unhandled rejection while starting
+
+- **WHEN** a template script leaves a rejected promise unhandled while the scripts start after
+  `PLAY`
 - **THEN** the bootstrap posts `ERROR` with code `RUNTIME_ERROR`
 
 #### Scenario: Framed without INIT

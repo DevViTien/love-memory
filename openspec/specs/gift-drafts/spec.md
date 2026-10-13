@@ -22,7 +22,7 @@ The system SHALL create a draft through `POST /api/gifts` with a strict JSON bod
 
 #### Scenario: Published version without an artifact
 
-- **WHEN** a client posts `{ "templateId": "our-timeline", "templateVersion": "1.0.0" }`, a version that is `published` but has no registered artifact
+- **WHEN** a client posts `{ "templateId": "future-template", "templateVersion": "1.0.0" }`, a version that is `published` but has no registered artifact
 - **THEN** the response is `404` with code `NOT_FOUND`, and no draft is created
 
 #### Scenario: Unexpected body fields
@@ -241,7 +241,7 @@ The studio page `/studio/new?template={templateId}` SHALL offer draft creation f
 
 #### Scenario: Template that is not yet available
 
-- **WHEN** a visitor opens `/studio/new?template=midnight-wish` and its current version has no registered artifact
+- **WHEN** a visitor opens `/studio/new?template=future-template` and its published current version has no registered artifact
 - **THEN** the page shows `Mẫu quà này sắp ra mắt.` and a link to `/templates`, and offers no way to create a draft
 
 #### Scenario: Save fails without losing content

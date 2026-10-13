@@ -396,6 +396,58 @@ describe("LoveGift bootstrap", () => {
     expect(frame.posted).toHaveLength(2);
   });
 
+  it("reports an unhandled promise rejection while starting as RUNTIME_ERROR", async () => {
+    // jsdom does not raise `unhandledrejection` itself; a browser does for `Promise.reject()`.
+    const frame = await load(["window.dispatchEvent(new Event('unhandledrejection'));"]);
+
+    await play(frame);
+    await vi.waitFor(() => expect(frame.posted).toEqual([READY, RUNTIME_ERROR]));
+  });
+
+  it("loads the template's scripts as CORS scripts, so the browser reports their failures", async () => {
+    const frame = await load(["window.ran = true;"]);
+
+    await play(frame);
+    await vi.waitFor(() => expect(frame.window["ran"]).toBe(true));
+    const scripts = Array.from(frame.window.document.querySelectorAll("script[src]")).filter(
+      (script) => script.getAttribute("src")?.startsWith("script-"),
+    );
+    expect(scripts.length).toBeGreaterThan(0);
+    expect(scripts.every((script) => script.getAttribute("crossorigin") === "anonymous")).toBe(
+      true,
+    );
+  });
+
+  it("forwards only the RUNTIME_ERROR code, never an error's message", async () => {
+    const frame = await load(["throw new Error('secret gift text');"]);
+
+    await play(frame);
+    await vi.waitFor(() => expect(frame.posted).toEqual([READY, RUNTIME_ERROR]));
+    expect(JSON.stringify(frame.posted)).not.toContain("secret gift text");
+  });
+
+  it("reports a rejection that a late onload handler leaves for the next task", async () => {
+    // A browser fires `unhandledrejection` in its own task, after the task of the `onload` that the
+    // bootstrap calls late; jsdom fires none, so the event is dispatched from such a later task.
+    const frame = await load([
+      "window.onload = () => { setTimeout(() => window.dispatchEvent(new Event('unhandledrejection')), 0); };",
+    ]);
+
+    await play(frame);
+    await vi.waitFor(() => expect(frame.posted).toEqual([READY, RUNTIME_ERROR]));
+  });
+
+  it("ignores an unhandled rejection after the template started", async () => {
+    const frame = await load(["window.started = true;"]);
+
+    await play(frame);
+    await vi.waitFor(() => expect(frame.window["started"]).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    frame.window.dispatchEvent(new frame.window.Event("unhandledrejection"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(frame.posted).toEqual([READY]);
+  });
+
   it("reports a deferred load listener that throws while starting", async () => {
     const frame = await load([
       "document.addEventListener('DOMContentLoaded', () => { throw new Error('late'); });",

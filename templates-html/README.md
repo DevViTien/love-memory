@@ -3,7 +3,24 @@
 An `html` template is a single-page animation whose configurable values live in one configuration
 object, in the style of the `animation-gift` collection. It is data, not a workspace: an operator
 imports it, and its versions live in MongoDB (`templateVersions`) and object storage. Each folder
-here is a bundled template that `pnpm db:seed` imports, published.
+here is a bundled template that `pnpm db:seed` imports, published, in the order of
+[`catalog-order.json`](./catalog-order.json).
+
+## Bundled templates
+
+All six are ported from the `animation-gift` collection, at version `1.0.0`.
+
+| Folder            | Name                    | What the creator fills in                                                                      | Fonts                                   |
+| ----------------- | ----------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `love-days`       | Trái tim yêu thương     | start date, two names and avatars, the photo of the full heart, hint, caption                  | Patrick Hand                            |
+| `envelope-letter` | Thư tay                 | card title lines, polaroid photo, letter paragraphs                                            | Dancing Script, Patrick Hand            |
+| `galaxy-text`     | Thông điệp giữa ngân hà | opening texts, big messages, floating lines, up to 6 photos, text and glow colours             | Nunito                                  |
+| `heart-photo`     | Trái tim kỉ niệm        | messages inside the heart, 1–6 photos, caption, heart and glow colours                         | Nunito                                  |
+| `matrix-text`     | Lời nhắn ma trận        | messages, heart text, rain letters, particle and heart colours                                 | Be Vietnam Pro                          |
+| `memories`        | Kỷ niệm của chúng mình  | start date, names, avatars, playful passcode, captioned album, popup photo and caption, letter | Dancing Script, Patrick Hand, Quicksand |
+
+A new bundled template goes at the end of `catalog-order.json` (a test checks that it lists every
+folder), so it comes after the existing ones on every database.
 
 ## Folder format
 
@@ -38,12 +55,27 @@ here is a bundled template that `pnpm db:seed` imports, published.
   `data-reduced-motion="true"` on `<html>`). Honour it together with
   `matchMedia("(prefers-reduced-motion: reduce)")`.
 - **Pause.** The gift page sends `PAUSE` when it is hidden and `PLAY` when it resumes. They reach
-  the template as the window events `lovegift:pause` and `lovegift:play`.
+  the template as the window events `lovegift:pause` and `lovegift:play`. Stop the drawing loop
+  and every timer of a sequence (auto-open, reveal steps, message timing) on pause, and resume
+  them where they stopped on play: nothing may advance or call `LoveGift.complete()` while the
+  page is hidden. Keep one `requestAnimationFrame` chain at most (a pending-frame flag), so a
+  `PLAY` never starts a second loop. The bundled templates share a small pause-aware timer helper
+  (`clock.later`, `clock.wait`).
+- **Fonts never block.** Wait for a font with a timeout and catch its failure
+  (`Promise.race([document.fonts.load(...), timeout]).catch(() => {})`), then start anyway. A
+  promise rejection left unhandled while the scripts start is reported as `RUNTIME_ERROR`.
 - **Scripts.** They are classic inline `<script>` blocks. The importer moves each one into its own
   file, and the bootstrap runs them in order once the gift starts, after the document has loaded.
   `DOMContentLoaded` and `load` listeners and `window.onload` are still called.
 - **Events.** Call `LoveGift.scene("name")` when the gift reaches a moment, and
   `LoveGift.complete()` when it reaches its end.
+- **Values are text.** Put configuration values into the page with `textContent` (or draw them on a
+  canvas), never with `innerHTML`: they are the creator's text. Keep `innerHTML` for the template's
+  own constant markup, such as SVG drawings.
+- **Line breaks.** A `textList` line has no newline. Templates that break a message into lines
+  accept `|` as a line break (and say so in the field's `helpText`).
+- **No navigation or storage.** Keep screens in memory: no `location.hash`, `history` or
+  `sessionStorage`. In a frame, history entries would reach the gift page's back button.
 - **Refused:**
   - inline event handlers (`onclick=`), `javascript:` URLs, `<script src>` and module scripts;
   - `<link>` (also stylesheets and Google Fonts), `<iframe>`, `<object>`, `<embed>`, `<form>`,
@@ -56,7 +88,9 @@ here is a bundled template that `pnpm db:seed` imports, published.
   - an SVG `<set>` or `<animate>` that animates an `href`;
   - links other than `#fragment` links.
 - **Fonts.** Bundle them as `assets/fonts/*.woff2` and declare them with `@font-face`. Commit the
-  font's license (for example `OFL.txt`).
+  font's license (for example `OFL.txt`, or `OFL-<family>.txt` for several families). From Google
+  Fonts, request the CSS with a modern browser user agent and keep the `vietnamese`, `latin-ext`
+  and `latin` subsets with their `unicode-range`.
 - **Music.** Leave it out. The gift page plays the licensed track that the creator chose, after the
   recipient's tap.
 - **Network and storage.** The template has none. Its CSP denies network, media, forms and workers
@@ -104,7 +138,8 @@ recipient never sees a sample person.
 - Symbolic links are refused.
 - Limits: an asset is at most 2 MB, there are at most 60 assets, and the folder is at most 8 MB.
   `index.html` is at most 512 KB.
-- `assets/thumbnail.jpg` is the catalog picture.
+- `assets/thumbnail.jpg` is the catalog picture: a 300×600 portrait screenshot of the template
+  with its sample content (no person).
 
 ## Importing
 
@@ -126,6 +161,31 @@ pnpm template:import templates-html/love-days --operator <your name> --publish
   its hash or version differs from the lock. After a deliberate change, bump `version` in
   `template.json`, then update the lock with the new hash from the failing test or the import
   output, in the same change.
+
+### Developer note: local databases seeded before `add-animation-gift-templates`
+
+No html template version was ever deployed, so `add-animation-gift-templates` changed the
+bootstrap and the bundled folders while keeping version `1.0.0`. A local database seeded between
+commit `bf4d946` and this change (for example the `_e2e` database) still holds the earlier hashes
+of `love-days` (and of any bundled template it imported) at `1.0.0`, and `db:seed` then fails
+because a version is immutable. Drop those records first, then seed again:
+
+```js
+// mongosh, on that local database only
+const ids = [
+  "love-days",
+  "envelope-letter",
+  "galaxy-text",
+  "heart-photo",
+  "matrix-text",
+  "memories",
+];
+db.templateVersions.deleteMany({ _id: { $in: ids.map((id) => `${id}@1.0.0`) }, kind: "html" });
+db.templates.deleteMany({ _id: { $in: ids } });
+```
+
+Delete local drafts bound to those versions too, if any. Never do this on a deployed tier: there,
+a changed template needs a new version.
 
 ## Previewing while authoring
 

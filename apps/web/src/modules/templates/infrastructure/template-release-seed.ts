@@ -21,9 +21,17 @@ export type SeedTemplateRelease = Readonly<{
 
 /** The collection methods the seed uses, so tests can pass a fake collection. */
 export type SeedCollection = Readonly<{
-  findOne: (filter: Readonly<{ _id: string }>) => Promise<Readonly<{ manifest?: unknown }> | null>;
+  findOne: (
+    filter: Readonly<{ _id: string }>,
+  ) => Promise<Readonly<{ kind?: unknown; manifest?: unknown }> | null>;
   updateOne: (
-    filter: Readonly<{ _id: string; adminRetiredAt?: Readonly<{ $exists: false }> }>,
+    filter: Readonly<{
+      _id: string;
+      adminRetiredAt?: Readonly<{ $exists: false }>;
+      currentVersion?: Readonly<{ $in: readonly string[] }>;
+      kind?: Readonly<{ $ne: "html" }>;
+      status?: Readonly<{ $ne: "retired" }>;
+    }>,
     update: Readonly<Record<string, unknown>>,
     options: Readonly<{ upsert: boolean }>,
   ) => Promise<unknown>;
@@ -124,5 +132,42 @@ export async function seedTemplateRelease(
       $setOnInsert: { createdAt: now },
     },
     { upsert: true },
+  );
+}
+
+/**
+ * Retires a placeholder template that the seed no longer provides. Only the stored `sdk` versions
+ * listed (never an `html` version an operator imported under the same id) get status `retired`,
+ * and the `templates` document only while its current version is one of them, so a template that
+ * was re-published stays published. Nothing is created when nothing is stored, and a record that
+ * is already retired is not written again (its `updatedAt` stays). Idempotent; the
+ * stored manifests stay as they are, so drafts that pin a version stay editable.
+ */
+export async function retireSeedTemplate(
+  collections: TemplateSeedCollections,
+  retired: Readonly<{ templateId: string; versions: readonly string[] }>,
+  now: Date,
+): Promise<void> {
+  const placeholderVersions: string[] = [];
+  for (const version of retired.versions) {
+    const _id = `${retired.templateId}@${version}`;
+    const stored = await collections.templateVersions.findOne({ _id });
+    if (!stored || stored.kind === "html") continue;
+    await collections.templateVersions.updateOne(
+      { _id, kind: { $ne: "html" }, status: { $ne: "retired" } },
+      { $set: { status: "retired", updatedAt: now } },
+      { upsert: false },
+    );
+    placeholderVersions.push(version);
+  }
+  if (placeholderVersions.length === 0) return;
+  await collections.templates.updateOne(
+    {
+      _id: retired.templateId,
+      currentVersion: { $in: placeholderVersions },
+      status: { $ne: "retired" },
+    },
+    { $set: { status: "retired", updatedAt: now } },
+    { upsert: false },
   );
 }

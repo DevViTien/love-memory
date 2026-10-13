@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07040a">
+<title>Trái tim kỉ niệm</title>
+<style>
+  /* Nunito (SIL Open Font License 1.1, see OFL*.txt), bundled: templates load no external URL. */
+  @font-face {
+    font-family: "Nunito";
+    font-style: normal;
+    font-weight: 700 800;
+    font-display: swap;
+    src: url(assets/fonts/nunito-vietnamese.woff2) format("woff2");
+    unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+  }
+  @font-face {
+    font-family: "Nunito";
+    font-style: normal;
+    font-weight: 700 800;
+    font-display: swap;
+    src: url(assets/fonts/nunito-latin-ext.woff2) format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
+  @font-face {
+    font-family: "Nunito";
+    font-style: normal;
+    font-weight: 700 800;
+    font-display: swap;
+    src: url(assets/fonts/nunito-latin.woff2) format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; background: #07040a; }
+  body {
+    font-family: "Nunito", system-ui, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  #stage { position: fixed; inset: 0; height: 100dvh; overflow: hidden; background: #07040a; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="cv" aria-label="Trái tim lấp lánh với ảnh kỉ niệm"></canvas>
+</div>
+
+<!-- Cấu hình mặc định. LoveMemory ghép giá trị của món quà vào đây (template.json → path);
+     nhạc do trang món quà phát. messages: các dòng chữ hiện lần lượt giữa trái tim ("|" hoặc
+     "\n" = xuống dòng); photos: nhiều ảnh sẽ tự đổi lần lượt, mỗi ảnh photoInterval giây;
+     caption: dòng chữ nhỏ dưới ảnh ("" = không có); colors.heart: viền phát sáng của các trái tim
+     nhỏ; colors.glow: quầng sáng. -->
+<script type="application/json" id="gift-config">
+{
+  "messages": ["Happy|Anniversary", "Anh 💗 Em", "Mãi bên nhau 🤍"],
+  "photos": ["assets/photo.jpg"],
+  "photoInterval": 5,
+  "caption": "",
+  "colors": {
+    "heart": "#ff1f50",
+    "heartCore": "#ffd3e0",
+    "streak": "#ffbcd8",
+    "glow": "#d01ccf",
+    "text": "#ffffff",
+    "textGlow": "#d9ffd9"
+  }
+}
+</script>
+
+<script>
+const CONFIG = LoveGift.config();
+
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+const reduce = LoveGift.reducedMotion() || matchMedia("(prefers-reduced-motion: reduce)").matches;
+const C = CONFIG.colors;
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const easeOut = x => 1 - Math.pow(1 - clamp(x, 0, 1), 3);
+
+let W = 0, H = 0, DPR = 1, cx = 0, cy = 0, HW = 300, K = 1, D = 700;
+let bg = null;
+
+// ---------- Đường cong trái tim (tham số theo độ dài cung) ----------
+const N = 600;
+const curve = [];
+(function buildCurve() {
+  const raw = [];
+  for (let i = 0; i <= N; i++) {
+    const t = i / N * Math.PI * 2;
+    const x = -16 * Math.pow(Math.sin(t), 3);
+    const y = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) - 2.5;
+    raw.push([x, y]);
+  }
+  const len = [0];
+  for (let i = 1; i <= N; i++) len.push(len[i - 1] + Math.hypot(raw[i][0] - raw[i - 1][0], raw[i][1] - raw[i - 1][1]));
+  const total = len[N];
+  let j = 0;
+  for (let k = 0; k < N; k++) {
+    const target = k / N * total;
+    while (len[j + 1] < target) j++;
+    const f = (target - len[j]) / (len[j + 1] - len[j] || 1);
+    curve.push([raw[j][0] + (raw[j + 1][0] - raw[j][0]) * f, raw[j][1] + (raw[j + 1][1] - raw[j][1]) * f]);
+  }
+})();
+function heartAt(u) { const p = curve[((Math.floor(u * N) % N) + N) % N]; return [p[0] * K, p[1] * K]; }
+function heartPath(c, x, y, w) {
+  const k = w / 32;
+  c.beginPath();
+  for (let i = 0; i < N; i += 4) { const p = curve[i]; i ? c.lineTo(x + p[0] * k, y + p[1] * k) : c.moveTo(x + p[0] * k, y + p[1] * k); }
+  c.closePath();
+}
+
+function roundHeartPath(c, x, y, w) {
+  const P = (a, b) => [x + a * w, y + (b - .015) * w];
+  c.beginPath(); c.moveTo(...P(0, -.28));
+  c.bezierCurveTo(...P(-.08, -.47), ...P(-.5, -.49), ...P(-.5, -.13));
+  c.bezierCurveTo(...P(-.5, .12), ...P(-.2, .28), ...P(0, .45));
+  c.bezierCurveTo(...P(.2, .28), ...P(.5, .12), ...P(.5, -.13));
+  c.bezierCurveTo(...P(.5, -.49), ...P(.08, -.47), ...P(0, -.28));
+  c.closePath();
+}
+
+// ---------- Sprite ----------
+function mk(w, h) { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; }
+function heartSprite(core, rim, blur, size = 64) {
+  const c = mk(size, size), g = c.getContext("2d");
+  const w = size * .46;
+  g.shadowColor = rim; g.shadowBlur = size * blur;
+  g.fillStyle = rim; heartPath(g, size / 2, size / 2 + 1, w * 1.05); g.fill(); g.fill();
+  g.shadowBlur = size * .05; g.fillStyle = core; heartPath(g, size / 2, size / 2 + 1, w * .78); g.fill();
+  return c;
+}
+function softSprite(color, size = 128) {
+  const c = mk(size, size), g = c.getContext("2d");
+  const r = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  r.addColorStop(0, color); r.addColorStop(.25, color + "aa"); r.addColorStop(.6, color + "33"); r.addColorStop(1, color + "00");
+  g.fillStyle = r; g.fillRect(0, 0, size, size);
+  return c;
+}
+const SPR = {
+  pink: heartSprite(C.heartCore, C.heart, .2),
+  red: heartSprite("#ff7c96", C.heart, .2),
+  white: heartSprite("#fff4f8", "#ff5c88", .16),
+  blur: (() => { const c = mk(96, 96), g = c.getContext("2d"); g.filter = "blur(5px)"; g.globalAlpha = .85; g.drawImage(heartSprite(C.heartCore, C.heart, .1), 16, 16, 64, 64); return c; })(),
+  glow: softSprite(C.glow),
+  core: softSprite("#ffb3ff", 64),
+  dot: softSprite("#ffffff", 32)
+};
+
+// ---------- Nền + sao ----------
+const stars = [];
+function buildBackground() {
+  bg = mk(Math.round(W * DPR), Math.round(H * DPR));
+  const g = bg.getContext("2d");
+  g.scale(DPR, DPR);
+  g.fillStyle = "#07040a"; g.fillRect(0, 0, W, H);
+  const r = g.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * .75);
+  r.addColorStop(0, "#1c0923"); r.addColorStop(.5, "#100617"); r.addColorStop(1, "#050307");
+  g.fillStyle = r; g.fillRect(0, 0, W, H);
+  stars.length = 0;
+  const n = Math.round(W * H / 2600);
+  for (let i = 0; i < n; i++) {
+    const s = { x: Math.random() * W, y: Math.random() * H, r: rand(.4, 1.1), a: rand(.15, .6), tw: Math.random() < .25 ? rand(1, 3) : 0, ph: rand(0, 6) };
+    if (!s.tw) { g.globalAlpha = s.a; g.fillStyle = "#fff"; g.beginPath(); g.arc(s.x, s.y, s.r, 0, 7); g.fill(); }
+    else stars.push(s);
+  }
+  g.globalAlpha = 1;
+}
+
+// ---------- Ảnh trong trái tim ----------
+const photos = [];
+let photoSize = 0;
+function bakePhoto(p) {
+  const w = photoSize, h = Math.round(w * .88), pad = Math.round(w * .06);
+  const c = mk(Math.round((w + pad * 2) * DPR), Math.round((h + pad * 2) * DPR)), g = c.getContext("2d");
+  g.scale(DPR, DPR);
+  const ox = pad + w / 2, oy = pad + h / 2;
+  if (p.img) {
+    const im = p.img, s = Math.max(w / im.naturalWidth, h / im.naturalHeight) * 1.02;
+    const dw = im.naturalWidth * s, dh = im.naturalHeight * s;
+    g.drawImage(im, ox - dw / 2, oy - dh * .45, dw, dh);
+  } else {
+    const lg = g.createLinearGradient(0, pad, 0, pad + h);
+    lg.addColorStop(0, "#5b1d5e"); lg.addColorStop(1, "#2a0b2f");
+    g.fillStyle = lg; g.fillRect(0, 0, w + pad * 2, h + pad * 2);
+    g.fillStyle = "rgba(255,200,230,.85)";
+    g.font = `800 ${w * .2}px Nunito, sans-serif`; g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText("♥", ox, oy - h * .1);
+    g.font = `700 ${Math.max(10, w * .065)}px Nunito, sans-serif`;
+    g.fillStyle = "rgba(255,220,240,.7)";
+    g.fillText("Ảnh của chúng mình", ox, oy + h * .1);
+  }
+  const m = mk(c.width, c.height), mg = m.getContext("2d");
+  mg.scale(DPR, DPR);
+  mg.shadowColor = "#000"; mg.shadowBlur = w * .035; mg.fillStyle = "#000";
+  roundHeartPath(mg, ox, oy, w * .97); mg.fill();
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.globalCompositeOperation = "destination-in"; g.drawImage(m, 0, 0);
+  p.canvas = c; p.pad = pad; p.h = h;
+}
+function loadPhotos() {
+  const list = (CONFIG.photos && CONFIG.photos.length) ? CONFIG.photos : [""];
+  list.forEach(src => {
+    const p = { src, img: null, canvas: null };
+    photos.push(p);
+    if (!src) return;
+    const im = new Image();
+    im.onload = () => { p.img = im; if (photoSize) bakePhoto(p); };
+    im.src = src;
+  });
+}
+
+// ---------- Kích thước ----------
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = cv.clientWidth; H = cv.clientHeight;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  HW = Math.min(W * .6, H * .46);
+  K = HW / 32;
+  D = HW * 2.3;
+  cx = W / 2; cy = H * (W < H ? .46 : .5);
+  photoSize = Math.round(HW * .66);
+  buildBackground();
+  photos.forEach(bakePhoto);
+  texts.forEach(t => t.canvases = null);
+}
+
+// ---------- Hạt ----------
+const parts = [];
+const MAXP = reduce ? 260 : (Math.min(innerWidth, innerHeight) < 600 ? 700 : 1000);
+let cam = { x: 0, y: 0, yaw: 0, pitch: 0 };
+function spawn(u, toward, speed) {
+  const [hx, hy] = heartAt(u);
+  const x0 = hx + rand(-1, 1) * K * .12, y0 = hy + rand(-1, 1) * K * .12;
+  const cyaw = Math.cos(cam.yaw), syaw = Math.sin(cam.yaw), cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+  const x = x0 * cyaw, y = y0 * cp, d = D + x0 * syaw + y0 * sp;
+  const nl = Math.hypot(x, y) || 1, drift = toward ? K * rand(0, .12) : 0;
+  const r = Math.random();
+  parts.push({
+    x, y, d, d0: d, v: D * speed, toward,
+    vx: x / nl * drift, vy: y / nl * drift,
+    age: 0, life: toward ? rand(5.5, 7) : rand(1.6, 2.8),
+    size: rand(.85, 1.15),
+    spr: toward ? (r < .75 ? SPR.pink : SPR.red) : (r < .6 ? SPR.white : SPR.red)
+  });
+}
+
+function proj(x, y, d) { const s = D / d; return [cx + (x - cam.x) * s, cy + (y - cam.y) * s, s]; }
+
+// ---------- Chữ ----------
+// Một dòng của Studio không có ký tự xuống dòng: "|" trong lời nhắn là xuống dòng.
+const messageLines = m => String(m).split(/\n|\|/).map(line => line.trim());
+const texts = CONFIG.messages.map(m => ({ lines: messageLines(m), canvases: null }));
+const sparks = [];
+function bakeText(t) {
+  const fsMax = HW * .19;
+  const probe = mk(10, 10).getContext("2d");
+  probe.font = `800 100px Nunito, sans-serif`;
+  const widest = Math.max(...t.lines.map(l => probe.measureText(l).width));
+  const fs = Math.min(fsMax, (Math.min(W * .86, HW * .82)) / widest * 100);
+  t.fs = fs;
+  t.canvases = t.lines.map(line => {
+    probe.font = `800 ${fs}px Nunito, sans-serif`;
+    const tw = probe.measureText(line).width;
+    const pad = fs * .6;
+    const c = mk(Math.ceil((tw + pad * 2) * DPR), Math.ceil((fs * 1.4 + pad * 2) * DPR)), g = c.getContext("2d");
+    g.scale(DPR, DPR);
+    g.font = `800 ${fs}px Nunito, sans-serif`; g.textAlign = "center"; g.textBaseline = "middle";
+    const x = tw / 2 + pad, y = fs * .7 + pad;
+    g.shadowColor = C.textGlow; g.shadowBlur = fs * .45; g.fillStyle = C.textGlow;
+    g.fillText(line, x, y);
+    g.shadowBlur = fs * .18; g.fillStyle = C.text;
+    g.fillText(line, x, y);
+    return { c, w: c.width / DPR, h: c.height / DPR };
+  });
+}
+function dissolve(t, alpha) {
+  const lh = t.fs * 1.18, n = t.lines.length;
+  t.canvases.forEach((L, i) => {
+    const ly = cy + (i - (n - 1) / 2) * lh;
+    const g = L.c.getContext("2d");
+    const data = g.getImageData(0, 0, L.c.width, L.c.height).data;
+    const step = Math.max(3, Math.round(t.fs / 9)) * DPR;
+    for (let y = 0; y < L.c.height; y += step) for (let x = 0; x < L.c.width; x += step) {
+      if (data[(y * L.c.width + x) * 4 + 3] > 200 && Math.random() < .55 && sparks.length < 600) {
+        sparks.push({
+          x: cx - L.w / 2 + x / DPR, y: ly - L.h / 2 + y / DPR,
+          vx: rand(-14, 14), vy: rand(-18, 8), age: 0, life: rand(.5, 1.2), a: alpha * rand(.5, 1), r: rand(1.2, 2.4)
+        });
+      }
+    }
+  });
+}
+
+// ---------- Dòng thời gian ----------
+const T0 = 0.85, HOLD = 1.75, GAP = 0.9, IN_STAGGER = .3, ZOOM = .38;
+const schedule = texts.map((t, i) => {
+  const start = T0 + i * (HOLD + GAP) - (i === texts.length - 1 && i > 0 ? .25 : 0);
+  return { t, start, end: start + HOLD + (t.lines.length - 1) * IN_STAGGER * .5, done: false };
+});
+const PHOTO_AT = (schedule.length ? schedule[schedule.length - 1].end : 0) + 1.2;
+const L1 = reduce ? 6 : 4.4, LOOP = reduce ? 5 : 2.8, E0 = .45;
+
+function emitterU(t) {
+  if (t < E0) return 0;
+  const a = t - E0;
+  return a < L1 ? a / L1 : 1 + (a - L1) / LOOP;
+}
+
+const STEP = reduce ? 1 / 50 : 1 / 115;
+let start = performance.now(), last = start, nextU = 0;
+// Một vòng lặp vẽ duy nhất: requestFrame() chỉ xin khung hình khi chưa có khung nào đang chờ, sau khi
+// món quà đã bắt đầu (go) và khi trang món quà không tạm dừng.
+let started = false, paused = false, framePending = false, pausedAt = 0, photoShown = false;
+function requestFrame() {
+  if (!started || paused || framePending) return;
+  framePending = true;
+  requestAnimationFrame(frame);
+}
+function frame(now) {
+  framePending = false;
+  // Trang món quà bị ẩn: dừng vòng lặp vẽ, chạy tiếp khi "lovegift:play".
+  if (paused) return;
+  const dt = Math.min(.05, (now - last) / 1000); last = now;
+  const t = (now - start) / 1000;
+  if (!photoShown && t > PHOTO_AT) { photoShown = true; LoveGift.scene("photo"); LoveGift.complete(); }
+  if (!texts[0] || texts[0].canvases === null) texts.forEach(x => { if (!x.canvases) bakeText(x); });
+
+  // camera chậm rãi lắc lư như xoay trong không gian 3D
+  if (!reduce) {
+    cam.yaw = Math.sin(t * .42) * .38 + Math.sin(t * .17) * .12;
+    cam.pitch = Math.sin(t * .31 + 1) * .16;
+    cam.x = Math.sin(t * .29) * HW * .07;
+    cam.y = Math.cos(t * .23) * HW * .04;
+  }
+
+  const u = emitterU(t);
+  if (t > E0) {
+    if (u - nextU > .5) nextU = u - .05;
+    while (nextU <= u) {
+      if (parts.length < MAXP) {
+        spawn(nextU, true, rand(.085, .11));
+        if (!reduce && Math.random() < .8) spawn(nextU, true, rand(.13, .165));
+        if (Math.random() < .5) spawn(nextU, false, rand(.14, .26));
+      }
+      nextU += STEP;
+    }
+  }
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 1;
+  ctx.drawImage(bg, 0, 0);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  ctx.globalCompositeOperation = "lighter";
+  for (const s of stars) { ctx.globalAlpha = s.a * (.5 + .5 * Math.sin(t * s.tw + s.ph)); ctx.fillStyle = "#fff"; ctx.fillRect(s.x, s.y, s.r * 1.6, s.r * 1.6); }
+
+  // quầng sáng tím theo điểm vẽ
+  const [ex0, ey0] = heartAt(u);
+  const cyaw = Math.cos(cam.yaw), syaw = Math.sin(cam.yaw);
+  const [ex, ey] = proj(ex0 * cyaw, ey0 * Math.cos(cam.pitch), D + ex0 * syaw + ey0 * Math.sin(cam.pitch));
+  const intro = clamp(1 - (t - 1) / 5, 0, 1);
+  const bigR = HW * (1.05 + intro * 1.1);
+  ctx.globalAlpha = .26 + intro * .3;
+  ctx.drawImage(SPR.glow, ex - bigR, ey - bigR, bigR * 2, bigR * 2);
+  const midR = HW * .22;
+  ctx.globalAlpha = .9;
+  ctx.drawImage(SPR.glow, ex - midR, ey - midR, midR * 2, midR * 2);
+  const cr = HW * .05 * (1 + .15 * Math.sin(t * 9));
+  ctx.globalAlpha = 1;
+  ctx.drawImage(SPR.core, ex - cr, ey - cr, cr * 2, cr * 2);
+
+  // hạt: vệt sáng rồi đến trái tim nhỏ
+  ctx.strokeStyle = C.streak; ctx.lineCap = "round";
+  const view = [];
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i];
+    p.age += dt;
+    p.d += (p.toward ? -1 : 1) * p.v * dt;
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    const [sx, sy, s] = proj(p.x, p.y, p.d);
+    if (p.age > p.life || p.d < D * .17 || sx < -80 || sx > W + 80 || sy < -80 || sy > H + 80) { parts[i] = parts[parts.length - 1]; parts.pop(); continue; }
+    let a = Math.min(1, p.age / .12);
+    if (p.toward) a *= (s < 2.6 ? 1 : Math.max(0, 1 - (s - 2.6) / 2.6)) * Math.min(1, (p.life - p.age) / 1.5);
+    else a *= Math.pow(1 - p.age / p.life, .7) * .9;
+    if (a <= .01) continue;
+    if (p.toward) {
+      const tr = Math.min(p.age, 1.1), td = p.d + p.v * tr;
+      const [tx, ty] = proj(p.x - p.vx * tr, p.y - p.vy * tr, td);
+      if (Math.abs(sx - tx) + Math.abs(sy - ty) > 2) {
+        ctx.globalAlpha = a * .7;
+        ctx.lineWidth = Math.min(5, .8 + s * .6);
+        ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(sx, sy); ctx.stroke();
+      }
+    }
+    view.push(sx, sy, s, a, p);
+  }
+  const base = HW * .034;
+  for (let k = 0; k < view.length; k += 5) {
+    const p = view[k + 4], s = view[k + 2];
+    const blurred = p.toward && s > 1.9;
+    const z = base * p.size * s * (blurred ? 1.5 : 1) * (p.toward ? 1 : .85);
+    ctx.globalAlpha = view[k + 3] * (blurred ? .75 : 1);
+    ctx.drawImage(blurred ? SPR.blur : p.spr, view[k] - z, view[k + 1] - z, z * 2, z * 2);
+  }
+
+  // ảnh trái tim
+  if (t > PHOTO_AT && photos.length) {
+    const pt = t - PHOTO_AT;
+    const n = photos.length, per = Math.max(1, CONFIG.photoInterval || 5);
+    const idx = n > 1 ? Math.floor(pt / per) % n : 0;
+    const local = n > 1 ? pt % per : pt;
+    const fadeIn = easeOut(pt / .9);
+    const breathe = 1 + Math.sin(t * 2.4) * .012;
+    const sc = (.88 + .12 * fadeIn) * breathe;
+    const draw = (p, a) => {
+      if (!p.canvas) return;
+      const w = (photoSize + p.pad * 2) * sc, h = (p.h + p.pad * 2) * sc;
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = a * .5;
+      const gr = photoSize * .8 * sc;
+      ctx.drawImage(SPR.glow, cx - gr, cy - gr * .95, gr * 2, gr * 2);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = a;
+      ctx.drawImage(p.canvas, cx - w / 2, cy - h / 2, w, h);
+    };
+    if (n > 1 && pt > per && local < .8) draw(photos[(idx - 1 + n) % n], (1 - local / .8) * fadeIn);
+    draw(photos[idx], (n > 1 && pt > per ? easeOut(local / .8) : 1) * fadeIn);
+
+    if (CONFIG.caption) {
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = easeOut((pt - .6) / 1);
+      ctx.font = `800 ${Math.round(HW * .075)}px Nunito, sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.shadowColor = C.textGlow; ctx.shadowBlur = HW * .03; ctx.fillStyle = C.text;
+      ctx.fillText(CONFIG.caption, cx, cy + HW * .62);
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  // chữ
+  ctx.globalCompositeOperation = "source-over";
+  for (const sch of schedule) {
+    const tt = t - sch.start, tx = sch.t;
+    if (tt < 0 || sch.done || !tx.canvases) continue;
+    if (t >= sch.end) { sch.done = true; dissolve(tx, 1); continue; }
+    const n = tx.lines.length, lh = tx.fs * 1.18;
+    tx.canvases.forEach((L, i) => {
+      const lt = tt - i * IN_STAGGER;
+      if (lt < 0) return;
+      const k = reduce ? 1 : easeOut(lt / ZOOM);
+      const a = clamp(lt / (ZOOM * .6), 0, 1);
+      const sc = reduce ? 1 : 1 + (1 - k) * 2.4;
+      const ly = cy + (i - (n - 1) / 2) * lh;
+      if (!reduce && k < 1) {
+        for (let g = 1; g <= 2; g++) {
+          const gs = sc * (1 + g * .12 * (1 - k));
+          ctx.globalAlpha = a * .22 * (1 - k);
+          ctx.drawImage(L.c, cx - L.w * gs / 2, ly - L.h * gs / 2, L.w * gs, L.h * gs);
+        }
+      }
+      ctx.globalAlpha = a;
+      ctx.drawImage(L.c, cx - L.w * sc / 2, ly - L.h * sc / 2, L.w * sc, L.h * sc);
+    });
+  }
+
+  // tia lấp lánh khi chữ tan
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = sparks.length - 1; i >= 0; i--) {
+    const s = sparks[i];
+    s.age += dt;
+    if (s.age > s.life) { sparks[i] = sparks[sparks.length - 1]; sparks.pop(); continue; }
+    s.x += s.vx * dt; s.y += s.vy * dt; s.vx *= .98;
+    const a = s.a * (1 - s.age / s.life);
+    ctx.globalAlpha = a;
+    const r = s.r * 2.2;
+    ctx.drawImage(SPR.dot, s.x - r, s.y - r, r * 2, r * 2);
+  }
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = "source-over";
+
+  requestFrame();
+}
+
+// ---------- Tạm dừng khi trang món quà bị ẩn ----------
+addEventListener("lovegift:pause", () => { if (!paused) { paused = true; pausedAt = performance.now(); } });
+addEventListener("lovegift:play", () => {
+  if (!paused) return;
+  paused = false;
+  const now = performance.now();
+  if (started) { start += now - pausedAt; last = now; }
+  requestFrame();
+});
+
+loadPhotos();
+resize();
+addEventListener("resize", resize);
+function go() {
+  if (started) return;
+  started = true;
+  start = last = performance.now();
+  if (paused) pausedAt = start;
+  requestFrame();
+}
+// Chờ phông chữ tối đa 1,2 giây; phông lỗi hay chậm không bao giờ chặn món quà.
+let fontsLoaded = Promise.resolve();
+try {
+  if (document.fonts && document.fonts.load) {
+    fontsLoaded = Promise.race([document.fonts.load('800 40px "Nunito"', "Happy Ảnh"), new Promise(r => setTimeout(r, 1200))]);
+  }
+} catch (_) { /* phông không đọc được: vẽ bằng phông dự phòng */ }
+fontsLoaded
+  .catch(() => {})
+  .then(() => { texts.forEach(x => x.canvases = null); photos.forEach(p => { if (!p.img) bakePhoto(p); }); })
+  .finally(go);
+</script>
+</body>
+</html>

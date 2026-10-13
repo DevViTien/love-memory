@@ -1,0 +1,71 @@
+{
+  "kind": "html",
+  "id": "heart-photo",
+  "version": "1.0.0",
+  "status": "published",
+  "meta": {
+    "name": "Trái tim kỉ niệm",
+    "description": "Hàng trăm trái tim nhỏ bay ra vẽ nên một trái tim lấp lánh, từng lời nhắn hiện lên rồi tan thành tia sáng, và ảnh của hai bạn hiện giữa trái tim.",
+    "estimatedDurationSec": 30,
+    "moods": ["romantic", "dreamy"],
+    "occasions": ["anniversary", "valentine", "birthday", "confession"]
+  },
+  "capabilities": ["canvas2d", "dom"],
+  "budgets": { "initialJsKbGzip": 14, "initialMediaKb": 160, "maxTextureMb": 16 },
+  "fields": [
+    {
+      "id": "messages",
+      "label": "Lời nhắn giữa trái tim",
+      "helpText": "Mỗi dòng là một lời nhắn, hiện lần lượt (tối đa 4). Dấu | là xuống dòng: chia câu dài hơn 16 ký tự để chữ to hơn, ví dụ Happy|Anniversary.",
+      "type": "textList",
+      "itemMaxLength": 24,
+      "minItems": 1,
+      "maxItems": 4,
+      "path": "messages",
+      "required": true
+    },
+    {
+      "id": "photos",
+      "label": "Ảnh trong trái tim",
+      "helpText": "Từ 1 đến 6 ảnh. Nhiều ảnh sẽ tự đổi lần lượt.",
+      "type": "imageList",
+      "aspectRatio": "25:22",
+      "minItems": 1,
+      "maxItems": 6,
+      "path": "photos",
+      "required": true
+    },
+    {
+      "id": "caption",
+      "label": "Dòng chữ dưới ảnh",
+      "helpText": "Không bắt buộc.",
+      "type": "shortText",
+      "maxLength": 40,
+      "path": "caption"
+    },
+    {
+      "id": "heart-color",
+      "label": "Màu trái tim nhỏ",
+      "type": "color",
+      "path": "colors.heart"
+    },
+    {
+      "id": "glow-color",
+      "label": "Màu quầng sáng",
+      "type": "color",
+      "path": "colors.glow"
+    },
+    {
+      "id": "audio",
+      "label": "Nhạc nền",
+      "type": "audio",
+      "source": "licensedLibrary"
+    }
+  ],
+  "steps": [
+    { "id": "message", "label": "Lời nhắn", "fieldIds": ["messages"] },
+    { "id": "photos", "label": "Ảnh", "fieldIds": ["photos", "caption"] },
+    { "id": "colors", "label": "Màu sắc", "fieldIds": ["heart-color", "glow-color"] },
+    { "id": "music", "label": "Nhạc", "fieldIds": ["audio"] }
+  ]
+}

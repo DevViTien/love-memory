@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BOOTSTRAP_FIELDS_MARKER, prepareHtmlTemplate } from "../application/html-template-import";
 import {
+  BUNDLED_HTML_TEMPLATES_DIRECTORY,
+  BUNDLED_HTML_TEMPLATES_ORDER_FILE,
   HTML_TEMPLATE_LOCK_FILE,
   listBundledHtmlTemplateFolders,
   readHtmlTemplateFolder,
@@ -89,11 +91,43 @@ describe("html template folders", () => {
     expect(readHtmlTemplateFolder(folder, "").assets).toEqual([]);
   });
 
-  it("lists the bundled template folders, or none without the directory", () => {
-    expect(
-      listBundledHtmlTemplateFolders(repositoryRoot).map((folder) => folder.split(/[\\/]/).pop()),
-    ).toContain("love-days");
+  const folderName = (folder: string) => folder.split(/[\\/]/).pop();
+
+  it("lists the bundled template folders in catalog order, or none without the directory", () => {
+    expect(listBundledHtmlTemplateFolders(repositoryRoot).map(folderName)).toEqual([
+      "love-days",
+      "envelope-letter",
+      "galaxy-text",
+      "heart-photo",
+      "matrix-text",
+      "memories",
+    ]);
     expect(listBundledHtmlTemplateFolders(temporaryFolder())).toEqual([]);
+  });
+
+  it("lists every bundled folder in catalog-order.json exactly once", () => {
+    const order = JSON.parse(
+      readFileSync(
+        join(repositoryRoot, BUNDLED_HTML_TEMPLATES_DIRECTORY, BUNDLED_HTML_TEMPLATES_ORDER_FILE),
+        "utf8",
+      ),
+    ) as string[];
+    const folders = listBundledHtmlTemplateFolders(repositoryRoot).map(folderName);
+
+    expect([...order].sort()).toEqual([...folders].sort());
+  });
+
+  it("lists unlisted folders after the catalog order by name, and all by name without it", () => {
+    const root = temporaryFolder();
+    const directory = join(root, BUNDLED_HTML_TEMPLATES_DIRECTORY);
+    for (const id of ["c", "a", "d", "b"]) mkdirSync(join(directory, id), { recursive: true });
+    const names = () => listBundledHtmlTemplateFolders(root).map(folderName);
+
+    expect(names()).toEqual(["a", "b", "c", "d"]);
+    writeFileSync(join(directory, BUNDLED_HTML_TEMPLATES_ORDER_FILE), '["c", "a"]');
+    expect(names()).toEqual(["c", "a", "b", "d"]);
+    writeFileSync(join(directory, BUNDLED_HTML_TEMPLATES_ORDER_FILE), '{"order": ["c"]}');
+    expect(names).toThrow("catalog-order.json must be a JSON list of template ids.");
   });
 
   it("ships a bootstrap with the field marker", () => {

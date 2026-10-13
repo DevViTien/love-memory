@@ -1,4 +1,4 @@
-import { type FrameLocator, type Page } from "@playwright/test";
+import { type FrameLocator, type Page, type Request } from "@playwright/test";
 import jsQR from "jsqr";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -148,8 +148,22 @@ test("creates, previews and publishes a love-days gift that opens with the creat
     /^data:image\/png;base64,/,
   );
   // From here on, generating, switching and downloading make no network request.
+  // The Studio's own same-origin background reads are not QR requests: media asset polling, RSC
+  // refreshes, and the photo previews that polling re-signs (local object storage images).
   const qrRequests: string[] = [];
-  const recordRequest = (request: { url: () => string }) => {
+  const origin = new URL(page.url()).origin;
+  const recordRequest = (request: Request) => {
+    const url = new URL(request.url());
+    if (url.protocol === "data:" || url.protocol === "blob:") return;
+    if (
+      url.origin === origin &&
+      (url.pathname.startsWith("/api/media/assets") ||
+        request.headers()["rsc"] === "1" ||
+        (url.pathname.startsWith("/api/local-object-storage/") &&
+          request.resourceType() === "image"))
+    ) {
+      return;
+    }
     qrRequests.push(request.url());
   };
   page.on("request", recordRequest);
@@ -199,7 +213,7 @@ test("creates, previews and publishes a love-days gift that opens with the creat
   expect(page.url()).toBe(studioUrl);
   expect(page.context().pages()).toHaveLength(1);
   page.off("request", recordRequest);
-  expect(qrRequests.filter((url) => !/^(data|blob):/.test(url))).toEqual([]);
+  expect(qrRequests).toEqual([]);
 
   // 5. A recipient without an account opens the link: the template shows the creator's values.
   const recipient = await browser.newContext();

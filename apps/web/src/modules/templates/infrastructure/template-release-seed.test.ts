@@ -4,6 +4,7 @@ import { seedTemplateReleases } from "./seed-template-catalog";
 import {
   canonicalJson,
   manifestContentHash,
+  retireSeedTemplate,
   type SeedCollection,
   seedTemplateRelease,
   upsertTemplateVersion,
@@ -22,6 +23,15 @@ function fakeCollection(initial: StoredDocument[] = []) {
       const existing = documents.get(_id);
       // `{ adminRetiredAt: { $exists: false } }` skips a version an admin retired or killed.
       if (filter.adminRetiredAt && existing?.["adminRetiredAt"] !== undefined) {
+        return Promise.resolve();
+      }
+      // `{ kind: { $ne: "html" } }` and `{ currentVersion: { $in: [...] } }` as MongoDB applies them.
+      if (filter.kind && existing?.["kind"] === filter.kind.$ne) return Promise.resolve();
+      if (filter.status && existing?.["status"] === filter.status.$ne) return Promise.resolve();
+      if (
+        filter.currentVersion &&
+        !filter.currentVersion.$in.includes(String(existing?.["currentVersion"]))
+      ) {
         return Promise.resolve();
       }
       if (!existing && !options.upsert) return Promise.resolve();
@@ -66,6 +76,96 @@ describe("canonicalJson", () => {
     expect(canonicalJson([2, 1])).not.toBe(canonicalJson([1, 2]));
     expect(canonicalJson({ a: undefined, b: null })).toBe('{"b":null}');
     expect(canonicalJson(undefined)).toBe("null");
+  });
+});
+
+describe("retireSeedTemplate", () => {
+  const retired = { templateId: "our-timeline", versions: ["1.0.0"] };
+
+  it("retires a stored placeholder template and its versions, idempotently", async () => {
+    const templates = fakeCollection([
+      { _id: "our-timeline", currentVersion: "1.0.0", sortOrder: 1, status: "published" },
+    ]);
+    const versions = fakeCollection([
+      { _id: "our-timeline@1.0.0", manifest: { id: "our-timeline" }, status: "published" },
+    ]);
+    const collections = { templates: templates.collection, templateVersions: versions.collection };
+
+    await retireSeedTemplate(collections, retired, now);
+    const later = new Date("2026-11-01T00:00:00.000Z");
+    templates.writes.length = 0;
+    versions.writes.length = 0;
+    await retireSeedTemplate(collections, retired, later);
+    // Already retired: a re-run writes nothing, and `updatedAt` keeps the first retirement.
+    expect(templates.writes).toEqual([]);
+    expect(versions.writes).toEqual([]);
+
+    expect(templates.documents.get("our-timeline")).toMatchObject({
+      sortOrder: 1,
+      status: "retired",
+      updatedAt: now,
+    });
+    // The stored manifest stays, so drafts that pin the version stay editable.
+    expect(versions.documents.get("our-timeline@1.0.0")).toEqual({
+      _id: "our-timeline@1.0.0",
+      manifest: { id: "our-timeline" },
+      status: "retired",
+      updatedAt: now,
+    });
+  });
+
+  it("keeps a template an operator re-published as html at another version", async () => {
+    const templates = fakeCollection([
+      { _id: "our-timeline", currentVersion: "2.0.0", sortOrder: 1, status: "published" },
+    ]);
+    const versions = fakeCollection([
+      { _id: "our-timeline@1.0.0", manifest: { id: "our-timeline" }, status: "published" },
+      { _id: "our-timeline@2.0.0", kind: "html", manifest: {}, status: "published" },
+    ]);
+
+    await retireSeedTemplate(
+      { templates: templates.collection, templateVersions: versions.collection },
+      retired,
+      now,
+    );
+
+    expect(versions.documents.get("our-timeline@1.0.0")?.["status"]).toBe("retired");
+    expect(versions.documents.get("our-timeline@2.0.0")?.["status"]).toBe("published");
+    expect(templates.documents.get("our-timeline")?.["status"]).toBe("published");
+  });
+
+  it("keeps an html template imported under the placeholder's id and version", async () => {
+    const templates = fakeCollection([
+      { _id: "our-timeline", currentVersion: "1.0.0", sortOrder: 3, status: "published" },
+    ]);
+    const versions = fakeCollection([
+      { _id: "our-timeline@1.0.0", kind: "html", manifest: {}, status: "published" },
+    ]);
+
+    await retireSeedTemplate(
+      { templates: templates.collection, templateVersions: versions.collection },
+      retired,
+      now,
+    );
+
+    expect(versions.documents.get("our-timeline@1.0.0")?.["status"]).toBe("published");
+    expect(templates.documents.get("our-timeline")?.["status"]).toBe("published");
+    expect(versions.writes).toEqual([]);
+    expect(templates.writes).toEqual([]);
+  });
+
+  it("creates nothing on a database that never stored it", async () => {
+    const templates = fakeCollection();
+    const versions = fakeCollection();
+
+    await retireSeedTemplate(
+      { templates: templates.collection, templateVersions: versions.collection },
+      retired,
+      now,
+    );
+
+    expect(templates.documents.size).toBe(0);
+    expect(versions.documents.size).toBe(0);
   });
 });
 

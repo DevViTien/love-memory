@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Thông điệp giữa ngân hà</title>
+<style>
+  /* Nunito (SIL Open Font License 1.1, see OFL*.txt), bundled: templates load no external URL. */
+  @font-face {
+    font-family: "Nunito";
+    font-style: normal;
+    font-weight: 600 900;
+    font-display: swap;
+    src: url(assets/fonts/nunito-vietnamese.woff2) format("woff2");
+    unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+  }
+  @font-face {
+    font-family: "Nunito";
+    font-style: normal;
+    font-weight: 600 900;
+    font-display: swap;
+    src: url(assets/fonts/nunito-latin-ext.woff2) format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
+  @font-face {
+    font-family: "Nunito";
+    font-style: normal;
+    font-weight: 600 900;
+    font-display: swap;
+    src: url(assets/fonts/nunito-latin.woff2) format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  :root {
+    --bg: #000;
+    --heart: #ff3b4e;
+    --glow: #8fc4ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; background: var(--bg); }
+  body {
+    font-family: "Nunito", system-ui, sans-serif;
+    color: #fff;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none; -webkit-user-select: none;
+    touch-action: none;
+  }
+  #stage { position: fixed; inset: 0; height: 100dvh; background: #000; overflow: hidden; }
+  #scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+  #scene:active { cursor: grabbing; }
+
+  /* ---------- Màn chờ: chạm để mở ---------- */
+  #gate {
+    position: absolute; inset: 0; z-index: 5;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
+    background: radial-gradient(ellipse 70% 50% at 50% 46%, #12060b 0%, #050204 55%, #000 100%);
+    transition: opacity .7s ease, visibility .7s;
+    cursor: pointer;
+  }
+  #gate.hide { opacity: 0; visibility: hidden; pointer-events: none; }
+  .g-heart {
+    position: relative; width: 96px; height: 96px;
+    border: 0; background: none; cursor: pointer;
+    display: grid; place-items: center;
+  }
+  .g-heart svg { width: 64px; height: 64px; overflow: visible; filter: drop-shadow(0 0 10px rgba(255, 59, 78, .9)) drop-shadow(0 0 26px rgba(255, 59, 78, .55)); animation: beat 1.4s ease-in-out infinite; }
+  .g-heart::before, .g-heart::after {
+    content: ""; position: absolute; inset: 14px; border-radius: 50%;
+    border: 1.5px solid rgba(255, 90, 105, .55);
+    animation: ripple 2.4s ease-out infinite;
+  }
+  .g-heart::after { animation-delay: 1.2s; }
+  @keyframes beat { 0%, 100% { transform: scale(1); } 14% { transform: scale(1.18); } 28% { transform: scale(1); } 42% { transform: scale(1.1); } }
+  @keyframes ripple { from { transform: scale(.6); opacity: .9; } to { transform: scale(2.1); opacity: 0; } }
+  .g-title {
+    font-weight: 800; font-size: clamp(19px, 5.4vw, 26px); letter-spacing: .3px; text-align: center;
+    padding: 0 24px;
+    text-shadow: 0 0 6px rgba(143, 196, 255, .9), 0 0 18px rgba(143, 196, 255, .45);
+    opacity: 0; animation: fadeUp .9s ease .3s forwards;
+  }
+  .g-hint {
+    font-weight: 600; font-size: 14px; color: rgba(255, 255, 255, .62); letter-spacing: .4px;
+    opacity: 0; animation: fadeUp .9s ease .8s forwards, blink 2s ease-in-out 1.8s infinite;
+  }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes blink { 50% { opacity: .3; } }
+
+  /* gợi ý vuốt */
+  #tip {
+    position: absolute; left: 0; right: 0; bottom: calc(26px + env(safe-area-inset-bottom));
+    text-align: center; font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, .55);
+    letter-spacing: .4px; pointer-events: none;
+    opacity: 0; transition: opacity 1.2s ease;
+  }
+  #tip.show { opacity: 1; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .2s !important; }
+  }
+  /* The gift page's reduced-motion request (LoveGift sets it on <html>). */
+  html[data-reduced-motion="true"] *, html[data-reduced-motion="true"] *::before, html[data-reduced-motion="true"] *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .2s !important; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="scene" aria-label="Không gian chữ bay"></canvas>
+  <p id="tip">Vuốt để xoay không gian ✦</p>
+  <div id="gate" role="button" tabindex="0" aria-label="Mở món quà">
+    <div class="g-heart">
+      <svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.5 6.7 4.5c2.2 0 3.6 1.3 4.3 2.6.7-1.3 2.1-2.6 4.3-2.6 3.7 0 5.8 3.9 4.3 7.3C19.5 16.4 12 21 12 21z" fill="var(--heart)"/></svg>
+    </div>
+    <p class="g-title" id="gTitle"></p>
+    <p class="g-hint" id="gHint"></p>
+  </div>
+</div>
+
+<!-- Cấu hình mặc định. LoveMemory ghép giá trị của món quà vào đây (template.json → path);
+     nhạc do trang món quà phát. heroTexts: chữ lớn bay ngang qua màn hình lần lượt ("|" hoặc
+     "\n" = xuống dòng, "♡" = trái tim viền); texts: những dòng chữ nhỏ trôi khắp không gian;
+     autoStartMs: tự mở sau x ms nếu không chạm (0 = chỉ mở khi chạm); density: mật độ chữ nhỏ
+     (0.5 – 1.5); speed: tốc độ trôi. -->
+<script type="application/json" id="gift-config">
+{
+  "pageTitle": "Thông điệp giữa ngân hà",
+  "gateTitle": "Có điều này anh muốn nói…",
+  "gateHint": "Chạm vào trái tim nhé",
+  "heroTexts": ["Đồng ý làm", "♡|vợ anh nhé"],
+  "texts": [
+    "Đồng ý làm vợ anh nhé ♡",
+    "Đồng ý làm vợ anh nhé ♡",
+    "Về chung một nhà nhé ♡",
+    "Anh yêu em",
+    "Mình cưới nhau nhé",
+    "Em là cả thế giới của anh",
+    "Nắm tay anh đi hết đời nhé ♡",
+    "Thương em nhiều lắm"
+  ],
+  "photos": [],
+  "autoStartMs": 0,
+  "colors": {
+    "text": "#ffffff",
+    "glow": "#8fc4ff",
+    "hearts": ["#ff3b4e", "#ff5a36", "#ff2f6d"]
+  },
+  "density": 1,
+  "speed": 1
+}
+</script>
+
+<script>
+const CONFIG = LoveGift.config();
+
+// ---------- Hẹn giờ theo trang món quà ----------
+// Các hẹn giờ của mẫu dừng khi trang món quà bị ẩn ("lovegift:pause") và chạy nốt phần còn lại khi
+// "lovegift:play": chuỗi hiệu ứng không chạy tiếp, cũng không kết thúc, lúc không ai xem.
+const clock = (() => {
+  const pending = new Set();
+  let paused = false;
+  function arm(timer) {
+    timer.armedAt = performance.now();
+    timer.id = setTimeout(() => { pending.delete(timer); timer.fn(); }, timer.left);
+  }
+  addEventListener("lovegift:pause", () => {
+    if (paused) return;
+    paused = true;
+    pending.forEach(timer => {
+      clearTimeout(timer.id);
+      timer.left = Math.max(0, timer.left - (performance.now() - timer.armedAt));
+    });
+  });
+  addEventListener("lovegift:play", () => {
+    if (!paused) return;
+    paused = false;
+    pending.forEach(arm);
+  });
+  function later(fn, ms) {
+    const timer = { armedAt: 0, fn, id: 0, left: Math.max(0, ms) };
+    pending.add(timer);
+    if (!paused) arm(timer);
+    return timer;
+  }
+  return {
+    isPaused: () => paused,
+    later,
+    wait: ms => new Promise(resolve => later(resolve, ms)),
+  };
+})();
+// Một dòng của Studio không có ký tự xuống dòng: "|" trong chữ lớn là xuống dòng.
+const heroLines = text => String(text).split("|").map(part => part.trim()).join("\n");
+
+document.title = CONFIG.pageTitle;
+document.getElementById("gTitle").textContent = CONFIG.gateTitle;
+document.getElementById("gHint").textContent = CONFIG.gateHint;
+
+const reduce = LoveGift.reducedMotion() || matchMedia("(prefers-reduced-motion: reduce)").matches;
+const cv = document.getElementById("scene");
+const ctx = cv.getContext("2d");
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const easeOut = t => 1 - Math.pow(1 - t, 3);
+
+/* ---------- Kích thước & phép chiếu ---------- */
+const FOV = 60 * Math.PI / 180, CZ = 900;          // tâm không gian cách camera CZ đơn vị
+const NEAR_D = 470, FAR_D = 1750;                   // dải độ sâu của chữ nhỏ
+let W, H, DPR, F, XR, YR;
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = innerWidth; H = innerHeight;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  F = 0.5 * H / Math.tan(FOV / 2);
+  XR = FAR_D * (W / 2) / F * 1.25 + 250;
+  YR = FAR_D * (H / 2) / F * 1.15 + 200;
+}
+resize();
+
+// góc nhìn gốc: nghiêng để chữ chéo lên bên phải như trong video
+const BASE = { yaw: -0.46, pitch: 0.05, roll: 0.2 };
+const cam = { yaw: 0, pitch: 0, roll: 0, dragYaw: 0, dragPitch: 0, vYaw: 0, vPitch: 0 };
+let cy, sy, cp, sp, cr, sr;
+function setRot(yaw, pitch, roll) {
+  cy = Math.cos(yaw); sy = Math.sin(yaw); cp = Math.cos(pitch); sp = Math.sin(pitch); cr = Math.cos(roll); sr = Math.sin(roll);
+}
+// toạ độ thế giới (quanh tâm) -> toạ độ camera (z âm phía trước)
+function rot(x, y, z, o) {
+  const x1 = x * cy + z * sy, z1 = -x * sy + z * cy;
+  const y2 = y * cp - z1 * sp, z2 = y * sp + z1 * cp;
+  o.x = x1 * cr - y2 * sr; o.y = x1 * sr + y2 * cr; o.z = z2;
+  return o;
+}
+// phép quay ngược (dùng để đặt chữ lớn vào giữa khung hình)
+function unrot(x, y, z, o) {
+  const x1 = x * cr + y * sr, y2 = -x * sr + y * cr;
+  const y1 = y2 * cp + z * sp, z1 = -y2 * sp + z * cp;
+  o.x = x1 * cy - z1 * sy; o.y = y1; o.z = x1 * sy + z1 * cy;
+  return o;
+}
+const EX = { x: 0, y: 0, z: 0 }, EY = { x: 0, y: 0, z: 0 }, TMP = { x: 0, y: 0, z: 0 }, Q = { x: 0, y: 0, z: 0 };
+
+/* ---------- Sprite chữ phát sáng ---------- */
+const FONT = '"Nunito", system-ui, sans-serif';
+function heartPath(c, x, y, s) { // tim nằm trong ô vuông cạnh s, góc trái trên (x,y)
+  c.beginPath();
+  c.moveTo(x + s * .5, y + s * .92);
+  c.bezierCurveTo(x + s * .12, y + s * .66, x - s * .02, y + s * .42, x + s * .06, y + s * .24);
+  c.bezierCurveTo(x + s * .16, y + s * .02, x + s * .44, y + s * .02, x + s * .5, y + s * .24);
+  c.bezierCurveTo(x + s * .56, y + s * .02, x + s * .84, y + s * .02, x + s * .94, y + s * .24);
+  c.bezierCurveTo(x + s * 1.02, y + s * .42, x + s * .88, y + s * .66, x + s * .5, y + s * .92);
+  c.closePath();
+}
+function makeTextSprite(text, px, weight, withShade) {
+  const lines = text.split("\n");
+  const m = document.createElement("canvas").getContext("2d");
+  m.font = `${weight} ${px}px ${FONT}`;
+  const lh = px * 1.12;
+  const layout = lines.map(line => {
+    const onlyHeart = line.trim() === "♡";
+    const hs = onlyHeart ? px * 1.25 : px * .78;
+    const parts = line.split("♡"); let w = 0; const segs = [];
+    parts.forEach((p, i) => {
+      if (p) { const tw = m.measureText(p).width; segs.push({ t: p, x: w, w: tw }); w += tw; }
+      if (i < parts.length - 1) { if (w > 0) w += px * .08; segs.push({ heart: true, x: w, w: hs }); w += hs; }
+    });
+    return { segs, w, h: onlyHeart ? hs * 1.02 : lh, hs };
+  });
+  const pad = Math.ceil(px * .55);
+  const tw = Math.max(...layout.map(l => l.w)), th = layout.reduce((s, l) => s + l.h, 0);
+  const c = document.createElement("canvas");
+  c.width = Math.ceil(tw + pad * 2); c.height = Math.ceil(th + pad * 2);
+  let g = c.getContext("2d");
+  g.font = m.font; g.textBaseline = "middle"; g.lineJoin = "round";
+  const draw = () => {
+    let y = pad;
+    layout.forEach(l => {
+      const ox = pad + (tw - l.w) / 2, my = y + l.h / 2;
+      l.segs.forEach(s => {
+        if (s.heart) {
+          heartPath(g, ox + s.x, my - s.w * .5, s.w);
+          g.lineWidth = Math.max(1.5, s.w * (l.segs.length === 1 ? .1 : .12));
+          g.stroke();
+        } else g.fillText(s.t, ox + s.x, my + px * .04);
+      });
+      y += l.h;
+    });
+  };
+  g.fillStyle = g.strokeStyle = CONFIG.colors.glow;
+  g.shadowColor = CONFIG.colors.glow;
+  g.globalAlpha = .7; g.shadowBlur = px * .55; draw(); draw();
+  g.globalAlpha = .9; g.shadowBlur = px * .2; draw();
+  g.globalAlpha = 1; g.shadowBlur = px * .06; g.shadowColor = "#fff";
+  g.fillStyle = g.strokeStyle = CONFIG.colors.text; draw();
+  const out = { c, w: c.width, h: c.height, core: px, lines: lines.length }; // core = cỡ chữ (px sprite)
+  if (withShade) { // bóng tối phía sau chữ lớn để dễ đọc khi chồng lên chữ nhỏ
+    const d = document.createElement("canvas"); d.width = c.width; d.height = c.height;
+    g = d.getContext("2d"); g.font = m.font; g.textBaseline = "middle"; g.lineJoin = "round";
+    g.fillStyle = g.strokeStyle = "#000"; g.shadowColor = "#000";
+    g.shadowBlur = px * .35; draw(); draw(); g.shadowBlur = px * .15; draw();
+    out.shade = d;
+  }
+  return out;
+}
+function makeHeartSprite(color) {
+  const s = 64, pad = 26, c = document.createElement("canvas");
+  c.width = c.height = s + pad * 2;
+  const g = c.getContext("2d");
+  const gr = g.createRadialGradient(pad + s * .42, pad + s * .38, 2, pad + s * .5, pad + s * .5, s * .62);
+  gr.addColorStop(0, "#ffd0b8"); gr.addColorStop(.35, color); gr.addColorStop(1, shade(color, .55));
+  g.shadowColor = color; g.shadowBlur = 22;
+  heartPath(g, pad, pad, s); g.fillStyle = gr; g.fill();
+  g.shadowBlur = 8; g.fill();
+  return { c, w: c.width, h: c.height, core: s };
+}
+function shade(hex, k) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgb(${(n >> 16 & 255) * k | 0},${(n >> 8 & 255) * k | 0},${(n & 255) * k | 0})`;
+}
+function makePhotoSprite(img) {
+  const s = 220, pad = 30, c = document.createElement("canvas");
+  const ar = img ? clamp(img.naturalWidth / img.naturalHeight, .6, 1.6) : .8;
+  const w = ar >= 1 ? s : s * ar, h = ar >= 1 ? s / ar : s;
+  c.width = Math.ceil(w + pad * 2); c.height = Math.ceil(h + pad * 2);
+  const g = c.getContext("2d");
+  g.shadowColor = CONFIG.colors.glow; g.shadowBlur = 24;
+  g.fillStyle = "#fff"; g.fillRect(pad - 6, pad - 6, w + 12, h + 12);
+  g.shadowBlur = 0;
+  if (img) {
+    const ir = img.naturalWidth / img.naturalHeight, r = w / h;
+    let sw = img.naturalWidth, sh = img.naturalHeight, sx = 0, sy = 0;
+    if (ir > r) { sw = sh * r; sx = (img.naturalWidth - sw) / 2; } else { sh = sw / r; sy = (img.naturalHeight - sh) / 2; }
+    g.drawImage(img, sx, sy, sw, sh, pad, pad, w, h);
+  } else { // ảnh thiếu -> khung tối với trái tim
+    const gr = g.createLinearGradient(0, pad, 0, pad + h);
+    gr.addColorStop(0, "#1a1424"); gr.addColorStop(1, "#0b0a14");
+    g.fillStyle = gr; g.fillRect(pad, pad, w, h);
+    g.strokeStyle = "rgba(255,255,255,.75)"; g.lineWidth = 4;
+    heartPath(g, pad + w / 2 - 34, pad + h / 2 - 40, 68); g.stroke();
+    g.fillStyle = "rgba(255,255,255,.6)"; g.font = `700 18px ${FONT}`; g.textAlign = "center";
+    g.fillText("ảnh của chúng mình", pad + w / 2, pad + h / 2 + 52);
+  }
+  return { c, w: c.width, h: c.height, core: h + 12 };
+}
+
+/* ---------- Đối tượng trong không gian ---------- */
+let textSprites = [], heroSprites = [], heartSprites = [], photoSprites = [];
+function buildSprites() {
+  textSprites = CONFIG.texts.map(t => makeTextSprite(t, 44, 800));
+  heroSprites = CONFIG.heroTexts.map(t => makeTextSprite(heroLines(t), 128, 900, true));
+  heartSprites = CONFIG.colors.hearts.map(makeHeartSprite);
+}
+buildSprites();
+
+const items = [], stars = [], heroes = [];
+function depthToZ(d) { return CZ - d; }
+function placeText(o, fresh) {
+  o.x = rand(-XR, XR);
+  o.y = fresh ? rand(-YR, YR) : YR + rand(0, 200);
+  o.z = depthToZ(rand(NEAR_D, FAR_D));
+}
+function populate() {
+  items.length = 0; stars.length = 0;
+  const nText = Math.round(clamp(110 * XR / 1000, 90, 240) * clamp(CONFIG.density, .3, 2));
+  for (let i = 0; i < nText; i++) {
+    const o = { kind: "text", spr: i % textSprites.length, size: rand(20, 26), speed: rand(14, 22), seed: Math.random() };
+    placeText(o, true); items.push(o);
+  }
+  const nHeart = Math.round(nText * .32);
+  for (let i = 0; i < nHeart; i++) {
+    const o = { kind: "heart", spr: i % heartSprites.length, size: rand(28, 40), speed: rand(34, 52), seed: Math.random() * 6.28, spin: rand(.6, 1.4) };
+    placeText(o, true); o.z = depthToZ(rand(380, 1500)); items.push(o);
+  }
+  photoSprites.forEach((p, i) => {
+    for (let k = 0; k < 2; k++) {
+      const o = { kind: "photo", ref: p, size: 170, speed: rand(16, 22), seed: Math.random() * 6.28 };
+      placeText(o, true); o.z = depthToZ(rand(700, 1500)); o.x = rand(-XR, XR) * .5; items.push(o);
+    }
+  });
+  const nStar = Math.round(clamp(320 * XR / 1000, 260, 700));
+  for (let i = 0; i < nStar; i++) stars.push({ x: rand(-XR * 1.3, XR * 1.3), y: rand(-YR * 1.3, YR * 1.3), z: depthToZ(rand(250, 2800)), a: rand(.35, 1), tw: rand(.6, 2.4), ph: Math.random() * 6.28, warm: Math.random() < .18 });
+}
+// ảnh (tuỳ chọn)
+CONFIG.photos.forEach(src => {
+  const holder = { spr: makePhotoSprite(null) };
+  photoSprites.push(holder);
+  const img = new Image();
+  img.onload = () => { holder.spr = makePhotoSprite(img); };
+  img.src = src;
+});
+
+populate();
+
+// chữ lớn
+let heroIdx = 0;
+let completed = false;
+function spawnHero(screenFrac) {
+  if (!heroSprites.length) return;
+  // Mỗi chữ lớn đã bay qua một lượt: món quà đã đến đoạn kết.
+  if (!completed && heroIdx >= heroSprites.length) { completed = true; LoveGift.complete(); }
+  const spr = heroSprites[heroIdx++ % heroSprites.length];
+  const d = rand(430, 480);
+  const visW = d * W / F, visH = d * H / F;
+  let wWorld = Math.min(visW * 1.02, visH * .5 * spr.w / spr.h);
+  const hWorld = wWorld * spr.h / spr.w;
+  // vị trí trong hệ camera (chưa tính lắc) -> đổi về thế giới
+  const yView = (0.5 - screenFrac) * visH;
+  setRot(BASE.yaw, BASE.pitch, BASE.roll);
+  unrot(rand(-.03, .03) * visW, yView, -d + CZ, TMP);
+  const h = { x: TMP.x, y: TMP.y, z: TMP.z, size: hWorld * spr.core / spr.h, spr, speed: 58, hWorld };
+  // căn cho chữ (đã phối cảnh) nằm gọn & cân giữa màn hình
+  const ax = rot(1, 0, 0, {}), P = {}, D = {};
+  for (let it = 0; it < 3; it++) {
+    const half = spr.w / 2 * h.size / spr.core;
+    rot(h.x, h.y, h.z, P);
+    const zl = -(P.z - CZ - ax.z * half), zr = -(P.z - CZ + ax.z * half);
+    const L = W / 2 + (P.x - ax.x * half) * F / zl, R = W / 2 + (P.x + ax.x * half) * F / zr;
+    const s = Math.min(1.15, (W * .94) / (R - L), (H * (.1 + .12 * spr.lines)) / (F * h.hWorld / d));
+    h.size *= s; h.hWorld *= s;
+    unrot((W / 2 - (L + R) / 2) * d / F, 0, 0, D);
+    h.x += D.x; h.y += D.y; h.z += D.z;
+  }
+  unrot(0, -1, 0, TMP); // rơi thẳng xuống theo khung hình gốc
+  h.vx = TMP.x; h.vy = TMP.y; h.vz = TMP.z;
+  heroes.push(h);
+}
+
+/* ---------- Vẽ ---------- */
+let started = false, t0 = 0, intro = 0, lastHeroCheck = 0;
+function drawSprite(spr, cx, cyy, cz, worldPerPx, ang, flipX, alpha, push) {
+  // tâm trong hệ camera
+  const d = -(cz - push);
+  if (d < 40) return;
+  const ca = Math.cos(ang), sa = Math.sin(ang);
+  // trục cục bộ trong hệ camera (đã xoay trong mặt phẳng)
+  const ax = (EX.x * ca + EY.x * sa) * flipX, ay = (EX.y * ca + EY.y * sa) * flipX, az = (EX.z * ca + EY.z * sa) * flipX;
+  const bx = EY.x * ca - EX.x * sa, by = EY.y * ca - EX.y * sa, bz = EY.z * ca - EX.z * sa;
+  const k = worldPerPx;
+  const screenW = F * spr.w * k / d;
+  if (screenW < 2) return;
+  const pz = cz - push, dd = -pz, px = cx, py = cyy;
+  const ix = F / dd, sxp = W / 2 + px * ix, syp = H / 2 - py * ix;
+  if (sxp < -screenW || sxp > W + screenW || syp < -screenW || syp > H + screenW) return;
+  // Jacobian của phép chiếu tại tâm -> biến đổi affine cho sprite
+  const jax = F * (ax * dd + px * az) / (dd * dd), jay = -F * (ay * dd + py * az) / (dd * dd);
+  const jbx = F * (bx * dd + px * bz) / (dd * dd), jby = -F * (by * dd + py * bz) / (dd * dd);
+  ctx.globalAlpha = alpha;
+  ctx.setTransform(jax * k * DPR, jay * k * DPR, -jbx * k * DPR, -jby * k * DPR, sxp * DPR, syp * DPR);
+  ctx.drawImage(spr.c, -spr.w / 2, -spr.h / 2);
+}
+function fog(d) {
+  const far = clamp((FAR_D + 150 - d) / 650, 0, 1);
+  const near = clamp((d - 80) / 160, 0, 1);
+  return far * near * (1 - clamp((d - NEAR_D) / (FAR_D - NEAR_D), 0, 1) * .25);
+}
+
+const order = [];
+let last = 0, time = 0, paused = false, looping = true, pausedAt = 0;
+function frame(now) {
+  // Trang món quà bị ẩn: dừng vòng lặp vẽ, chạy lại khi "lovegift:play".
+  if (paused) { looping = false; last = 0; return; }
+  const dt = Math.min(.05, (now - (last || now)) / 1000); last = now;
+  time += dt;
+  const spd = CONFIG.speed * (reduce ? .3 : 1);
+
+  // camera: lắc nhẹ + kéo tay
+  if (!dragging) {
+    cam.dragYaw += cam.vYaw * dt; cam.dragPitch += cam.vPitch * dt;
+    cam.vYaw *= Math.pow(.04, dt); cam.vPitch *= Math.pow(.04, dt);
+    if (now - lastDragEnd > 2500) { const k = 1 - Math.pow(.55, dt); cam.dragYaw -= cam.dragYaw * k; cam.dragPitch -= cam.dragPitch * k; }
+  }
+  cam.dragYaw = clamp(cam.dragYaw, -1.1, 1.1); cam.dragPitch = clamp(cam.dragPitch, -.7, .7);
+  const sway = reduce ? 0 : 1;
+  setRot(BASE.yaw + cam.dragYaw + sway * .05 * Math.sin(time * .17),
+         BASE.pitch + cam.dragPitch + sway * .035 * Math.sin(time * .13 + 1),
+         BASE.roll + sway * .02 * Math.sin(time * .11 + 2));
+  rot(1, 0, 0, EX); rot(0, 1, 0, EY);
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, cv.width, cv.height);
+  if (!started) { requestAnimationFrame(frame); return; }
+
+  const st = (now - t0) / 1000;
+  const starA = clamp(st / .5, 0, 1);
+  intro = reduce ? clamp(st / .6, 0, 1) : easeOut(clamp((st - .25) / 1.6, 0, 1));
+  const push = reduce ? 0 : (1 - intro) * 1700;
+  const ia = clamp(intro * 1.6, 0, 1);
+
+  ctx.globalCompositeOperation = "lighter";
+
+  // bụi sao
+  for (const s of stars) {
+    s.y -= 6 * spd * dt;
+    if (s.y < -YR * 1.3) s.y += YR * 2.6;
+    rot(s.x, s.y, s.z, Q);
+    const d = -(Q.z - CZ);
+    if (d < 60) continue;
+    const ix = F / d, x = W / 2 + Q.x * ix, y = H / 2 - Q.y * ix;
+    if (x < -4 || x > W + 4 || y < -4 || y > H + 4) continue;
+    const r = clamp(2.4 * 600 / d, .7, 2.6);
+    const tw = .55 + .45 * Math.sin(time * s.tw + s.ph);
+    ctx.globalAlpha = s.a * tw * starA * clamp((3000 - d) / 800, 0, 1);
+    ctx.fillStyle = s.warm ? "#ffd2c4" : "#fff";
+    ctx.fillRect((x - r / 2) * DPR, (y - r / 2) * DPR, r * DPR, r * DPR);
+  }
+
+  // cập nhật & sắp xếp theo độ sâu
+  order.length = 0;
+  for (const o of items) {
+    o.y -= o.speed * spd * dt;
+    if (o.y < -YR) placeText(o, false);
+    rot(o.x, o.y, o.z, Q);
+    o.cx = Q.x; o.cy = Q.y; o.cz = Q.z - CZ;
+    order.push(o);
+  }
+  for (let i = heroes.length - 1; i >= 0; i--) {
+    const h = heroes[i];
+    const st = h.speed * spd * dt;
+    h.x += h.vx * st; h.y += h.vy * st; h.z += h.vz * st;
+    rot(h.x, h.y, h.z, Q);
+    h.cx = Q.x; h.cy = Q.y; h.cz = Q.z - CZ; h.kind = "hero";
+    const d = -h.cz, sy = H / 2 - h.cy * F / d;
+    h.sy = sy;
+    if (sy - F * h.hWorld / d > H * 1.15 || h.y < -YR * 1.5) { heroes.splice(i, 1); continue; }
+    order.push(h);
+  }
+  // chữ lớn kế tiếp xuất hiện khi chữ trước đã trôi quá nửa màn hình
+  const lastHero = heroes[heroes.length - 1];
+  if (!lastHero || lastHero.sy > H * .62) spawnHero(-.12);
+
+  order.sort((a, b) => a.cz - b.cz);
+  for (const o of order) {
+    const d = -(o.cz - push);
+    if (o.kind === "text") {
+      const spr = textSprites[o.spr];
+      drawSprite(spr, o.cx, o.cy, o.cz, o.size / spr.core, 0, 1, fog(d) * ia, push);
+    } else if (o.kind === "heart") {
+      const spr = heartSprites[o.spr];
+      const flip = Math.cos(time * o.spin + o.seed); // xoay quanh trục đứng
+      const f = Math.sign(flip) * Math.max(.18, Math.abs(flip));
+      drawSprite(spr, o.cx, o.cy, o.cz, o.size / spr.core, .25 * Math.sin(time * .7 + o.seed), f, fog(d) * ia * .95, push);
+    } else if (o.kind === "photo") {
+      const spr = o.ref.spr;
+      ctx.globalCompositeOperation = "source-over";
+      drawSprite(spr, o.cx, o.cy, o.cz, o.size / spr.core, .08 * Math.sin(time * .4 + o.seed), 1, fog(d) * ia, push);
+      ctx.globalCompositeOperation = "lighter";
+    } else {
+      const a = clamp((d - 60) / 120, 0, 1) * ia;
+      ctx.globalCompositeOperation = "source-over";
+      drawSprite({ c: o.spr.shade, w: o.spr.w, h: o.spr.h }, o.cx, o.cy, o.cz, o.size / o.spr.core, 0, 1, a * .8, push);
+      ctx.globalCompositeOperation = "lighter";
+      drawSprite(o.spr, o.cx, o.cy, o.cz, o.size / o.spr.core, 0, 1, a, push);
+    }
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+addEventListener("lovegift:pause", () => { if (!paused) { paused = true; pausedAt = performance.now(); } });
+addEventListener("lovegift:play", () => {
+  if (!paused) return;
+  paused = false;
+  // Đoạn mở đầu (t0) tiếp tục từ chỗ đã dừng.
+  if (started) t0 += performance.now() - pausedAt;
+  if (!looping) { looping = true; requestAnimationFrame(frame); }
+});
+
+/* ---------- Kéo để xoay ---------- */
+let dragging = false, lx = 0, ly = 0, lt = 0, lastDragEnd = -1e9;
+cv.addEventListener("pointerdown", e => { dragging = true; lx = e.clientX; ly = e.clientY; lt = performance.now(); cam.vYaw = cam.vPitch = 0; cv.setPointerCapture(e.pointerId); });
+cv.addEventListener("pointermove", e => {
+  if (!dragging) return;
+  const now = performance.now(), dtm = Math.max(8, now - lt) / 1000;
+  const dx = (e.clientX - lx) / Math.min(W, 600), dy = (e.clientY - ly) / Math.min(H, 800);
+  cam.dragYaw += dx * 1.6; cam.dragPitch += dy * 1.2;
+  cam.vYaw = dx * 1.6 / dtm * .6; cam.vPitch = dy * 1.2 / dtm * .6;
+  lx = e.clientX; ly = e.clientY; lt = now;
+});
+const endDrag = () => { if (dragging) { dragging = false; lastDragEnd = performance.now(); } };
+cv.addEventListener("pointerup", endDrag);
+cv.addEventListener("pointercancel", endDrag);
+
+/* ---------- Mở quà ---------- */
+const gate = document.getElementById("gate");
+const tip = document.getElementById("tip");
+
+function start() {
+  if (started) return;
+  started = true; t0 = performance.now();
+  LoveGift.scene("galaxy");
+  gate.classList.add("hide");
+  heroes.length = 0; heroIdx = 0;
+  spawnHero(.22);
+  clock.later(() => tip.classList.add("show"), 3200);
+  clock.later(() => tip.classList.remove("show"), 7600);
+}
+gate.addEventListener("click", start);
+document.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") start(); });
+if (CONFIG.autoStartMs > 0) clock.later(start, CONFIG.autoStartMs);
+
+addEventListener("resize", () => { const ox = XR; resize(); if (Math.abs(XR - ox) / ox > .15) populate(); });
+if (document.fonts) document.fonts.ready.then(() => { buildSprites(); heroes.forEach((h, i) => { const n = heroSprites[(heroIdx - heroes.length + i) % heroSprites.length]; if (n) h.spr = n; }); });
+</script>
+</body>
+</html>

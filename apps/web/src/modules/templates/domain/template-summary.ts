@@ -9,6 +9,11 @@ export type StoredTemplateSummary = Readonly<{
   }>;
   moods: readonly string[];
   name: string;
+  /**
+   * The catalog picture of an `html` version that ships `assets/thumbnail.jpg`: the same-origin URL
+   * of that artifact file. Absent for `sdk` templates and html versions without one.
+   */
+  thumbnailUrl?: string;
   version: string;
 }>;
 

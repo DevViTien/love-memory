@@ -149,19 +149,26 @@ test("shows the product promise and template catalog", async ({ page }) => {
   expect(browserErrors).toEqual([]);
 });
 
-test("offers no gift creation for templates that are not yet available", async ({ page }) => {
+test("retires the sdk-era placeholder templates from the catalog and gift creation", async ({
+  page,
+}) => {
+  // `add-animation-gift-templates`: `our-timeline` and `midnight-wish` are retired by the seed.
   await page.goto("/templates");
-  const timelineCard = page.getByRole("article").filter({ hasText: "Dòng thời gian hai đứa" });
-  await expect(timelineCard.getByText("Sắp ra mắt")).toBeVisible();
-  const memoryBoxCard = page.getByRole("article").filter({ hasText: "Hộp ký ức" });
-  await expect(memoryBoxCard.getByText("Sắp ra mắt")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Hộp ký ức" })).toBeVisible();
+  await expect(page.getByRole("article").filter({ hasText: "Dòng thời gian hai đứa" })).toHaveCount(
+    0,
+  );
+  await expect(page.getByRole("article").filter({ hasText: "Bầu trời lời nhắn" })).toHaveCount(0);
+  await expect(page.getByText("Sắp ra mắt")).toHaveCount(0);
 
   await page.goto("/templates/midnight-wish");
-  await expect(page.getByText("Sắp ra mắt", { exact: true })).toBeVisible();
+  await expect(page).toHaveTitle(/Không tìm thấy template/);
   await expect(page.getByRole("link", { name: "Dùng template này" })).toHaveCount(0);
 
   await page.goto("/studio/new?template=midnight-wish");
-  await expect(page.getByRole("heading", { name: "Mẫu quà này sắp ra mắt." })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Chọn template trước khi bắt đầu" }),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: /Bắt đầu|Tạo/ })).toHaveCount(0);
 
   const createStatus = await page.evaluate(async () => {

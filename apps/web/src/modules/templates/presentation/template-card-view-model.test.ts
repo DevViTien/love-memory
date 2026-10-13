@@ -55,4 +55,44 @@ describe("template card view model", () => {
 
     expect(viewModel).toMatchObject({ comingSoon: true, icon: "✨" });
   });
+
+  const memories = {
+    available: true,
+    description: "Sổ kỷ niệm",
+    estimatedDurationSec: 120,
+    id: "memories",
+    imageRequirement: { maxItems: 15, minItems: 1 },
+    moods: ["romantic"],
+    name: "Kỷ niệm của chúng mình",
+    thumbnailUrl: `/template-artifacts/memories/1.0.0/${"a".repeat(64)}/assets/thumbnail.jpg`,
+    version: "1.0.0",
+  };
+
+  it("shows an html template's own thumbnail with a descriptive alt (Catalog thumbnail)", () => {
+    expect(toTemplateCardViewModel(memories)).toMatchObject({
+      icon: "📔",
+      photoRequirement: "1–15 ảnh",
+      thumbnail: {
+        alt: "Hình minh họa mẫu quà Kỷ niệm của chúng mình",
+        src: memories.thumbnailUrl,
+      },
+    });
+  });
+
+  it("shows an exact photo count when the range is a single number (Card of a one-photo template)", () => {
+    expect(
+      toTemplateCardViewModel({ ...memories, imageRequirement: { maxItems: 1, minItems: 1 } })
+        .photoRequirement,
+    ).toBe("1 ảnh");
+  });
+
+  it("keeps the gradient visual without a thumbnail or while the template is unavailable", () => {
+    const { thumbnailUrl: _thumbnailUrl, ...withoutThumbnail } = memories;
+
+    expect(toTemplateCardViewModel(withoutThumbnail).thumbnail).toBeNull();
+    expect(toTemplateCardViewModel({ ...memories, available: false })).toMatchObject({
+      comingSoon: true,
+      thumbnail: null,
+    });
+  });
 });

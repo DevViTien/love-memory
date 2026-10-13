@@ -12,9 +12,18 @@ import {
   readHtmlTemplateFolder,
   readLoveGiftBootstrap,
 } from "../apps/web/src/modules/templates/infrastructure/html-template-folder";
-import { seedBundledHtmlTemplates } from "../apps/web/src/modules/templates/infrastructure/seed-html-templates";
-import { seedTemplateReleases } from "../apps/web/src/modules/templates/infrastructure/seed-template-catalog";
-import { seedTemplateRelease } from "../apps/web/src/modules/templates/infrastructure/template-release-seed";
+import {
+  BUNDLED_HTML_FIRST_SORT_ORDER,
+  seedBundledHtmlTemplates,
+} from "../apps/web/src/modules/templates/infrastructure/seed-html-templates";
+import {
+  RETIRED_SEED_TEMPLATES,
+  seedTemplateReleases,
+} from "../apps/web/src/modules/templates/infrastructure/seed-template-catalog";
+import {
+  retireSeedTemplate,
+  seedTemplateRelease,
+} from "../apps/web/src/modules/templates/infrastructure/template-release-seed";
 
 async function seedTemplates(): Promise<void> {
   const database = await getDatabase();
@@ -31,6 +40,10 @@ async function seedTemplates(): Promise<void> {
   for (const [sortOrder, release] of seedTemplateReleases.entries()) {
     await seedTemplateRelease(collections, release, sortOrder, now);
   }
+  // The sdk-era placeholders `our-timeline` and `midnight-wish` are retired where they exist.
+  for (const retired of RETIRED_SEED_TEMPLATES) {
+    await retireSeedTemplate(collections, retired, now);
+  }
 
   // The bundled html templates (templates-html/), imported published into MongoDB and object
   // storage like `pnpm template:import`; the storage driver must be configured.
@@ -39,7 +52,7 @@ async function seedTemplates(): Promise<void> {
     createOperatorHtmlTemplateImporter(),
     listBundledHtmlTemplateFolders(process.cwd()),
     (folder) => readHtmlTemplateFolder(folder, bootstrap),
-    seedTemplateReleases.length,
+    BUNDLED_HTML_FIRST_SORT_ORDER,
   );
   for (const summary of summaries) process.stdout.write(`${JSON.stringify(summary)}\n`);
 }

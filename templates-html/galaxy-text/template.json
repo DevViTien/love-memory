@@ -1,0 +1,89 @@
+{
+  "kind": "html",
+  "id": "galaxy-text",
+  "version": "1.0.0",
+  "status": "published",
+  "meta": {
+    "name": "Thông điệp giữa ngân hà",
+    "description": "Chạm trái tim để bay vào ngân hà: lời nhắn lớn lướt qua giữa muôn dòng chữ nhỏ, tim và ảnh trôi lấp lánh. Hợp với một lời cầu hôn như “Đồng ý làm vợ anh nhé”.",
+    "estimatedDurationSec": 50,
+    "moods": ["dreamy", "romantic"],
+    "occasions": ["proposal", "confession", "anniversary", "valentine"]
+  },
+  "capabilities": ["canvas2d", "dom", "svg"],
+  "budgets": { "initialJsKbGzip": 16, "initialMediaKb": 160, "maxTextureMb": 16 },
+  "fields": [
+    {
+      "id": "gate-title",
+      "label": "Lời mở đầu",
+      "helpText": "Hiện trên màn hình chờ trước khi chạm. Để trống sẽ dùng: Có điều này anh muốn nói…",
+      "type": "shortText",
+      "maxLength": 60,
+      "path": "gateTitle"
+    },
+    {
+      "id": "gate-hint",
+      "label": "Lời gợi ý chạm",
+      "helpText": "Để trống sẽ dùng: Chạm vào trái tim nhé",
+      "type": "shortText",
+      "maxLength": 40,
+      "path": "gateHint"
+    },
+    {
+      "id": "hero-texts",
+      "label": "Lời nhắn lớn",
+      "helpText": "Mỗi dòng là một câu chữ lớn bay qua màn hình, lần lượt. Dùng dấu | để xuống dòng và ♡ để vẽ một trái tim.",
+      "type": "textList",
+      "itemMaxLength": 30,
+      "minItems": 1,
+      "maxItems": 4,
+      "path": "heroTexts",
+      "required": true
+    },
+    {
+      "id": "texts",
+      "label": "Những dòng chữ nhỏ",
+      "helpText": "Mỗi dòng một câu ngắn, trôi khắp không gian. Từ 3 đến 16 dòng.",
+      "type": "textList",
+      "itemMaxLength": 40,
+      "minItems": 3,
+      "maxItems": 16,
+      "path": "texts",
+      "required": true
+    },
+    {
+      "id": "photos",
+      "label": "Ảnh bay cùng chữ",
+      "helpText": "Không bắt buộc, tối đa 6 ảnh.",
+      "type": "imageList",
+      "aspectRatio": "4:5",
+      "minItems": 0,
+      "maxItems": 6,
+      "path": "photos"
+    },
+    {
+      "id": "text-color",
+      "label": "Màu chữ",
+      "type": "color",
+      "path": "colors.text"
+    },
+    {
+      "id": "glow-color",
+      "label": "Màu quầng sáng",
+      "type": "color",
+      "path": "colors.glow"
+    },
+    {
+      "id": "audio",
+      "label": "Nhạc nền",
+      "type": "audio",
+      "source": "licensedLibrary"
+    }
+  ],
+  "steps": [
+    { "id": "opening", "label": "Mở đầu", "fieldIds": ["gate-title", "gate-hint"] },
+    { "id": "message", "label": "Lời nhắn", "fieldIds": ["hero-texts", "texts"] },
+    { "id": "photos", "label": "Ảnh và màu", "fieldIds": ["photos", "text-color", "glow-color"] },
+    { "id": "music", "label": "Nhạc", "fieldIds": ["audio"] }
+  ]
+}

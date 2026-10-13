@@ -1,0 +1,187 @@
+{
+  "kind": "html",
+  "id": "memories",
+  "version": "1.0.0",
+  "status": "published",
+  "meta": {
+    "name": "Kỷ niệm của chúng mình",
+    "description": "Một cuốn sổ nhỏ của hai bạn: đếm ngày yêu, album ảnh có chú thích, lá thư trong phong bì và ván caro “nhường” nhau, có thể khóa vui bằng một mật mã.",
+    "estimatedDurationSec": 120,
+    "moods": ["romantic", "playful", "nostalgic"],
+    "occasions": ["anniversary", "valentine", "birthday"]
+  },
+  "capabilities": ["dom", "svg"],
+  "budgets": { "initialJsKbGzip": 20, "initialMediaKb": 260, "maxTextureMb": 8 },
+  "fields": [
+    {
+      "id": "start-date",
+      "label": "Ngày bắt đầu yêu",
+      "type": "date",
+      "path": "startDate",
+      "required": true
+    },
+    {
+      "id": "her-name",
+      "label": "Tên (hoặc biệt danh) của cô ấy",
+      "type": "shortText",
+      "maxLength": 20,
+      "path": "herName",
+      "required": true
+    },
+    {
+      "id": "avatar-her",
+      "label": "Ảnh đại diện của cô ấy",
+      "helpText": "Không có ảnh thì hiện chữ cái đầu của tên.",
+      "type": "image",
+      "aspectRatio": "1:1",
+      "path": "avatarHer"
+    },
+    {
+      "id": "him-name",
+      "label": "Tên (hoặc biệt danh) của anh ấy",
+      "type": "shortText",
+      "maxLength": 20,
+      "path": "himName",
+      "required": true
+    },
+    {
+      "id": "avatar-him",
+      "label": "Ảnh đại diện của anh ấy",
+      "helpText": "Không có ảnh thì hiện chữ cái đầu của tên.",
+      "type": "image",
+      "aspectRatio": "1:1",
+      "path": "avatarHim"
+    },
+    {
+      "id": "intro-title",
+      "label": "Chữ trên trái tim mở đầu",
+      "helpText": "Để trống sẽ dùng: Happy Anniversary",
+      "type": "shortText",
+      "maxLength": 24,
+      "path": "introTitle"
+    },
+    {
+      "id": "passcode",
+      "label": "Mật mã vui (4 số)",
+      "helpText": "Không bắt buộc. Người nhận nhập đúng 4 số này mới vào được, chỉ để vui chứ không bảo vệ món quà. Để trống thì không khóa.",
+      "type": "passcode",
+      "length": 4,
+      "path": "passcode"
+    },
+    {
+      "id": "pass-hint",
+      "label": "Gợi ý mật mã",
+      "helpText": "Ví dụ: Mật mã là ngày mình yêu nhau nha",
+      "type": "shortText",
+      "maxLength": 60,
+      "path": "passHint"
+    },
+    {
+      "id": "couple-title",
+      "label": "Tiêu đề màn hình mật mã",
+      "helpText": "Ví dụ: MINH & THƯ. Để trống sẽ dùng: ANH & EM",
+      "type": "shortText",
+      "maxLength": 30,
+      "path": "coupleTitle"
+    },
+    {
+      "id": "gallery",
+      "label": "Album kỷ niệm",
+      "helpText": "Từ 1 đến 12 ảnh, mỗi ảnh một dòng chú thích ngắn.",
+      "type": "captionedImageList",
+      "aspectRatio": "4:5",
+      "captionMaxLength": 80,
+      "minItems": 1,
+      "maxItems": 12,
+      "path": "gallery",
+      "required": true
+    },
+    {
+      "id": "popup-photo",
+      "label": "Ảnh khi trái tim đầy",
+      "helpText": "Không có ảnh thì dùng ảnh đầu tiên của album.",
+      "type": "image",
+      "aspectRatio": "20:17",
+      "path": "popup.photo"
+    },
+    {
+      "id": "popup-caption",
+      "label": "Lời nhắn dưới ảnh",
+      "type": "shortText",
+      "maxLength": 160,
+      "path": "popup.caption"
+    },
+    {
+      "id": "letter-card-label",
+      "label": "Chữ trên phong bì thư",
+      "helpText": "Ví dụ: Thư gửi Bé iu ❤️",
+      "type": "shortText",
+      "maxLength": 30,
+      "path": "letter.cardLabel"
+    },
+    {
+      "id": "letter-title",
+      "label": "Tiêu đề lá thư",
+      "type": "shortText",
+      "maxLength": 40,
+      "path": "letter.title"
+    },
+    {
+      "id": "letter-paragraphs",
+      "label": "Nội dung lá thư",
+      "helpText": "Mỗi dòng là một đoạn thư, tối đa 10 đoạn.",
+      "type": "textList",
+      "itemMaxLength": 500,
+      "minItems": 1,
+      "maxItems": 10,
+      "path": "letter.paragraphs",
+      "required": true
+    },
+    {
+      "id": "letter-closing",
+      "label": "Lời kết",
+      "helpText": "Ví dụ: Thương em rất nhiều,",
+      "type": "shortText",
+      "maxLength": 40,
+      "path": "letter.closing"
+    },
+    {
+      "id": "letter-signature",
+      "label": "Chữ ký",
+      "type": "shortText",
+      "maxLength": 30,
+      "path": "letter.signature"
+    },
+    {
+      "id": "audio",
+      "label": "Nhạc nền",
+      "type": "audio",
+      "source": "licensedLibrary"
+    }
+  ],
+  "steps": [
+    {
+      "id": "couple",
+      "label": "Hai bạn",
+      "fieldIds": ["start-date", "her-name", "avatar-her", "him-name", "avatar-him", "intro-title"]
+    },
+    { "id": "lock", "label": "Mật mã", "fieldIds": ["passcode", "pass-hint", "couple-title"] },
+    {
+      "id": "memories",
+      "label": "Kỷ niệm",
+      "fieldIds": ["gallery", "popup-photo", "popup-caption"]
+    },
+    {
+      "id": "letter",
+      "label": "Lá thư",
+      "fieldIds": [
+        "letter-card-label",
+        "letter-title",
+        "letter-paragraphs",
+        "letter-closing",
+        "letter-signature"
+      ]
+    },
+    { "id": "music", "label": "Nhạc", "fieldIds": ["audio"] }
+  ]
+}

@@ -60,6 +60,20 @@ const memoryBox_1_0_0 = {
 const memoryBox_1_1_0 = MEMORY_BOX_RELEASES.find((release) => release.version === "1.1.0");
 if (!memoryBox_1_1_0) throw new Error("The committed memory-box@1.1.0 release is missing.");
 
+/**
+ * Templates an earlier seed published as catalog placeholders (manifests without an artifact,
+ * `Sắp ra mắt`), replaced by the `html` templates of the pivot (`template-pivot-plan.md` T9). The
+ * seed no longer creates them and retires them, with these versions, where they are stored, so
+ * drafts that pin them stay editable while the catalog and new drafts leave them out.
+ */
+export const RETIRED_SEED_TEMPLATES: readonly Readonly<{
+  templateId: string;
+  versions: readonly string[];
+}>[] = Object.freeze([
+  { templateId: "our-timeline", versions: ["1.0.0"] },
+  { templateId: "midnight-wish", versions: ["1.0.0"] },
+]);
+
 /** Seeded launch templates in `sortOrder`, each with every stored version. */
 export const seedTemplateReleases: readonly SeedTemplateRelease[] = [
   {
@@ -82,105 +96,6 @@ export const seedTemplateReleases: readonly SeedTemplateRelease[] = [
       {
         manifest: memoryBox_1_1_0.manifest,
         previewFixture: memoryBox_1_1_0.previewFixture,
-        status: "published",
-      },
-    ],
-  },
-  {
-    currentVersion: "1.0.0",
-    templateId: "our-timeline",
-    versions: [
-      {
-        manifest: {
-          budgets: { initialJsKbGzip: 100, initialMediaKb: 650, maxTextureMb: 24 },
-          capabilities: ["audio", "dom", "svg"],
-          engineVersion: "1.0.0",
-          entry: "index.js",
-          fields: [
-            {
-              id: "title",
-              label: "Tên câu chuyện",
-              maxLength: 100,
-              required: true,
-              type: "shortText",
-            },
-            {
-              aspectRatio: "4:5",
-              id: "milestones",
-              label: "Các cột mốc",
-              maxItems: 7,
-              minItems: 4,
-              required: true,
-              type: "imageList",
-            },
-          ],
-          id: "our-timeline",
-          meta: {
-            description: "Kể lại hành trình qua những cột mốc nhỏ chỉ hai người mới nhớ.",
-            estimatedDurationSec: 90,
-            moods: ["nostalgic", "warm"],
-            name: "Dòng thời gian hai đứa",
-            occasions: ["anniversary", "long-distance"],
-          },
-          previewFixture: "fixtures/demo.json",
-          status: "published",
-          version: "1.0.0",
-        },
-        previewFixture: {
-          milestones: [
-            "550e8400-e29b-41d4-a716-446655440101",
-            "550e8400-e29b-41d4-a716-446655440102",
-            "550e8400-e29b-41d4-a716-446655440103",
-            "550e8400-e29b-41d4-a716-446655440104",
-          ],
-          title: "Hành trình của hai đứa",
-        },
-        status: "published",
-      },
-    ],
-  },
-  {
-    currentVersion: "1.0.0",
-    templateId: "midnight-wish",
-    versions: [
-      {
-        manifest: {
-          budgets: { initialJsKbGzip: 135, initialMediaKb: 500, maxTextureMb: 32 },
-          capabilities: ["audio", "canvas2d", "dom"],
-          engineVersion: "1.0.0",
-          entry: "index.js",
-          fields: [
-            {
-              id: "receiver-name",
-              label: "Tên người nhận",
-              maxLength: 40,
-              required: true,
-              type: "shortText",
-            },
-            {
-              id: "wishes",
-              label: "Những lời nhắn trên bầu trời",
-              maxLength: 900,
-              required: true,
-              type: "longText",
-            },
-          ],
-          id: "midnight-wish",
-          meta: {
-            description: "Chạm những vì sao để mở lời nhắn và kết thúc bằng một bầu trời pháo hoa.",
-            estimatedDurationSec: 60,
-            moods: ["dreamy", "romantic"],
-            name: "Bầu trời lời nhắn",
-            occasions: ["confession", "birthday"],
-          },
-          previewFixture: "fixtures/demo.json",
-          status: "published",
-          version: "1.0.0",
-        },
-        previewFixture: {
-          "receiver-name": "Người thương",
-          wishes: "Mỗi vì sao là một điều mình trân trọng về chúng ta.",
-        },
         status: "published",
       },
     ],
@@ -232,7 +147,9 @@ export const seedTemplateVersionManifests: readonly TemplateManifest[] = Object.
   ),
 );
 
-const templates = Object.freeze(seedTemplateCurrentManifests.map(summarizeTemplateManifest));
+const templates = Object.freeze(
+  seedTemplateCurrentManifests.map((manifest) => summarizeTemplateManifest(manifest)),
+);
 
 export const seedTemplateCatalog: TemplateCatalog = {
   findPublishedById(id) {

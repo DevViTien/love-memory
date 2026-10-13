@@ -1,0 +1,667 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Thư tay</title>
+<style>
+  /* Dancing Script and Patrick Hand (SIL Open Font License 1.1, see OFL-*.txt), bundled:
+     templates load no external URL. */
+  @font-face {
+    font-family: "Dancing Script";
+    font-style: normal;
+    font-weight: 500 700;
+    font-display: swap;
+    src: url(assets/fonts/dancing-script-vietnamese.woff2) format("woff2");
+    unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+  }
+  @font-face {
+    font-family: "Dancing Script";
+    font-style: normal;
+    font-weight: 500 700;
+    font-display: swap;
+    src: url(assets/fonts/dancing-script-latin-ext.woff2) format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
+  @font-face {
+    font-family: "Dancing Script";
+    font-style: normal;
+    font-weight: 500 700;
+    font-display: swap;
+    src: url(assets/fonts/dancing-script-latin.woff2) format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  @font-face {
+    font-family: "Patrick Hand";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url(assets/fonts/patrick-hand-vietnamese.woff2) format("woff2");
+    unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+  }
+  @font-face {
+    font-family: "Patrick Hand";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url(assets/fonts/patrick-hand-latin-ext.woff2) format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
+  @font-face {
+    font-family: "Patrick Hand";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url(assets/fonts/patrick-hand-latin.woff2) format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  :root {
+    --pink-back: #f4ccd4;
+    --pink-front: #f8dbe0;
+    --pink-flap: #f6d2d9;
+    --pink-line: #ecbcc6;
+    --rose: #e8697f;
+    --ink: #2b2326;
+    --script: #c4787c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: #fff;
+    font-family: "Patrick Hand", "Comic Sans MS", cursive;
+    color: var(--ink);
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  #stage {
+    position: fixed; inset: 0;
+    height: 100dvh;
+    background: radial-gradient(ellipse 75% 60% at 50% 45%, #fff 0%, #fff 42%, #ece8ea 72%, #bdb7ba 100%);
+    overflow: hidden;
+  }
+  section { position: absolute; inset: 0; display: grid; place-items: center; }
+
+  /* ---------------- Scene 1: phong bì ---------------- */
+  #envScene { transition: opacity .6s ease, transform .7s cubic-bezier(.5,0,.3,1); }
+  #envScene.leave { opacity: 0; transform: scale(1.35); pointer-events: none; }
+
+  .envelope {
+    --W: min(66vw, 300px);
+    position: relative;
+    width: var(--W);
+    height: calc(var(--W) * .6);
+    margin-top: -6dvh;
+    cursor: pointer;
+    transform: translateY(70dvh);
+    animation: envIn 1s cubic-bezier(.2,.8,.25,1) .2s forwards;
+  }
+  @keyframes envIn { to { transform: translateY(0); } }
+
+  .env-back, .env-front, .flap { position: absolute; left: 0; width: 100%; }
+  .env-back {
+    top: 0; height: 100%;
+    background: var(--pink-back);
+    border-radius: 3px;
+    z-index: 0;
+  }
+  .env-front {
+    top: 0; height: 100%;
+    background: var(--pink-front);
+    clip-path: polygon(0 0, 50% 55%, 100% 0, 100% 100%, 0 100%);
+    z-index: 3;
+    box-shadow: 0 10px 24px rgba(160, 90, 105, .18);
+  }
+  .env-front svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .envelope::after { /* bóng đổ dưới phong bì */
+    content: ""; position: absolute; left: 4%; right: 4%; bottom: -10px; height: 14px;
+    background: radial-gradient(ellipse, rgba(120,70,80,.18), transparent 70%);
+    z-index: -1;
+  }
+  .flap {
+    top: 0; height: 55%;
+    background: var(--pink-flap);
+    clip-path: polygon(0 0, 100% 0, 50% 100%);
+    transform-origin: 50% 0;
+    z-index: 5;
+    transition: transform .65s cubic-bezier(.55,0,.35,1), opacity .5s ease, filter .65s;
+    filter: drop-shadow(0 2px 2px rgba(150,80,95,.15));
+  }
+  .seal {
+    position: absolute; left: 50%; top: 50%;
+    width: calc(var(--W) * .075); aspect-ratio: 1;
+    transform: translate(-50%, -50%);
+    z-index: 6;
+    transition: top .65s cubic-bezier(.55,0,.35,1), opacity .5s ease;
+    animation: beat 1.4s ease-in-out infinite;
+  }
+  .seal svg { width: 100%; height: 100%; display: block; }
+  @keyframes beat { 0%,100% { scale: 1; } 15% { scale: 1.25; } 30% { scale: 1; } 45% { scale: 1.15; } }
+
+  .card {
+    position: absolute; left: 6%; top: 4%;
+    width: 88%; height: 92%;
+    background: #fffdfc;
+    border-radius: 2px;
+    box-shadow: 0 -2px 10px rgba(150, 90, 100, .12);
+    z-index: 2;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 6% 4% 0;
+    font-family: "Dancing Script", cursive;
+    font-weight: 500;
+    color: var(--script);
+    font-size: calc(var(--W) * .085);
+    line-height: 1.12;
+    text-align: center;
+    overflow-wrap: anywhere;
+    transition: transform 1s cubic-bezier(.3,.7,.3,1);
+  }
+
+  .flower {
+    position: absolute; top: -62%;
+    width: 36%;
+    transform-origin: 50% 85%;
+    transform: scale(0) translateY(30%);
+    opacity: 0;
+    transition: transform .9s cubic-bezier(.3,1.5,.5,1), opacity .4s ease;
+  }
+  .flower svg { width: 100%; display: block; overflow: visible; }
+  .f-left  { left: -13%; z-index: 1; }
+  .f-right { right: -15%; z-index: 2; }
+
+  .hint {
+    position: absolute; left: 0; right: 0; bottom: 18dvh;
+    text-align: center;
+    font-size: 18px; color: #b9737d; letter-spacing: .3px;
+    opacity: 0;
+    animation: hintIn .6s ease 1.3s forwards, pulse 1.6s ease-in-out 1.9s infinite;
+    transition: opacity .3s;
+  }
+  @keyframes hintIn { to { opacity: 1; } }
+  @keyframes pulse { 50% { opacity: .45; } }
+
+  /* trạng thái mở */
+  .envelope.open { cursor: default; }
+  .envelope.open .seal { top: -50%; animation: none; }
+  .envelope.open .flap { transform: scaleY(-1); filter: brightness(1.02); }
+  .envelope.behind .flap, .envelope.behind .seal { z-index: 1; }
+  .envelope.rise1 .card { transform: translateY(-26%); }
+  .envelope.rise2 .card { transform: translateY(-66%); }
+  .envelope.rise2 .flap, .envelope.rise2 .seal { opacity: 0; transition-delay: .25s; }
+  .envelope.bloom .flower { opacity: 1; }
+  .envelope.bloom .f-left  { transform: scale(1) rotate(-16deg); }
+  .envelope.bloom .f-right { transform: scale(1) rotate(14deg); transition-delay: .12s; }
+
+  /* ---------------- Scene 2: lá thư ---------------- */
+  #letterScene { opacity: 0; pointer-events: none; transform: scale(.86); transition: opacity .7s ease, transform .8s cubic-bezier(.2,.8,.25,1); }
+  #letterScene.show { opacity: 1; pointer-events: auto; transform: scale(1); }
+
+  .letter {
+    --L: min(94vw, 440px, 68dvh);
+    position: relative;
+    width: var(--L);
+    height: calc(var(--L) * 1.32);
+    margin-top: -8dvh;
+  }
+  .l-back {
+    position: absolute; inset: 0 0 0 0;
+    background: linear-gradient(#f7d5dc, #f5cfd6);
+    border: 1px solid #f0c3cc;
+    border-radius: 3px;
+    box-shadow: 0 14px 34px rgba(150, 90, 105, .16);
+  }
+  .paper {
+    position: absolute; left: 5%; right: 5%; top: 4%;
+    height: 52%;
+    background: #fffefd;
+    border-radius: 2px;
+    box-shadow: 0 2px 8px rgba(150, 90, 100, .12);
+    padding: 5% 2% 0 6%;
+  }
+  .paper-scroll {
+    height: 100%;
+    overflow-y: auto;
+    padding-right: 4%;
+    padding-bottom: 30%;
+    font-size: calc(var(--L) * .041);
+    line-height: 1.5;
+    scrollbar-width: none;
+    overflow-wrap: anywhere;
+    -webkit-mask-image: linear-gradient(#000 82%, transparent);
+            mask-image: linear-gradient(#000 82%, transparent);
+    user-select: text;
+  }
+  .paper-scroll::-webkit-scrollbar { display: none; }
+  .paper-scroll p { margin: 0; }
+  .l-front {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: 50%;
+    background: linear-gradient(#f9dde2, #f7d6dc);
+    clip-path: polygon(0 0, 50% 22%, 100% 0, 100% 100%, 0 100%);
+    border-radius: 0 0 3px 3px;
+  }
+  .l-front svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  .bouquet {
+    position: absolute; left: -4%; bottom: 0%;
+    width: 50%;
+    opacity: 0; transform: translateY(12%) rotate(-4deg);
+    transition: opacity .8s ease .35s, transform 1s cubic-bezier(.2,.8,.25,1) .35s;
+  }
+  .bouquet svg { width: 100%; display: block; overflow: visible; }
+
+  .polaroid {
+    position: absolute; right: -3%; top: 51%;
+    width: 46%;
+    background: #fff;
+    padding: 4% 4% 13%;
+    box-shadow: 0 8px 18px rgba(60, 30, 40, .22), 0 1px 2px rgba(0,0,0,.12);
+    transform: rotate(16deg) translateY(-25%);
+    opacity: 0;
+    transition: opacity .6s ease .55s, transform 1s cubic-bezier(.25,1.4,.5,1) .55s;
+  }
+  .polaroid .photo {
+    width: 100%; aspect-ratio: 1 / .95;
+    background: linear-gradient(135deg, #f9e2e6, #f2c1cb);
+    overflow: hidden;
+    display: grid; place-items: center;
+    color: #b06b78; font-size: calc(var(--L) * .032); text-align: center; line-height: 1.3;
+  }
+  .polaroid img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  /* trái tim trên polaroid: bấm để thả tim */
+  .like {
+    position: absolute; right: 4%; bottom: 1%;
+    width: 15%; aspect-ratio: 1; padding: 3%;
+    border: 0; background: none; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .like svg { width: 100%; height: 100%; display: block; overflow: visible; }
+  .like path { fill: transparent; stroke: #333; transition: fill .25s ease, stroke .25s ease; }
+  .like.liked path { fill: #e8344e; stroke: #c81f3a; }
+  .like.nudge { animation: likeHint 2.4s ease-in-out infinite; }
+  .like.pop { animation: likePop .45s cubic-bezier(.3,1.6,.5,1); }
+  .like:focus-visible { outline: 2px solid #e8344e; outline-offset: 2px; border-radius: 50%; }
+  @keyframes likeHint { 0%, 70%, 100% { scale: 1; } 78% { scale: 1.3; } 86% { scale: 1; } 92% { scale: 1.18; } }
+  @keyframes likePop { 0% { scale: .7; } 50% { scale: 1.45; } 100% { scale: 1; } }
+
+  .fx-layer { position: fixed; inset: 0; pointer-events: none; z-index: 40; overflow: hidden; }
+  .fx { position: absolute; left: 0; top: 0; line-height: 1; will-change: transform, opacity; }
+  .fx-ring {
+    position: absolute; left: 0; top: 0;
+    width: 60px; height: 60px; margin: -30px 0 0 -30px;
+    border-radius: 50%; border: 2px solid #f06a85;
+  }
+
+  .deco { position: absolute; width: 13%; opacity: .55; pointer-events: none; }
+  .deco svg { width: 100%; display: block; }
+  .deco.tr { right: -5%; top: -5%; transform: rotate(25deg); }
+  .deco.ml { left: -6%; top: 34%; transform: rotate(-30deg); width: 10%; }
+
+  #letterScene.show .bouquet { opacity: 1; transform: none; }
+  #letterScene.show .polaroid { opacity: 1; transform: rotate(7deg); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; transition-delay: 0s !important; }
+  }
+  /* The gift page's reduced-motion request (LoveGift sets it on <html>). */
+  html[data-reduced-motion="true"] *, html[data-reduced-motion="true"] *::before, html[data-reduced-motion="true"] *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; transition-delay: 0s !important; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <section id="envScene">
+    <div class="envelope" id="env" role="button" tabindex="0" aria-label="Mở thư">
+      <div class="env-back"></div>
+      <div class="flower f-left" data-flower="11"></div>
+      <div class="card" id="cardTitle"></div>
+      <div class="flower f-right" data-flower="27"></div>
+      <div class="env-front">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path d="M0 0 L50 55 L100 0 M0 100 L44 60 M100 100 L56 60" fill="none" stroke="var(--pink-line)" stroke-width=".6" vector-effect="non-scaling-stroke"/>
+        </svg>
+      </div>
+      <div class="flap"></div>
+      <div class="seal"><svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.5 6.7 4.5c2.2 0 3.6 1.3 4.3 2.6.7-1.3 2.1-2.6 4.3-2.6 3.7 0 5.8 3.9 4.3 7.3C19.5 16.4 12 21 12 21z" fill="var(--rose)"/></svg></div>
+    </div>
+    <p class="hint" id="hint">Chạm vào phong bì để mở 💌</p>
+  </section>
+
+  <section id="letterScene" aria-hidden="true">
+    <div class="letter">
+      <div class="l-back"></div>
+      <div class="deco tr" data-mini="5"></div>
+      <div class="deco ml" data-mini="9"></div>
+      <div class="paper"><div class="paper-scroll" id="scroll"></div></div>
+      <div class="l-front">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path d="M0 0 L50 22 L100 0 M0 100 L40 40 M100 100 L60 40" fill="none" stroke="#efc5cd" stroke-width=".8" vector-effect="non-scaling-stroke"/>
+        </svg>
+      </div>
+      <div class="bouquet" id="bouquet"></div>
+      <figure class="polaroid">
+        <div class="photo" id="photo"></div>
+        <button class="like nudge" id="like" type="button" aria-label="Thả tim" aria-pressed="false">
+          <svg viewBox="0 0 24 24"><path d="M12 20c-4-3-8-6-8-10 0-2.5 2-4.5 4.3-4.2C10 6 11.3 7.2 12 8.7c.6-1.6 2-3 3.8-3 2.4 0 4.3 2.2 4 4.7-.4 3.6-4.2 6.3-7.8 9.6" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </figure>
+    </div>
+  </section>
+</div>
+
+<!-- Cấu hình mặc định. LoveMemory ghép giá trị của món quà vào đây (template.json → path);
+     nhạc do trang món quà phát. autoOpenMs: tự mở sau x ms nếu không chạm (0 = chỉ mở khi chạm);
+     scrollSpeed: tốc độ tự cuộn lá thư (px/giây). -->
+<script type="application/json" id="gift-config">
+{
+  "cardTitle": ["Gửi", "người thương", "♡"],
+  "photo": "assets/photo.jpg",
+  "autoOpenMs": 3500,
+  "scrollSpeed": 20,
+  "letter": [
+    "Em yêu của anh,",
+    "Hôm nay anh muốn dành vài dòng thật lòng để gửi tới em – người con gái anh thương nhất.",
+    "Anh không giỏi nói những lời hoa mỹ, nhưng anh luôn biết mình may mắn thế nào khi có em bên cạnh. Từ ngày có em, những điều bình thường nhất cũng trở nên đáng nhớ: một bữa cơm, một buổi chiều đi dạo, hay chỉ là tin nhắn chúc ngủ ngon mỗi tối.",
+    "Cảm ơn em vì đã luôn kiên nhẫn, dịu dàng và bao dung với anh, kể cả những lúc anh vụng về, vô tâm. Anh biết có những mệt mỏi em giữ lại cho riêng mình để anh được yên lòng.",
+    "Anh muốn nói lại điều anh vẫn nghĩ mỗi ngày: anh thương em, và anh tự hào vì được đi cùng em trên quãng đường này.",
+    "Anh hứa sẽ lắng nghe em nhiều hơn, quan tâm em nhiều hơn, để em luôn cảm thấy được yêu thương và không bao giờ thấy cô đơn.",
+    "Chúc em luôn xinh đẹp, bình an và mãi giữ nụ cười rạng rỡ mà anh yêu nhất.",
+    "Anh yêu em rất nhiều! ❤"
+  ]
+}
+</script>
+
+<script>
+const CONFIG = LoveGift.config();
+
+// ---------- Hẹn giờ theo trang món quà ----------
+// Các hẹn giờ của mẫu dừng khi trang món quà bị ẩn ("lovegift:pause") và chạy nốt phần còn lại khi
+// "lovegift:play": chuỗi hiệu ứng không chạy tiếp, cũng không kết thúc, lúc không ai xem.
+const clock = (() => {
+  const pending = new Set();
+  let paused = false;
+  function arm(timer) {
+    timer.armedAt = performance.now();
+    timer.id = setTimeout(() => { pending.delete(timer); timer.fn(); }, timer.left);
+  }
+  addEventListener("lovegift:pause", () => {
+    if (paused) return;
+    paused = true;
+    pending.forEach(timer => {
+      clearTimeout(timer.id);
+      timer.left = Math.max(0, timer.left - (performance.now() - timer.armedAt));
+    });
+  });
+  addEventListener("lovegift:play", () => {
+    if (!paused) return;
+    paused = false;
+    pending.forEach(arm);
+  });
+  function later(fn, ms) {
+    const timer = { armedAt: 0, fn, id: 0, left: Math.max(0, ms) };
+    pending.add(timer);
+    if (!paused) arm(timer);
+    return timer;
+  }
+  return {
+    isPaused: () => paused,
+    later,
+    wait: ms => new Promise(resolve => later(resolve, ms)),
+  };
+})();
+
+// ---------- Vẽ hoa cẩm chướng bằng SVG ----------
+function rng(seed) { let s = seed % 2147483647 || 1; return () => (s = s * 16807 % 2147483647) / 2147483647; }
+
+// đường cong khép kín đi qua các điểm (Catmull-Rom -> Bezier)
+function smoothPath(pts) {
+  const n = pts.length, f = v => v.toFixed(2);
+  let d = `M${f(pts[0][0])} ${f(pts[0][1])}`;
+  for (let i = 0; i < n; i++) {
+    const p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n], p3 = pts[(i + 2) % n];
+    d += `C${f(p1[0] + (p2[0] - p0[0]) / 6)} ${f(p1[1] + (p2[1] - p0[1]) / 6)} ${f(p2[0] - (p3[0] - p1[0]) / 6)} ${f(p2[1] - (p3[1] - p1[1]) / 6)} ${f(p2[0])} ${f(p2[1])}`;
+  }
+  return d + "Z";
+}
+
+// mép cánh hoa lượn sóng
+function ruffle(cx, cy, rx, ry, n, amp, r) {
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const a = i / n * Math.PI * 2 + r() * .08;
+    const k = i % 2 ? 1 + r() * .04 : 1 - amp * (.55 + .45 * r());
+    pts.push([cx + Math.cos(a) * rx * k, cy + Math.sin(a) * ry * k]);
+  }
+  return smoothPath(pts);
+}
+
+// đầu hoa, tâm (0,0), bán kính ~30
+function flowerHead(seed) {
+  const r = rng(seed);
+  const layers = [
+    [0, -2, 33, 26, 40, .2, "url(#gBack)"],
+    [-2, 3, 30, 23, 36, .22, "url(#gMid)"],
+    [3, -7, 21, 14, 28, .26, "#f6b9c5"],
+    [-1, 9, 25, 15, 32, .24, "url(#gFront)"],
+  ];
+  let g = layers.map(([x, y, rx, ry, n, a, fill]) =>
+    `<path d="${ruffle(x, y, rx, ry, n, a, r)}" fill="${fill}" stroke="#e58fa2" stroke-width=".5" stroke-opacity=".6"/>`).join("");
+  // nếp gấp bên trong
+  for (let i = 0; i < 7; i++) {
+    const x = -16 + r() * 32, y = -8 + r() * 18, w = 5 + r() * 7;
+    g += `<path d="M${x - w} ${y} q${w} ${-3 - r() * 3} ${w * 2} 0" fill="none" stroke="#e07f95" stroke-width=".7" stroke-opacity=".55" stroke-linecap="round"/>`;
+  }
+  g += `<ellipse cx="-9" cy="-10" rx="12" ry="7" fill="#fff" opacity=".22"/>`;
+  return g;
+}
+
+function calyx() {
+  return `<path d="M-9 20 Q0 26 9 20 L5 40 Q0 43 -5 40Z" fill="#8fc27f" stroke="#6ea463" stroke-width=".6"/>
+          <path d="M-9 20 L-4 27 L0 21 L4 27 L9 20" fill="none" stroke="#6ea463" stroke-width=".6"/>`;
+}
+
+function leaf(x, y, len, w, angle) {
+  return `<g transform="translate(${x} ${y}) rotate(${angle})">
+    <path d="M0 0 Q${len * .45} ${-w} ${len} 0 Q${len * .5} ${w * .8} 0 0Z" fill="#86c172" stroke="#5f9d55" stroke-width=".6"/>
+    <path d="M2 0 Q${len * .5} ${-w * .15} ${len - 3} 0" fill="none" stroke="#5f9d55" stroke-width=".6" opacity=".7"/></g>`;
+}
+
+function singleFlower(seed) {
+  return `<svg viewBox="-40 -36 80 200">
+    <path d="M0 38 C 2 80, -3 120, 1 164" fill="none" stroke="#79b267" stroke-width="3.2" stroke-linecap="round"/>
+    ${leaf(0, 82, 34, 10, -38)}${leaf(0, 100, 30, 9, 205)}
+    ${calyx()}
+    <g>${flowerHead(seed)}</g></svg>`;
+}
+
+function bouquetSvg() {
+  return `<svg viewBox="0 0 200 250">
+    <g stroke="#79b267" stroke-width="3" fill="none" stroke-linecap="round">
+      <path d="M78 98 C 88 150, 96 185, 104 250"/>
+      <path d="M42 140 C 70 170, 92 195, 108 250"/>
+      <path d="M125 120 C 112 170, 106 200, 100 250"/>
+    </g>
+    ${leaf(86, 150, 52, 13, -55)}${leaf(92, 175, 48, 12, -20)}${leaf(80, 165, 44, 12, 200)}${leaf(110, 160, 40, 11, -80)}
+    <g transform="translate(125 112) scale(.55)">${calyx()}${flowerHead(51)}</g>
+    <g transform="translate(40 125) scale(.85) rotate(-10)">${calyx()}${flowerHead(73)}</g>
+    <g transform="translate(78 70) scale(1.15)">${calyx()}${flowerHead(19)}</g>
+    <g fill="#f5b3c1" stroke="#de8597" stroke-width="1.2" stroke-linejoin="round">
+      <path d="M100 196 C 70 168, 46 190, 62 204 C 72 212, 90 204, 100 198Z"/>
+      <path d="M102 196 C 132 166, 156 186, 142 202 C 132 212, 112 204, 102 198Z"/>
+      <path d="M99 200 C 92 222, 80 236, 62 248 L 74 250 C 90 236, 98 222, 101 204Z"/>
+      <path d="M103 200 C 112 222, 128 234, 146 242 L 140 250 C 122 238, 108 224, 101 204Z"/>
+      <ellipse cx="101" cy="199" rx="7" ry="6"/>
+    </g></svg>`;
+}
+
+function miniFlower(seed) {
+  return `<svg viewBox="-36 -36 72 72"><g>${flowerHead(seed)}</g></svg>`;
+}
+
+// Chỉ là hình vẽ cố định của mẫu: không có giá trị nào của món quà trong các chuỗi SVG này.
+const defs = `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <radialGradient id="gBack" cx=".45" cy=".35" r=".7"><stop offset="0" stop-color="#f4a9b9"/><stop offset="1" stop-color="#e88ea2"/></radialGradient>
+  <radialGradient id="gMid" cx=".4" cy=".3" r=".7"><stop offset="0" stop-color="#f9c8d1"/><stop offset="1" stop-color="#f1a3b4"/></radialGradient>
+  <radialGradient id="gFront" cx=".5" cy=".2" r=".8"><stop offset="0" stop-color="#fcd9df"/><stop offset="1" stop-color="#f3abbb"/></radialGradient>
+</defs></svg>`;
+document.body.insertAdjacentHTML("afterbegin", defs);
+
+document.querySelectorAll("[data-flower]").forEach(el => el.innerHTML = singleFlower(+el.dataset.flower));
+document.querySelectorAll("[data-mini]").forEach(el => el.innerHTML = miniFlower(+el.dataset.mini));
+document.getElementById("bouquet").innerHTML = bouquetSvg();
+
+// ---------- Nội dung (chỉ textContent) ----------
+const card = document.getElementById("cardTitle");
+CONFIG.cardTitle.forEach(t => { const d = document.createElement("div"); d.textContent = t; card.appendChild(d); });
+
+const scroller = document.getElementById("scroll");
+CONFIG.letter.forEach(t => { const p = document.createElement("p"); p.textContent = t; scroller.appendChild(p); });
+
+const photo = document.getElementById("photo");
+function photoPlaceholder() {
+  photo.textContent = "";
+  const span = document.createElement("span");
+  span.textContent = "📷 Chưa có ảnh";
+  photo.appendChild(span);
+}
+if (CONFIG.photo) {
+  const img = new Image();
+  img.alt = "";
+  img.onload = () => { photo.textContent = ""; photo.appendChild(img); };
+  img.onerror = photoPlaceholder;
+  img.src = CONFIG.photo;
+} else photoPlaceholder();
+
+// ---------- Dòng thời gian ----------
+const env = document.getElementById("env");
+const envScene = document.getElementById("envScene");
+const letterScene = document.getElementById("letterScene");
+const hint = document.getElementById("hint");
+const reduceMotion = LoveGift.reducedMotion() || matchMedia("(prefers-reduced-motion: reduce)").matches;
+const wait = ms => clock.wait(reduceMotion ? Math.min(ms, 120) : ms);
+let opened = false;
+
+async function openEnvelope() {
+  if (opened) return;
+  opened = true;
+  LoveGift.scene("envelope-open");
+  hint.style.animation = "none"; hint.style.opacity = 0;
+
+  env.classList.add("open");          // lật nắp, tim chạy lên đỉnh nắp
+  await wait(330);
+  env.classList.add("behind");        // nắp qua nửa vòng -> nằm sau thiệp
+  await wait(450);
+  env.classList.add("rise1");         // thiệp nhú lên
+  await wait(900);
+  env.classList.add("rise2", "bloom");// thiệp lên hết + hoa nở
+  await wait(2100);
+  envScene.classList.add("leave");    // phóng to chuyển cảnh
+  await wait(250);
+  letterScene.classList.add("show");
+  letterScene.removeAttribute("aria-hidden");
+  LoveGift.scene("letter");
+  await wait(1800);
+  startAutoScroll();
+}
+
+env.addEventListener("click", openEnvelope);
+document.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") openEnvelope(); });
+if (CONFIG.autoOpenMs > 0) clock.later(openEnvelope, 1200 + CONFIG.autoOpenMs);
+
+// ---------- Thả tim: tim chuyển đỏ + icon bay lên từ điểm nhấn ----------
+const like = document.getElementById("like");
+const fxLayer = document.createElement("div");
+fxLayer.className = "fx-layer";
+document.body.appendChild(fxLayer);
+const FX_ICONS = ["❤️", "💖", "💕", "💗", "🌸", "✨", "💞"];
+
+function burst(x, y) {
+  const ring = document.createElement("div");
+  ring.className = "fx-ring";
+  fxLayer.appendChild(ring);
+  ring.animate([
+    { transform: `translate(${x}px, ${y}px) scale(.2)`, opacity: .9 },
+    { transform: `translate(${x}px, ${y}px) scale(1.6)`, opacity: 0 }
+  ], { duration: 600, easing: "ease-out" }).onfinish = () => ring.remove();
+
+  const count = reduceMotion ? 4 : 14;
+  for (let i = 0; i < count; i++) {
+    const el = document.createElement("span");
+    el.className = "fx";
+    el.textContent = FX_ICONS[Math.random() * FX_ICONS.length | 0];
+    el.style.fontSize = (14 + Math.random() * 16) + "px";
+    fxLayer.appendChild(el);
+    const dx = (Math.random() - .5) * 180, dy = -(140 + Math.random() * 220);
+    const sway = (Math.random() - .5) * 60, rot = (Math.random() - .5) * 90;
+    const at = (fx, fy, s, r) => `translate(${x + fx}px, ${y + fy}px) translate(-50%, -50%) scale(${s}) rotate(${r}deg)`;
+    const frames = reduceMotion
+      ? [{ transform: at(0, 0, 1, 0), opacity: 1 }, { transform: at(dx * .3, dy * .4, 1, 0), opacity: 0 }]
+      : [
+          { transform: at(0, 0, .2, 0), opacity: 0 },
+          { transform: at(dx * .35, dy * .25, 1.15, rot * .4), opacity: 1, offset: .18 },
+          { transform: at(dx * .7 + sway, dy * .65, 1, rot * .8), opacity: .9, offset: .6 },
+          { transform: at(dx + sway * .5, dy, .7, rot), opacity: 0 }
+        ];
+    el.animate(frames, {
+      duration: 1200 + Math.random() * 900,
+      delay: Math.random() * 120,
+      easing: "cubic-bezier(.2,.7,.3,1)",
+      fill: "both"
+    }).onfinish = () => el.remove();
+  }
+}
+
+like.addEventListener("click", e => {
+  const r = like.getBoundingClientRect();
+  // bấm bằng bàn phím thì không có toạ độ -> lấy tâm trái tim
+  const x = e.clientX || r.left + r.width / 2, y = e.clientY || r.top + r.height / 2;
+  like.classList.remove("nudge", "pop");
+  void like.offsetWidth;              // chạy lại hiệu ứng nảy mỗi lần bấm
+  like.classList.add("liked", "pop");
+  like.setAttribute("aria-pressed", "true");
+  like.setAttribute("aria-label", "Đã thả tim");
+  if (navigator.vibrate) navigator.vibrate(15);
+  burst(x, y);
+});
+
+// ---------- Tự cuộn lá thư (dừng khi người xem tự cuộn, hoặc khi trang món quà tạm dừng) ----------
+let paused = false, scrolling = false, completed = false, resumeScroll = null;
+addEventListener("lovegift:pause", () => { paused = true; });
+addEventListener("lovegift:play", () => { paused = false; if (resumeScroll) resumeScroll(); });
+
+function complete() {
+  if (completed) return;
+  completed = true;
+  LoveGift.complete();
+}
+
+function startAutoScroll() {
+  let pausedUntil = 0, pos = scroller.scrollTop, last = performance.now();
+  const hold = () => { pausedUntil = performance.now() + 2500; };
+  ["pointerdown", "wheel", "touchstart"].forEach(ev => scroller.addEventListener(ev, hold, { passive: true }));
+  scroller.addEventListener("scroll", () => {
+    if (performance.now() < pausedUntil) pos = scroller.scrollTop;
+    if (scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 2) complete();
+  }, { passive: true });
+
+  function tick(now) {
+    if (paused) { scrolling = false; return; }
+    const dt = Math.min(.05, (now - last) / 1000); last = now;
+    const end = scroller.scrollHeight - scroller.clientHeight;
+    if (now >= pausedUntil && !reduceMotion) {
+      pos = Math.min(pos + CONFIG.scrollSpeed * dt, end);
+      scroller.scrollTop = pos;
+    }
+    if (pos >= end) { complete(); scrolling = false; return; }
+    requestAnimationFrame(tick);
+  }
+  // Giảm chuyển động: không tự cuộn (cũng không có vòng lặp nào), người xem tự cuộn lá thư.
+  if (reduceMotion) { if (scroller.scrollHeight <= scroller.clientHeight + 2) complete(); return; }
+  resumeScroll = () => {
+    if (scrolling || completed) return;
+    scrolling = true; last = performance.now();
+    requestAnimationFrame(tick);
+  };
+  resumeScroll();
+}
+</script>
+</body>
+</html>

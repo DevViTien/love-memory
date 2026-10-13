@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertSeedTemplateReleases,
+  RETIRED_SEED_TEMPLATES,
   seedTemplateCatalog,
   seedTemplateCurrentManifests,
   seedTemplateReleases,
@@ -15,8 +16,6 @@ import { canonicalJson, manifestContentHash } from "./template-release-seed";
 /** Canonical manifest hashes of the releases seeded before `memory-box@1.1.0`. */
 const PRE_CHANGE_CANONICAL_HASHES = {
   "memory-box@1.0.0": "72cb6a6838b17736fcdfe7dae23a2028c8b35188bec88ce234e2396fca9883d1",
-  "midnight-wish@1.0.0": "fe21c7399d9b505077de27d74653f6bcca8f7237fa0e292f0ddf06924dff0c35",
-  "our-timeline@1.0.0": "980ad4b371e772a7fdedece9224d59c5172477262f01176995da6a2eb0b4c7c1",
 };
 
 function seedVersion(templateId: string, version: string) {
@@ -33,8 +32,6 @@ describe("seed template catalog", () => {
 
     expect(templates.map((template) => [template.id, template.version])).toEqual([
       ["memory-box", "1.1.0"],
-      ["our-timeline", "1.0.0"],
-      ["midnight-wish", "1.0.0"],
     ]);
     await expect(seedTemplateCatalog.findPublishedById("memory-box")).resolves.toMatchObject({
       imageRequirement: {
@@ -63,12 +60,14 @@ describe("seed template catalog", () => {
         .update(JSON.stringify(parseTemplateManifest(retired.manifest)))
         .digest("hex"),
     ).toBe("3bcda99c59f72576cee4528aa166baa08b900953e82d749e5b8d67a21f29825f");
-    expect(manifestContentHash(seedVersion("our-timeline", "1.0.0").manifest)).toBe(
-      PRE_CHANGE_CANONICAL_HASHES["our-timeline@1.0.0"],
-    );
-    expect(manifestContentHash(seedVersion("midnight-wish", "1.0.0").manifest)).toBe(
-      PRE_CHANGE_CANONICAL_HASHES["midnight-wish@1.0.0"],
-    );
+  });
+
+  it("no longer seeds the sdk-era placeholders, and retires them where they are stored", () => {
+    expect(seedTemplateReleases.map((release) => release.templateId)).toEqual(["memory-box"]);
+    expect(RETIRED_SEED_TEMPLATES).toEqual([
+      { templateId: "our-timeline", versions: ["1.0.0"] },
+      { templateId: "midnight-wish", versions: ["1.0.0"] },
+    ]);
   });
 
   it("seeds memory-box 1.1.0 from the committed release", () => {
@@ -88,12 +87,8 @@ describe("seed template catalog", () => {
         );
       }
     }
-    expect(seedTemplateCurrentManifests.map((manifest) => manifest.version)).toEqual([
-      "1.1.0",
-      "1.0.0",
-      "1.0.0",
-    ]);
-    expect(seedTemplateVersionManifests).toHaveLength(4);
+    expect(seedTemplateCurrentManifests.map((manifest) => manifest.version)).toEqual(["1.1.0"]);
+    expect(seedTemplateVersionManifests).toHaveLength(2);
   });
 
   it("rejects releases that rely on defaults, belong elsewhere or lack a published current version", () => {

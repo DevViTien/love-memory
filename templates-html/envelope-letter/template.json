@@ -1,0 +1,57 @@
+{
+  "kind": "html",
+  "id": "envelope-letter",
+  "version": "1.0.0",
+  "status": "published",
+  "meta": {
+    "name": "Thư tay",
+    "description": "Phong bì hồng mở ra tấm thiệp và hoa cẩm chướng, rồi lá thư tay tự cuộn bên tấm ảnh polaroid để người nhận thả tim.",
+    "estimatedDurationSec": 60,
+    "moods": ["romantic", "warm"],
+    "occasions": ["womens-day", "anniversary", "birthday", "confession"]
+  },
+  "capabilities": ["dom", "svg"],
+  "budgets": { "initialJsKbGzip": 14, "initialMediaKb": 200, "maxTextureMb": 8 },
+  "fields": [
+    {
+      "id": "card-title",
+      "label": "Chữ trên tấm thiệp",
+      "helpText": "Mỗi dòng một cụm chữ ngắn, tối đa 3 dòng. Để trống sẽ dùng: Gửi / người thương / ♡",
+      "type": "textList",
+      "itemMaxLength": 20,
+      "minItems": 1,
+      "maxItems": 3,
+      "path": "cardTitle"
+    },
+    {
+      "id": "photo",
+      "label": "Ảnh polaroid",
+      "type": "image",
+      "aspectRatio": "20:19",
+      "path": "photo",
+      "required": true
+    },
+    {
+      "id": "letter",
+      "label": "Lá thư",
+      "helpText": "Mỗi dòng là một đoạn thư, tối đa 12 đoạn. Dòng đầu tiên thường là lời gọi, ví dụ: Em yêu của anh,",
+      "type": "textList",
+      "itemMaxLength": 500,
+      "minItems": 1,
+      "maxItems": 12,
+      "path": "letter",
+      "required": true
+    },
+    {
+      "id": "audio",
+      "label": "Nhạc nền",
+      "type": "audio",
+      "source": "licensedLibrary"
+    }
+  ],
+  "steps": [
+    { "id": "card", "label": "Tấm thiệp", "fieldIds": ["card-title", "photo"] },
+    { "id": "letter", "label": "Lá thư", "fieldIds": ["letter"] },
+    { "id": "music", "label": "Nhạc", "fieldIds": ["audio"] }
+  ]
+}

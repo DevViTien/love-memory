@@ -180,6 +180,11 @@
       index += 1;
       var script = document.createElement("script");
       script.async = false;
+      // A CORS script (the artifact route answers `Access-Control-Allow-Origin: *`): a no-cors
+      // script in the opaque-origin sandbox would be "muted", and the browser would then report
+      // neither its errors' details nor its unhandled rejections. Only the code `RUNTIME_ERROR`
+      // ever leaves the frame.
+      script.crossOrigin = "anonymous";
       script.onload = next;
       script.onerror = fail;
       script.src = placeholder.getAttribute("data-src");
@@ -236,13 +241,17 @@
     return true;
   }
 
-  /** Runs the template's scripts in order; an error while they start is a `RUNTIME_ERROR`. */
+  /**
+   * Runs the template's scripts in order; an error or an unhandled promise rejection while they
+   * start is a `RUNTIME_ERROR`.
+   */
   function runTemplate() {
     if (state !== "ready") return;
     state = "starting";
     var onloadBefore = window.onload;
     var restoreListeners = deferLateLoadListeners();
     window.addEventListener("error", fail);
+    window.addEventListener("unhandledrejection", fail);
     runScripts(function () {
       restoreListeners();
       var onload = window.onload;
@@ -255,14 +264,19 @@
           onload.call(window, new Event("load"));
         }, 0);
       }
-      // After the deferred listeners above, so an error they throw is still a start failure.
+      // After the deferred listeners above, so an error they throw is still a start failure, and
+      // one task later again: the browser reports a promise they rejected (`unhandledrejection`)
+      // in a task of its own, queued after theirs.
       setTimeout(function () {
-        window.removeEventListener("error", fail);
-        if (state !== "starting") return;
-        state = "started";
-        var command = pendingCommand;
-        pendingCommand = null;
-        if (command) window.dispatchEvent(new Event("lovegift:" + command));
+        setTimeout(function () {
+          window.removeEventListener("error", fail);
+          window.removeEventListener("unhandledrejection", fail);
+          if (state !== "starting") return;
+          state = "started";
+          var command = pendingCommand;
+          pendingCommand = null;
+          if (command) window.dispatchEvent(new Event("lovegift:" + command));
+        }, 0);
       }, 0);
     });
   }

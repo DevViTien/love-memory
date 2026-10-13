@@ -25,6 +25,8 @@ import { GET } from "./route";
 
 const font = new Uint8Array([0x77, 0x4f, 0x46, 0x32, 1, 2, 3]);
 const fontSha256 = createHash("sha256").update(font).digest("hex");
+const thumbnail = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 9, 8, 7]);
+const thumbnailSha256 = createHash("sha256").update(thumbnail).digest("hex");
 const htmlHash = "b".repeat(64);
 const loveDays = {
   artifactContentHash: htmlHash,
@@ -35,6 +37,13 @@ const loveDays = {
       sha256: fontSha256,
       sizeBytes: font.byteLength,
       storageKey: `private/templates/love-days/1.0.0/${htmlHash}/assets/fonts/hand.woff2`,
+    },
+    {
+      contentType: "image/jpeg",
+      name: "assets/thumbnail.jpg",
+      sha256: thumbnailSha256,
+      sizeBytes: thumbnail.byteLength,
+      storageKey: `private/templates/love-days/1.0.0/${htmlHash}/assets/thumbnail.jpg`,
     },
   ],
 };
@@ -228,6 +237,18 @@ describe("content-addressed template artifact route", () => {
         loveDays.files[0]?.storageKey,
         2 * 1024 * 1024,
       );
+    });
+
+    it("serves the catalog thumbnail as a cacheable image (Catalog thumbnail)", async () => {
+      storage.getObject.mockResolvedValueOnce(thumbnail);
+      const response = await request(["assets", "thumbnail.jpg"]);
+
+      expect(response.status).toBe(200);
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(thumbnail);
+      expect(response.headers.get("content-type")).toBe("image/jpeg");
+      expect(response.headers.get("etag")).toBe(`"${thumbnailSha256}"`);
+      expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     });
 
     it("answers 404 for a stale hash, an unknown file or bytes that no longer match", async () => {

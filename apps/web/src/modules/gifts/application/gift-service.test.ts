@@ -228,7 +228,7 @@ describe("gift application service", () => {
     }
   });
 
-  it("refuses a draft on a published version without a registered artifact", async () => {
+  it("refuses a draft on a published version without a registered artifact (Published version without an artifact)", async () => {
     const withArtifacts = (registered: boolean) =>
       createGiftService({
         audioTracks: { findSelectableTrack: () => null, isSelectableTrack: () => false },

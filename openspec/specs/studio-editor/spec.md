@@ -355,7 +355,7 @@ While the action runs, both confirmation actions SHALL be disabled, `Xác nhận
 
 #### Scenario: Template version without an artifact
 
-- **WHEN** the owner opens step `Xuất bản` of a draft bound to `our-timeline@1.0.0`, which has no registered artifact, with every step `Đã xong`
+- **WHEN** the owner opens step `Xuất bản` of a draft bound to `future-template@1.0.0`, which has no registered artifact, with every step `Đã xong`
 - **THEN** the `Xuất bản` button is disabled with `Phiên bản mẫu của món quà này không hỗ trợ xuất bản.`
 
 #### Scenario: Template version cannot be published
@@ -460,7 +460,7 @@ When the draft's bound template version has no registered template artifact (`te
 
 #### Scenario: Draft on a version without an artifact
 
-- **WHEN** the editor opens a draft bound to `midnight-wish@1.0.0`, which has no registered artifact
+- **WHEN** the editor opens a draft bound to `future-template@1.0.0`, which has no registered artifact
 - **THEN** the notice is shown above the step navigation before the creator edits anything
 
 #### Scenario: Draft on a publishable version

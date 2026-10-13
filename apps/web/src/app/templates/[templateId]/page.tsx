@@ -9,6 +9,7 @@ import {
   COMING_SOON_LABEL,
   toTemplateCardViewModel,
 } from "@/modules/templates/presentation/template-card-view-model";
+import { TemplateVisual } from "@/modules/templates/presentation/template-visual";
 
 type TemplateDetailPageProps = Readonly<{
   params: Promise<{ templateId: string }>;
@@ -50,15 +51,11 @@ export default async function TemplateDetailPage({ params }: TemplateDetailPageP
           ← Quay lại kho template
         </Link>
         <div className="mt-8 grid gap-10 lg:grid-cols-[0.85fr_1.15fr]">
-          <div
-            className={
-              "grid aspect-[4/5] place-items-center rounded-[2.5rem] bg-gradient-to-br " +
-              viewModel.gradient +
-              " text-8xl shadow-xl shadow-rose-100"
-            }
-          >
-            <span aria-hidden>{viewModel.icon}</span>
-          </div>
+          <TemplateVisual
+            className="aspect-[4/5] rounded-[2.5rem] shadow-xl shadow-rose-100"
+            iconClassName="text-8xl"
+            template={viewModel}
+          />
           <div className="self-center">
             <Badge>{viewModel.moodLabel}</Badge>
             <h1 className="mt-5 text-5xl font-black tracking-tight text-stone-900">

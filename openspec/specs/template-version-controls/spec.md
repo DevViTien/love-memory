@@ -43,7 +43,7 @@ No manifest, preview fixture or artifact SHALL change.
 
 #### Scenario: Retire a published version
 
-- **WHEN** a stepped-up admin retires `our-timeline` `1.0.0`
+- **WHEN** a stepped-up admin retires `love-days` `1.0.0`
 - **THEN** the response is `200` with `status` `retired` and `changed: true`
 - **AND** `admin.template.retired` is recorded
 

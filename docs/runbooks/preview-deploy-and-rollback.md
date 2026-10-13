@@ -69,9 +69,11 @@ Schema version `19` (`add-html-template-kind`):
 
 Run `pnpm db:migrate`, then `pnpm db:seed` against the tier with its object storage configured
 (the tier's `BLOB_READ_WRITE_TOKEN`, or OIDC; never `STORAGE_DRIVER=local` on a deployed tier).
-The seed imports the bundled html templates of `templates-html/` (today `love-days`) into Blob and
-`templateVersions`, and prints one `template_import` line each; re-running it reports `unchanged`.
-Until the seed runs, the catalog does not list `love-days`. An operator imports further templates
+The seed imports the bundled html templates of `templates-html/` (today `love-days`,
+`envelope-letter`, `galaxy-text`, `heart-photo`, `matrix-text` and `memories`, in the order of
+`templates-html/catalog-order.json`) into Blob and `templateVersions`, and prints one
+`template_import` line each; re-running it reports `unchanged`. Until the seed runs, the catalog
+does not list them. An operator imports further templates
 with `pnpm template:import <folder> --operator <name> --publish` (see
 [templates-html/README.md](../../templates-html/README.md)).
 

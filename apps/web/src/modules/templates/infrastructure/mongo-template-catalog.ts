@@ -3,10 +3,16 @@ import { TemplateManifestSchema, type TemplateManifest } from "@love-memory/temp
 
 import { reportUnreadableTemplateManifest } from "@/observability/operational-errors";
 
-import { summarizeTemplateManifest } from "../application/summarize-template";
+import {
+  type StoredHtmlArtifact,
+  summarizeTemplateManifest,
+} from "../application/summarize-template";
 import { type StoredTemplateSummary, type TemplateCatalog } from "../domain/template-summary";
 
 type TemplateVersionDocument = Readonly<{
+  /** `html` versions only: the artifact's content address and its files. */
+  artifactContentHash?: string;
+  files?: unknown;
   manifest: TemplateManifest;
   status: "draft" | "published" | "retired";
   templateId: string;
@@ -20,6 +26,19 @@ type TemplateDocument = Readonly<{
   status: "draft" | "published" | "retired";
 }>;
 
+/** The stored artifact of an `html` version (only its file names), for its catalog thumbnail. */
+function storedArtifact(document: TemplateVersionDocument): StoredHtmlArtifact | undefined {
+  const files = document.files;
+  if (typeof document.artifactContentHash !== "string" || !Array.isArray(files)) return undefined;
+  return {
+    artifactContentHash: document.artifactContentHash,
+    fileNames: (files as unknown[]).flatMap((file) => {
+      const name = (file as Readonly<{ name?: unknown }> | null)?.name;
+      return typeof name === "string" ? [name] : [];
+    }),
+  };
+}
+
 /**
  * The summary of a stored version, or `null` when this build cannot read its manifest: the entry
  * is left out and reported, so one unreadable version (for example an html template after a
@@ -27,7 +46,7 @@ type TemplateDocument = Readonly<{
  */
 function toSummary(document: TemplateVersionDocument): StoredTemplateSummary | null {
   const parsed = TemplateManifestSchema.safeParse(document.manifest);
-  if (parsed.success) return summarizeTemplateManifest(parsed.data);
+  if (parsed.success) return summarizeTemplateManifest(parsed.data, storedArtifact(document));
   reportUnreadableTemplateManifest(`${document.templateId}@${document.version}`);
   return null;
 }

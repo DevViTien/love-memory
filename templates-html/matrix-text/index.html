@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lời Nhắn Ma Trận</title>
+<style>
+  /* Be Vietnam Pro (SIL Open Font License 1.1, see OFL*.txt), bundled: templates load no external URL. */
+  @font-face {
+    font-family: "Be Vietnam Pro";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url(assets/fonts/be-vietnam-pro-600-vietnamese.woff2) format("woff2");
+    unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+  }
+  @font-face {
+    font-family: "Be Vietnam Pro";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url(assets/fonts/be-vietnam-pro-600-latin-ext.woff2) format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
+  @font-face {
+    font-family: "Be Vietnam Pro";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url(assets/fonts/be-vietnam-pro-600-latin.woff2) format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  @font-face {
+    font-family: "Be Vietnam Pro";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url(assets/fonts/be-vietnam-pro-700-vietnamese.woff2) format("woff2");
+    unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+  }
+  @font-face {
+    font-family: "Be Vietnam Pro";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url(assets/fonts/be-vietnam-pro-700-latin-ext.woff2) format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
+  @font-face {
+    font-family: "Be Vietnam Pro";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url(assets/fonts/be-vietnam-pro-700-latin.woff2) format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; background: #000; }
+  body {
+    font-family: "Be Vietnam Pro", system-ui, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  #stage {
+    position: fixed; inset: 0;
+    height: 100dvh;
+    background: #000;
+    overflow: hidden;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #heartText {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    color: #fff;
+    font-weight: 600;
+    white-space: nowrap;
+    letter-spacing: .02em;
+    text-shadow: 0 0 6px rgba(255, 190, 240, .9), 0 0 16px rgba(220, 110, 255, .6);
+    opacity: 0;
+    transition: opacity 1.4s ease;
+    pointer-events: none;
+  }
+  #heartText.show { opacity: 1; }
+  #hint {
+    position: absolute; left: 0; right: 0;
+    bottom: calc(9dvh + env(safe-area-inset-bottom));
+    text-align: center;
+    color: #eee6ff;
+    font-size: 15px; font-weight: 600; letter-spacing: .4px;
+    text-shadow: 0 0 10px #8f5fff, 0 0 2px #000;
+    opacity: 0;
+    transition: opacity .5s ease;
+    pointer-events: none;
+  }
+  #hint.show { opacity: 1; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .4; } }
+  @media (prefers-reduced-motion: reduce) {
+    #hint.show { animation: none; }
+  }
+  /* The gift page's reduced-motion request (LoveGift sets it on <html>). */
+  html[data-reduced-motion="true"] #hint.show { animation: none; }
+</style>
+</head>
+<body>
+<div id="stage" role="button" tabindex="0" aria-label="Lời nhắn đặc biệt">
+  <canvas id="rain"></canvas>
+  <canvas id="parts"></canvas>
+  <div id="heartText"></div>
+  <p id="hint">Chạm vào màn hình ♥</p>
+</div>
+
+<!-- Cấu hình mặc định. LoveMemory ghép giá trị của món quà vào đây (template.json → path);
+     nhạc do trang món quà phát. countdown: đếm ngược trước lời nhắn (0 = bỏ qua); messages: lần
+     lượt từng lời nhắn ("|" hoặc "\n" = xuống dòng); holdMs, morphMs, countdownMs: thời gian (ms);
+     endWithHeart: kết thúc bằng trái tim; autoStartMs: tự chạy sau x ms nếu chưa chạm (0 = chỉ
+     chạy khi chạm); tapToReplay: chạm sau khi kết thúc để xem lại; rainChars: các ký tự rơi kiểu
+     ma trận. -->
+<script type="application/json" id="gift-config">
+{
+  "countdown": 3,
+  "messages": ["Happy|Birthday", "Tuổi mới|thật vui", "Luôn|rạng rỡ nhé", "Thương em|nhiều lắm"],
+  "holdMs": 1600,
+  "morphMs": 1200,
+  "countdownMs": 1100,
+  "endWithHeart": true,
+  "heartText": "Anh sẽ luôn bên em",
+  "autoStartMs": 1800,
+  "tapToReplay": true,
+  "font": "Be Vietnam Pro",
+  "rainChars": "HAPPYBIRTHDAY",
+  "colors": {
+    "rain": ["#6c47de", "#8761f2", "#a083ff", "#b9a1ff", "#cdbcff"],
+    "text": "#e9e2ff",
+    "heart": "#ff6fd8"
+  }
+}
+</script>
+
+<script>
+const CONFIG = LoveGift.config();
+
+// ---------- Hẹn giờ theo trang món quà ----------
+// Các hẹn giờ của mẫu dừng khi trang món quà bị ẩn ("lovegift:pause") và chạy nốt phần còn lại khi
+// "lovegift:play": chuỗi hiệu ứng không chạy tiếp, cũng không kết thúc, lúc không ai xem.
+const clock = (() => {
+  const pending = new Set();
+  let paused = false;
+  function arm(timer) {
+    timer.armedAt = performance.now();
+    timer.id = setTimeout(() => { pending.delete(timer); timer.fn(); }, timer.left);
+  }
+  addEventListener("lovegift:pause", () => {
+    if (paused) return;
+    paused = true;
+    pending.forEach(timer => {
+      clearTimeout(timer.id);
+      timer.left = Math.max(0, timer.left - (performance.now() - timer.armedAt));
+    });
+  });
+  addEventListener("lovegift:play", () => {
+    if (!paused) return;
+    paused = false;
+    pending.forEach(arm);
+  });
+  function later(fn, ms) {
+    const timer = { armedAt: 0, fn, id: 0, left: Math.max(0, ms) };
+    pending.add(timer);
+    if (!paused) arm(timer);
+    return timer;
+  }
+  return {
+    isPaused: () => paused,
+    later,
+    wait: ms => new Promise(resolve => later(resolve, ms)),
+  };
+})();
+// Một dòng của Studio không có ký tự xuống dòng: "|" trong lời nhắn là xuống dòng.
+const messageText = text => String(text).split(/\n|\|/).map(line => line.trim()).join("\n");
+
+const stage = document.getElementById("stage");
+const rainCv = document.getElementById("rain"), rctx = rainCv.getContext("2d");
+const partCv = document.getElementById("parts"), pctx = partCv.getContext("2d");
+const heartTextEl = document.getElementById("heartText");
+const hint = document.getElementById("hint");
+heartTextEl.textContent = CONFIG.heartText;
+
+const REDUCE = LoveGift.reducedMotion() || matchMedia("(prefers-reduced-motion: reduce)").matches;
+const clamp = (v, a = 0, b = 1) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const easeInOut = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+const easeOut = t => 1 - Math.pow(1 - t, 3);
+const gauss = () => (Math.random() + Math.random() + Math.random() - 1.5) / 1.5;
+const sleep = ms => clock.wait(ms);
+
+let W = 0, H = 0, DPR = 1;
+
+function hexRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+
+// ---------- Mưa ma trận ----------
+// Chữ hoa, không khoảng trắng; trống thì dùng "01".
+const RAIN_CHARS = String(CONFIG.rainChars || "").toUpperCase().replace(/\s+/g, "") || "01";
+const RAIN_UNIQ = [...new Set(RAIN_CHARS)];
+const RAIN_MAP = [...RAIN_CHARS].map(c => RAIN_UNIQ.indexOf(c));
+let rfs = 12, cw = 11, cols = 0, rows = 0, D = 0, head, speeds, tlen, coff, ccol, atlas, rainAcc = 1;
+
+function setupRain() {
+  rfs = Math.round(clamp(Math.min(W, H) / 31, 10, 18));
+  cw = Math.round(rfs * 1.05);
+  cols = Math.ceil(W / cw); rows = Math.ceil(H / rfs) + 1;
+  D = cols * 2;
+  head = new Float32Array(D); speeds = new Float32Array(D); tlen = new Uint16Array(D);
+  coff = new Uint16Array(cols); ccol = new Uint8Array(D);
+  for (let c = 0; c < cols; c++) coff[c] = Math.random() * RAIN_CHARS.length | 0;
+  for (let d = 0; d < D; d++) resetDrop(d, d < cols ? -Math.random() * rows * .6 : -rows * (.6 + Math.random() * .8));
+  const pal = [...CONFIG.colors.rain, "#ece4ff"], s = Math.ceil(rfs * DPR);
+  atlas = document.createElement("canvas");
+  atlas.width = RAIN_UNIQ.length * s; atlas.height = pal.length * s;
+  const ax = atlas.getContext("2d");
+  ax.font = `bold ${rfs * .92 * DPR}px Arial, "Helvetica Neue", sans-serif`;
+  ax.textAlign = "center"; ax.textBaseline = "middle";
+  pal.forEach((c, v) => { ax.fillStyle = c; RAIN_UNIQ.forEach((ch, u) => ax.fillText(ch, u * s + s / 2, v * s + s * .54)); });
+  rainAcc = 1;
+}
+function resetDrop(d, start) {
+  head[d] = start;
+  speeds[d] = (17 + Math.random() * 19) * (REDUCE ? .45 : 1);
+  tlen[d] = Math.round(rows * (.45 + Math.random() * .8));
+  ccol[d] = Math.random() * CONFIG.colors.rain.length | 0;
+}
+
+let heartDark = 0, heartPath = null;
+function drawRain(dt) {
+  for (let d = 0; d < D; d++) {
+    head[d] += speeds[d] * dt;
+    if ((head[d] - tlen[d]) * rfs > H) resetDrop(d, -Math.random() * rows * .3);
+  }
+  rainAcc += dt;
+  if (rainAcc < 1 / 30) return;
+  rainAcc = 0;
+  rctx.globalAlpha = 1;
+  rctx.fillStyle = "#000"; rctx.fillRect(0, 0, W, H);
+  const s = Math.ceil(rfs * DPR), np = CONFIG.colors.rain.length, L = RAIN_CHARS.length;
+  for (let d = 0; d < D; d++) {
+    const h = Math.floor(head[d]), len = tlen[d], x = (d % cols) * cw + (cw - rfs) / 2;
+    for (let j = Math.max(0, h - rows + 1); j < len; j++) {
+      const r = h - j;
+      if (r < 0) break;
+      const q = j / len, hs = (d * 73 + r * 151) % 97;
+      const v = j === 0 || hs < 3 ? np : hs < 60 ? ccol[d] : hs % np;
+      rctx.globalAlpha = j === 0 ? 1 : .95 * (1 - q * q) * (hs < 6 ? .4 : 1);
+      rctx.drawImage(atlas, RAIN_MAP[(coff[d % cols] + r) % L] * s, v * s, s, s, x, r * rfs, rfs, rfs);
+    }
+  }
+  rctx.globalAlpha = 1;
+  if (heartDark > 0 && heartPath) {
+    rctx.fillStyle = `rgba(0,0,0,${.82 * heartDark})`;
+    rctx.fill(heartPath);
+  }
+}
+
+// ---------- Hạt ----------
+let N = 0;
+let px, py, fx, fy, tx, ty, nx, ny, dl, br, ph, tw, cm, cf, ct, vx, vy, kind;
+const KIND_SIZE = [1, 1.15, .8, .7];
+const SPR = 10, sprites = [];
+let dot = 2, gAlpha = 0, boost = 1, curFs = 80;
+
+function makeSprites() {
+  const a = hexRgb(CONFIG.colors.text), b = hexRgb(CONFIG.colors.heart);
+  for (let k = 0; k < SPR; k++) {
+    const t = k / (SPR - 1), c = document.createElement("canvas"); c.width = c.height = 32;
+    const x = c.getContext("2d"), col = a.map((v, j) => Math.round(lerp(v, b[j], t))).join(",");
+    const g = x.createRadialGradient(16, 16, 0, 16, 16, 16);
+    g.addColorStop(0, `rgba(255,255,255,1)`);
+    g.addColorStop(.18, `rgba(${col},1)`);
+    g.addColorStop(.38, `rgba(${col},.55)`);
+    g.addColorStop(.65, `rgba(${col},.14)`);
+    g.addColorStop(1, `rgba(${col},0)`);
+    x.fillStyle = g; x.fillRect(0, 0, 32, 32);
+    sprites.push(c);
+  }
+}
+
+function allocParticles() {
+  N = Math.round(clamp(W * H / 80, 1800, 4000));
+  const F = () => new Float32Array(N);
+  px = F(); py = F(); fx = F(); fy = F(); tx = F(); ty = F(); nx = F(); ny = F();
+  dl = F(); br = F(); ph = F(); tw = F(); cm = F(); cf = F(); ct = F(); vx = F(); vy = F();
+  kind = new Uint8Array(N);
+  for (let i = 0; i < N; i++) {
+    px[i] = tx[i] = Math.random() * W; py[i] = ty[i] = Math.random() * H;
+    br[i] = .55 + Math.random() * .45; ph[i] = Math.random() * 6.283; tw[i] = 1.5 + Math.random() * 4;
+  }
+}
+
+// ---------- Lấy mẫu chữ từ canvas ẩn ----------
+const oc = document.createElement("canvas"), ox = oc.getContext("2d", { willReadFrequently: true });
+const fontAt = s => `700 ${s}px "${CONFIG.font}", "Segoe UI", Arial, sans-serif`;
+function measure(t, s) { ox.font = fontAt(100); return ox.measureText(t).width * s / 100; }
+
+const LH = 1.25;
+function wrapAt(text, fs, maxW) {
+  const out = [];
+  for (const l of String(text).split("\n")) {
+    let cur = "";
+    for (const w of l.split(" ")) {
+      const t = cur ? cur + " " + w : w;
+      if (cur && measure(t, fs) > maxW) { out.push(cur); cur = w; } else cur = t;
+    }
+    out.push(cur);
+  }
+  return out;
+}
+function layoutText(text, digit) {
+  const land = W > H;
+  const base = Math.min(H * .26, W * .2) * (digit ? .85 : 1);
+  const maxW = W * (land ? .8 : .88), maxH = H * (land ? .72 : .55);
+  let fs = base, lines;
+  for (; fs > base * .35; fs *= .94) {
+    lines = wrapAt(text, fs, maxW);
+    if (lines.length * fs * LH <= maxH && lines.every(l => measure(l, fs) <= maxW)) break;
+  }
+  const widest = Math.max(...lines.map(l => measure(l, fs)));
+  if (widest > maxW) fs *= maxW / widest;
+  if (lines.length * fs * LH > maxH) fs = maxH / (lines.length * LH);
+  return { lines, fs };
+}
+
+function pickTargets(pts, n, scale, jit) {
+  const out = new Float32Array(n * 2), m = pts.length / 2;
+  if (!m) { for (let i = 0; i < n; i++) { out[2 * i] = W / 2; out[2 * i + 1] = H / 2; } return out; }
+  const idx = new Uint32Array(m); for (let i = 0; i < m; i++) idx[i] = i;
+  for (let i = 0; i < n; i++) {
+    let j;
+    if (i < m) { const r = i + (Math.random() * (m - i) | 0); j = idx[r]; idx[r] = idx[i]; idx[i] = j; }
+    else j = Math.random() * m | 0;
+    out[2 * i] = (pts[2 * j] + Math.random() * jit) / scale;
+    out[2 * i + 1] = (pts[2 * j + 1] + Math.random() * jit) / scale;
+  }
+  return out;
+}
+
+function textShape(text, digit) {
+  const { lines, fs } = layoutText(text, digit);
+  const ss = clamp(620 / Math.max(W, H), .3, 1);
+  oc.width = Math.ceil(W * ss); oc.height = Math.ceil(H * ss);
+  ox.clearRect(0, 0, oc.width, oc.height);
+  ox.fillStyle = "#fff"; ox.font = fontAt(fs * ss);
+  ox.textAlign = "center"; ox.textBaseline = "middle";
+  const n = lines.length, lh = fs * LH;
+  lines.forEach((l, k) => ox.fillText(l, W * ss / 2, (H / 2 + (k - (n - 1) / 2) * lh + fs * .04) * ss));
+  const d = ox.getImageData(0, 0, oc.width, oc.height).data, pts = [];
+  for (let y = 0, w = oc.width; y < oc.height; y++)
+    for (let x = 0; x < w; x++) if (d[(y * w + x) * 4 + 3] > 128) pts.push(x, y);
+  return { type: "text", fs, targets: pickTargets(pts, N, ss, 1), kinds: null, color: 0, dot: clamp(fs / 40, 1.3, 3.2) };
+}
+
+// ---------- Trái tim ----------
+let heart = { cx: 0, cy: 0, k: 1 };
+function heartShape() {
+  const k = Math.min(H * (W > H ? .64 : .5) / 29, W * .8 / 32);
+  const cx = W / 2, cy = H / 2;
+  heart = { cx, cy, k };
+  const M = 720, P = new Float32Array(M * 2), cum = new Float32Array(M + 1);
+  for (let s = 0; s < M; s++) {
+    const t = s / M * Math.PI * 2, st = Math.sin(t);
+    P[2 * s] = cx + 16 * st * st * st * k;
+    P[2 * s + 1] = cy + (-(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) - 2.5) * k;
+  }
+  for (let s = 0; s < M; s++) {
+    const a = s, b = (s + 1) % M;
+    cum[s + 1] = cum[s] + Math.hypot(P[2 * b] - P[2 * a], P[2 * b + 1] - P[2 * a + 1]);
+  }
+  const path = new Path2D(), inner = new Path2D();
+  for (let s = 0; s < M; s++) {
+    const x = P[2 * s], y = P[2 * s + 1];
+    s ? path.lineTo(x, y) : path.moveTo(x, y);
+    const ix = cx + (x - cx) * .9, iy = cy + (y - cy) * .9;
+    s ? inner.lineTo(ix, iy) : inner.moveTo(ix, iy);
+  }
+  path.closePath(); inner.closePath();
+  heartPath = inner;
+
+  const nOut = Math.round(N * .6), nIn = Math.round(N * .12);
+  const targets = new Float32Array(N * 2), kinds = new Uint8Array(N), band = 1.7 * k;
+  ox.setTransform(1, 0, 0, 1, 0, 0);
+  for (let i = 0; i < N; i++) {
+    let x, y;
+    if (i < nOut) {
+      const L = Math.random() * cum[M];
+      let lo = 0, hi = M;
+      while (lo < hi - 1) { const mid = (lo + hi) >> 1; cum[mid] <= L ? lo = mid : hi = mid; }
+      const a = lo, b = (lo + 1) % M, f = (L - cum[a]) / (cum[a + 1] - cum[a] || 1);
+      const dx = P[2 * b] - P[2 * a], dy = P[2 * b + 1] - P[2 * a + 1], len = Math.hypot(dx, dy) || 1;
+      const off = (Math.random() + Math.random() - 1) * band;
+      x = P[2 * a] + dx * f - dy / len * off;
+      y = P[2 * a + 1] + dy * f + dx / len * off;
+      kinds[i] = 1;
+    } else if (i < nOut + nIn) {
+      let tries = 0;
+      do { x = cx + (Math.random() - .5) * 32 * k; y = cy + (Math.random() - .5) * 29 * k; }
+      while (!ox.isPointInPath(inner, x, y) && ++tries < 30);
+      kinds[i] = 2;
+    } else {
+      x = Math.random() * W; y = Math.random() * H; kinds[i] = 3;
+    }
+    targets[2 * i] = x; targets[2 * i + 1] = y;
+  }
+  heartTextEl.style.fontSize = Math.max(11, k * 1.55) + "px";
+  heartTextEl.style.top = (cy - 1.2 * k) + "px";
+  return { type: "heart", fs: k * 10, targets, kinds, color: 1, dot: clamp(k * .3, 1.4, 3.4) };
+}
+
+// ---------- Điều khiển chuyển động ----------
+const S = { mode: "hidden", t0: 0, dur: 1, zoom: 0, next: "idle", dotFrom: 2, dotTo: 2, aFrom: 0 };
+let shape = null;
+const KIND_COLOR = [0, 1, .8, .12];
+
+function morphTo(sh, { dur, zoom = 0, noise = 1, next = "idle" }) {
+  shape = sh;
+  const now = performance.now(), jit = sh.fs * .25;
+  const pOrd = Array.from({ length: N }, (_, i) => i), keyP = new Float32Array(N);
+  for (let i = 0; i < N; i++) keyP[i] = px[i] + (Math.random() - .5) * jit;
+  pOrd.sort((a, b) => keyP[a] - keyP[b]);
+  const T = sh.targets, tOrd = Array.from({ length: N }, (_, i) => i), keyT = new Float32Array(N);
+  for (let i = 0; i < N; i++) keyT[i] = T[2 * i] + (Math.random() - .5) * jit;
+  tOrd.sort((a, b) => keyT[a] - keyT[b]);
+  const amp = REDUCE ? 0 : noise * Math.min(sh.fs, curFs);
+  for (let q = 0; q < N; q++) {
+    const i = pOrd[q], j = tOrd[q];
+    fx[i] = px[i]; fy[i] = py[i]; cf[i] = cm[i];
+    tx[i] = T[2 * j]; ty[i] = T[2 * j + 1];
+    kind[i] = sh.kinds ? sh.kinds[j] : 0;
+    ct[i] = KIND_COLOR[kind[i]];
+    nx[i] = gauss() * amp * .45; ny[i] = gauss() * amp * .3;
+    dl[i] = Math.random();
+    if (kind[i] === 3) { vx[i] = (Math.random() - .5) * 8; vy[i] = 3 + Math.random() * 9; }
+  }
+  curFs = sh.fs;
+  Object.assign(S, { mode: "morph", t0: now, dur: dur / 1000, zoom, next, dotFrom: dot, dotTo: sh.dot, aFrom: gAlpha });
+}
+
+function bloom(ms) {
+  const a = curFs * .1;
+  for (let i = 0; i < N; i++) { const t = Math.random() * 6.283, r = Math.sqrt(Math.random()) * a; nx[i] = Math.cos(t) * r; ny[i] = Math.sin(t) * r; }
+  Object.assign(S, { mode: "bloom", t0: performance.now(), dur: ms / 1000 });
+}
+function explode() {
+  const cx = W / 2, cy = H / 2, sp = Math.min(W, H) * .95;
+  for (let i = 0; i < N; i++) {
+    let dx = px[i] - cx, dy = py[i] - cy; const d = Math.hypot(dx, dy) || 1;
+    const t = Math.random() * 6.283, v = (.25 + Math.random()) * sp;
+    vx[i] = (dx / d * .5 + Math.cos(t) * .7) * v;
+    vy[i] = (dy / d * .5 + Math.sin(t) * .7) * v;
+  }
+  Object.assign(S, { mode: "explode", t0: performance.now() });
+}
+
+function update(now, dt) {
+  const T = now / 1000, el = (now - S.t0) / 1000;
+  if (S.mode === "morph") {
+    const p = clamp(el / S.dur);
+    const zs = S.zoom ? lerp(S.zoom, 1, easeOut(p)) : 1, span = S.zoom ? .3 : .7, spread = S.zoom ? .08 : .3;
+    const cx = W / 2, cy = H / 2;
+    for (let i = 0; i < N; i++) {
+      const lt = clamp((p - dl[i] * spread) / span), e = easeInOut(lt), w = Math.sin(Math.PI * lt);
+      const X = cx + (tx[i] - cx) * zs, Y = cy + (ty[i] - cy) * zs;
+      px[i] = fx[i] + (X - fx[i]) * e + nx[i] * w;
+      py[i] = fy[i] + (Y - fy[i]) * e + ny[i] * w;
+      cm[i] = cf[i] + (ct[i] - cf[i]) * e;
+    }
+    dot = lerp(S.dotFrom, S.dotTo, easeInOut(p));
+    gAlpha = lerp(S.aFrom, 1, clamp(p * 1.6));
+    boost = lerp(boost, 1, clamp(dt * 4));
+    if (p >= 1) { S.mode = S.next; S.t0 = now; }
+  } else if (S.mode === "idle") {
+    for (let i = 0; i < N; i++) {
+      px[i] = tx[i] + Math.sin(T * 1.7 + ph[i] * 3) * .35;
+      py[i] = ty[i] + Math.cos(T * 1.3 + ph[i] * 5) * .35;
+    }
+  } else if (S.mode === "bloom") {
+    const p = clamp(el / S.dur), a = easeOut(p);
+    for (let i = 0; i < N; i++) { px[i] = tx[i] + nx[i] * a; py[i] = ty[i] + ny[i] * a; }
+    boost = 1 + .2 * a;
+  } else if (S.mode === "explode") {
+    const drag = Math.pow(.035, dt);
+    for (let i = 0; i < N; i++) {
+      px[i] += vx[i] * dt; py[i] += vy[i] * dt;
+      vx[i] *= drag; vy[i] *= drag;
+    }
+    boost = lerp(boost, 1, clamp(dt * 2));
+  } else if (S.mode === "heart") {
+    const amp = REDUCE ? 0 : clamp(el / 1.5) * .03;
+    const b = Math.sin(T * Math.PI * 1.25);
+    const pulse = 1 + amp * b * b * b;
+    const { cx, cy } = heart;
+    heartDark = clamp(heartDark + dt);
+    for (let i = 0; i < N; i++) {
+      if (kind[i] === 3) {
+        tx[i] += vx[i] * dt; ty[i] += vy[i] * dt;
+        if (ty[i] > H + 4) { ty[i] = -4; tx[i] = Math.random() * W; }
+        if (tx[i] < -4) tx[i] = W + 4; else if (tx[i] > W + 4) tx[i] = -4;
+        px[i] = tx[i]; py[i] = ty[i];
+      } else {
+        px[i] = cx + (tx[i] - cx) * pulse + Math.sin(T * 3 + ph[i] * 7) * .5;
+        py[i] = cy + (ty[i] - cy) * pulse + Math.cos(T * 2.6 + ph[i] * 4) * .5;
+      }
+    }
+  }
+}
+
+function drawParticles(now, dt) {
+  pctx.globalCompositeOperation = "destination-out";
+  pctx.globalAlpha = 1;
+  pctx.fillStyle = `rgba(0,0,0,${1 - Math.pow(1 - .5, dt * 60)})`;
+  pctx.fillRect(0, 0, W, H);
+  pctx.globalCompositeOperation = "source-over";
+  if (gAlpha <= .001) return;
+  const T = now / 1000, base = dot * 2.4 * boost, ga = gAlpha * clamp(.85 + (boost - 1));
+  for (let i = 0; i < N; i++) {
+    const k = kind[i];
+    let a = br[i] * (.72 + .28 * Math.sin(T * tw[i] + ph[i]));
+    if (k === 3) { const s = Math.sin(T * tw[i] * .8 + ph[i]); a = br[i] * (.15 + .85 * s * s); }
+    else if (k === 2) a *= .55;
+    pctx.globalAlpha = clamp(a * ga);
+    const sz = base * KIND_SIZE[k];
+    pctx.drawImage(sprites[Math.round(cm[i] * (SPR - 1))], px[i] - sz / 2, py[i] - sz / 2, sz, sz);
+  }
+  pctx.globalAlpha = 1;
+}
+
+// ---------- Kích thước & đổi hướng màn hình ----------
+function setSize() {
+  W = stage.clientWidth; H = stage.clientHeight;
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  for (const [cv, cx] of [[rainCv, rctx], [partCv, pctx]]) {
+    cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+    cx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  setupRain();
+  rctx.fillStyle = "#000"; rctx.fillRect(0, 0, W, H);
+}
+let resizeTimer = 0;
+addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    const ow = W, oh = H;
+    if (stage.clientWidth === ow && stage.clientHeight === oh) return;
+    setSize();
+    if (!shape || S.mode === "explode" || S.mode === "bloom") return;
+    for (let i = 0; i < N; i++) { px[i] *= W / ow; py[i] *= H / oh; }
+    const sh = shape.type === "heart" ? heartShape() : tShape(shape.text, shape.digit);
+    const next = S.mode === "morph" ? S.next : S.mode;
+    morphTo(sh, { dur: 500, noise: .15, next: next === "hidden" ? "idle" : next });
+  }, 150);
+});
+
+// ---------- Kịch bản ----------
+let runId = 0, started = false, finished = false, completedOnce = false;
+const tShape = (text, digit) => Object.assign(textShape(text, digit), { text, digit });
+
+async function run() {
+  const id = ++runId, alive = () => id === runId;
+  finished = false;
+  heartTextEl.classList.remove("show");
+  heartDark = 0;
+  const seq = [];
+  for (let n = CONFIG.countdown | 0; n > 0; n--) seq.push({ text: String(n), digit: true });
+  CONFIG.messages.forEach(m => seq.push({ text: messageText(m) }));
+
+  let prevDigit = false, first = true;
+  for (const item of seq) {
+    if (item.digit) {
+      const dur = first ? 900 : 420;
+      morphTo(tShape(item.text, true), { dur, noise: first ? .3 : .45 });
+      await sleep(Math.max(dur, CONFIG.countdownMs));
+    } else {
+      const zoomIn = prevDigit || first;
+      const dur = zoomIn ? 900 : CONFIG.morphMs;
+      morphTo(tShape(item.text, false), zoomIn ? { dur, zoom: .28, noise: .15 } : { dur });
+      await sleep(dur + CONFIG.holdMs);
+    }
+    if (!alive()) return;
+    prevDigit = !!item.digit; first = false;
+  }
+
+  if (CONFIG.endWithHeart) {
+    if (!REDUCE) {
+      bloom(420); await sleep(420); if (!alive()) return;
+      explode(); await sleep(650); if (!alive()) return;
+    }
+    morphTo(heartShape(), { dur: 1600, noise: .25, next: "heart" });
+    LoveGift.scene("heart");
+    await sleep(500); if (!alive()) return;
+    heartTextEl.classList.add("show");
+    await sleep(1100);
+  }
+  finished = true;
+  if (!completedOnce) { completedOnce = true; LoveGift.complete(); }
+}
+
+function start() {
+  if (started) return;
+  started = true;
+  hint.classList.remove("show");
+  fontsReady.then(run);
+}
+
+stage.addEventListener("pointerdown", () => {
+  if (!started) start();
+  else if (finished && CONFIG.tapToReplay) run();
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Enter" || e.key === " ") {
+    if (!started) start(); else if (finished && CONFIG.tapToReplay) run();
+  }
+});
+
+// ---------- Khởi động ----------
+setSize();
+makeSprites();
+allocParticles();
+
+let last = performance.now(), paused = false, looping = true, pausedAt = 0;
+function frame(now) {
+  // Trang món quà bị ẩn: dừng vòng lặp vẽ, chạy tiếp khi "lovegift:play".
+  if (paused) { looping = false; return; }
+  const dt = Math.min(.05, Math.max(0, (now - last) / 1000)); last = now;
+  drawRain(dt);
+  update(now, dt);
+  drawParticles(now, dt);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+addEventListener("lovegift:pause", () => { if (!paused) { paused = true; pausedAt = performance.now(); } });
+addEventListener("lovegift:play", () => {
+  if (!paused) return;
+  paused = false;
+  // Chuyển động đang dở (S.t0) tiếp tục từ chỗ đã dừng.
+  S.t0 += performance.now() - pausedAt;
+  if (!looping) { looping = true; last = performance.now(); requestAnimationFrame(frame); }
+});
+
+const fontsReady = (async () => {
+  const texts = CONFIG.messages.join("") + "0123456789";
+  try {
+    await Promise.race([
+      Promise.all([
+        document.fonts.load(`700 64px "${CONFIG.font}"`, texts),
+        document.fonts.load(`600 20px "${CONFIG.font}"`, CONFIG.heartText)
+      ]),
+      sleep(3000)
+    ]);
+  } catch (e) {}
+})();
+fontsReady.then(() => {
+  if (started) return;
+  hint.classList.add("show");
+  if (CONFIG.autoStartMs > 0) clock.later(start, CONFIG.autoStartMs);
+});
+</script>
+</body>
+</html>

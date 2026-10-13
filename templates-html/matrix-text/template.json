@@ -1,0 +1,71 @@
+{
+  "kind": "html",
+  "id": "matrix-text",
+  "version": "1.0.0",
+  "status": "published",
+  "meta": {
+    "name": "Lời nhắn ma trận",
+    "description": "Mưa chữ kiểu ma trận, đếm ngược 3-2-1, rồi hàng nghìn hạt sáng xếp thành từng lời nhắn của bạn và kết thúc bằng một trái tim lấp lánh.",
+    "estimatedDurationSec": 25,
+    "moods": ["playful", "romantic"],
+    "occasions": ["birthday", "anniversary", "confession", "valentine"]
+  },
+  "capabilities": ["canvas2d", "dom"],
+  "budgets": { "initialJsKbGzip": 15, "initialMediaKb": 160, "maxTextureMb": 16 },
+  "fields": [
+    {
+      "id": "messages",
+      "label": "Các lời nhắn",
+      "helpText": "Mỗi dòng là một lời nhắn, hiện lần lượt (tối đa 8). Dùng dấu | để xuống dòng, ví dụ: Happy|Birthday",
+      "type": "textList",
+      "itemMaxLength": 40,
+      "minItems": 1,
+      "maxItems": 8,
+      "path": "messages",
+      "required": true
+    },
+    {
+      "id": "heart-text",
+      "label": "Dòng chữ trong trái tim",
+      "helpText": "Hiện ở cuối, giữa trái tim. Để trống sẽ dùng: Anh sẽ luôn bên em",
+      "type": "shortText",
+      "maxLength": 40,
+      "path": "heartText"
+    },
+    {
+      "id": "rain-chars",
+      "label": "Chữ rơi kiểu ma trận",
+      "helpText": "Các chữ cái rơi trên nền, viết liền không dấu cách, ví dụ: HAPPYBIRTHDAY",
+      "type": "shortText",
+      "maxLength": 24,
+      "path": "rainChars"
+    },
+    {
+      "id": "text-color",
+      "label": "Màu hạt chữ",
+      "type": "color",
+      "path": "colors.text"
+    },
+    {
+      "id": "heart-color",
+      "label": "Màu trái tim",
+      "type": "color",
+      "path": "colors.heart"
+    },
+    {
+      "id": "audio",
+      "label": "Nhạc nền",
+      "type": "audio",
+      "source": "licensedLibrary"
+    }
+  ],
+  "steps": [
+    { "id": "message", "label": "Lời nhắn", "fieldIds": ["messages", "heart-text"] },
+    {
+      "id": "style",
+      "label": "Mưa chữ và màu",
+      "fieldIds": ["rain-chars", "text-color", "heart-color"]
+    },
+    { "id": "music", "label": "Nhạc", "fieldIds": ["audio"] }
+  ]
+}

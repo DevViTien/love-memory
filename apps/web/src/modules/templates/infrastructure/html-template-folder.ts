@@ -70,12 +70,34 @@ export function readHtmlTemplateFolder(folder: string, bootstrap: string): HtmlT
   };
 }
 
-/** The bundled template folders, sorted by name. */
+/**
+ * The catalog order of the bundled templates (`templates-html/catalog-order.json`, a JSON list of
+ * template ids): the seed stores them in this order, so a new template comes after the ones already
+ * in the catalog on every database, fresh or seeded before.
+ */
+export const BUNDLED_HTML_TEMPLATES_ORDER_FILE = "catalog-order.json";
+
+function readCatalogOrder(directory: string): readonly string[] {
+  const path = join(directory, BUNDLED_HTML_TEMPLATES_ORDER_FILE);
+  if (!existsSync(path)) return [];
+  const order = JSON.parse(readFileSync(path, "utf8")) as unknown;
+  if (!Array.isArray(order) || !order.every((id): id is string => typeof id === "string")) {
+    throw new Error(`${BUNDLED_HTML_TEMPLATES_ORDER_FILE} must be a JSON list of template ids.`);
+  }
+  return order;
+}
+
+/** The bundled template folders, in catalog order; folders it does not list follow by name. */
 export function listBundledHtmlTemplateFolders(root: string): string[] {
   const directory = join(root, BUNDLED_HTML_TEMPLATES_DIRECTORY);
   if (!existsSync(directory)) return [];
+  const order = readCatalogOrder(directory);
+  const rank = (entry: string) => {
+    const index = order.indexOf(entry);
+    return index === -1 ? order.length : index;
+  };
   return readdirSync(directory)
     .filter((entry) => statSync(join(directory, entry)).isDirectory())
-    .sort()
+    .sort((left, right) => rank(left) - rank(right) || (left < right ? -1 : left > right ? 1 : 0))
     .map((entry) => join(directory, entry));
 }
